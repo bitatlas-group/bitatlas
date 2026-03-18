@@ -44,6 +44,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
+        name: "whoami",
+        description: "Discovery tool to get the agent's profile, available endpoints, and encryption guide.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         name: "list_vault_files",
         description: "List all encrypted files currently stored in the BitAtlas vault.",
         inputSchema: {
@@ -81,6 +86,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    if (name === "whoami") {
+      // Mock response for now or call real /agents/whoami if ready
+      // Based on Claw report recommendations: include endpoint map + encryption guide
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              name: "BitAtlas Agent",
+              version: "1.0.0",
+              availableEndpoints: {
+                list_files: "GET /files",
+                get_file: "GET /files/:id",
+                upload_file: "POST /files/upload",
+                whoami: "GET /agents/whoami"
+              },
+              encryption: {
+                algorithm: "AES-256-GCM",
+                keySize: 32,
+                ivSize: 12,
+                format: "base64",
+                blobStructure: "ciphertext || authTag (16 bytes)",
+                guide: "To upload: 1. Generate 256-bit file key. 2. Encrypt file with AES-256-GCM. 3. Encrypt file key with BitAtlas Master Key. 4. POST blob + encrypted keys."
+              },
+              nextSteps: [
+                "Call list_vault_files to see current storage",
+                "Use get_file_metadata for specific file encryption params"
+              ]
+            }, null, 2),
+          },
+        ],
+      };
+    }
+
     if (name === "list_vault_files") {
       const response = await api.get("/files", { params: args });
       return {
