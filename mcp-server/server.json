@@ -1,42 +1,42 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "LegacyShield",
-  "description": "LegacyShield Zero-knowledge encrypted vault \u2014 persistent, encrypted storage for AI agents. EU-hosted.",
+  "name": "BitAtlas",
+  "description": "Zero Knowledge Cloud Drive for Humans and Agents. Secure, persistent, encrypted storage for AI agents. EU-hosted.",
   "repository": {
-    "url": "https://github.com/stephenballot-ai/legacy-shield",
+    "url": "https://github.com/bitatlas-group/bitatlas",
     "source": "github",
-    "subfolder": "packages/mcp-server"
+    "subfolder": "mcp-server"
   },
-  "version": "1.0.2",
+  "version": "1.0.0",
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "@legacy-shield/mcp-server",
-      "version": "1.0.2",
+      "identifier": "@bitatlas/mcp-server",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
-          "description": "Your LegacyShield API key (starts with ls_). Get one at POST https://api.legacyshield.eu/api/v1/auth/agent-register",
+          "name": "BITATLAS_API_KEY",
+          "description": "Your BitAtlas API key (starts with ba_). Get one at https://bitatlas.io/dashboard",
           "isRequired": true,
           "format": "string",
-          "isSecret": true,
-          "name": "LEGACY_SHIELD_API_KEY"
+          "isSecret": true
         },
         {
-          "description": "LegacyShield API base URL",
+          "name": "BITATLAS_API_URL",
+          "description": "BitAtlas API base URL",
           "isRequired": false,
           "format": "string",
-          "isSecret": false,
-          "name": "LEGACY_SHIELD_API_URL"
+          "isSecret": false
         }
       ]
     }
   ],
   "icons": [
     {
-      "src": "https://legacyshield.eu/icon.png"
+      "src": "https://bitatlas.io/icon.png"
     }
   ]
 }
