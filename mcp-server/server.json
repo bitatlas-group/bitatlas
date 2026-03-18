@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "LegacyShield",
+  "description": "LegacyShield Zero-knowledge encrypted vault \u2014 persistent, encrypted storage for AI agents. EU-hosted.",
+  "repository": {
+    "url": "https://github.com/stephenballot-ai/legacy-shield",
+    "source": "github",
+    "subfolder": "packages/mcp-server"
+  },
+  "version": "1.0.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@legacy-shield/mcp-server",
+      "version": "1.0.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Your LegacyShield API key (starts with ls_). Get one at POST https://api.legacyshield.eu/api/v1/auth/agent-register",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "LEGACY_SHIELD_API_KEY"
+        },
+        {
+          "description": "LegacyShield API base URL",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "LEGACY_SHIELD_API_URL"
+        }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "src": "https://legacyshield.eu/icon.png"
+    }
+  ]
+}

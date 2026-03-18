@@ -1,0 +1,24 @@
+{
+  "name": "@legacy-shield/mcp-server",
+  "version": "1.0.1",
+  "description": "Zero-knowledge document vault persistence for AI agents.",
+  "author": "Stephen Ballot",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stephenballot-ai/legacy-shield"
+  },
+  "mcp": {
+    "type": "stdio",
+    "runtime": "node",
+    "install": "npm install",
+    "build": "npm run build",
+    "main": "packages/mcp-server/index.js",
+    "env": {
+      "LEGACY_SHIELD_API_KEY": {
+        "description": "Your LegacyShield Agent API Key",
+        "required": true
+      }
+    }
+  }
+}
