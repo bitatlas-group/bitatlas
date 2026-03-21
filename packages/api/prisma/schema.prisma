@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String    @id @default(uuid()) @db.Uuid
+  email               String    @unique @db.VarChar(255)
+  emailVerified       Boolean   @default(false) @map("email_verified")
+  passwordHash        String    @db.VarChar(255) @map("password_hash")
+  encryptionSalt      String    @db.VarChar(255) @map("encryption_salt")
+  emergencySalt       String?   @db.VarChar(255) @map("emergency_salt")
+  plan                String    @default("free") @db.VarChar(20)
+  storageUsedBytes    BigInt    @default(0) @map("storage_used_bytes")
+  storageLimitBytes   BigInt    @default(1073741824) @map("storage_limit_bytes")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  files               File[]
+  folders             Folder[]
+  apiKeys             ApiKey[]
+  emergencyContacts   EmergencyContact[]
+  agentSessions       AgentSession[]
+
+  @@map("users")
+}
+
+model File {
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @db.Uuid @map("user_id")
+  name                  String    @db.VarChar(500)
+  mimeType              String?   @db.VarChar(255) @map("mime_type")
+  sizeBytes             BigInt    @map("size_bytes")
+  originalSizeBytes     BigInt?   @map("original_size_bytes")
+  storageKey            String    @db.VarChar(500) @map("storage_key")
+
+  // Encryption metadata (Base64-encoded)
+  ownerEncryptedKey     String    @map("owner_encrypted_key") @db.Text
+  ownerIv               String    @map("owner_iv") @db.Text
+  fileIv                String    @map("file_iv") @db.Text
+  authTag               String    @map("auth_tag") @db.Text
+  emergencyEncryptedKey String?   @map("emergency_encrypted_key") @db.Text
+  emergencyIv           String?   @map("emergency_iv") @db.Text
+
+  // Organization
+  folderId              String?   @db.Uuid @map("folder_id")
+  category              String?   @db.VarChar(50)
+  tags                  String[]  @default([])
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder                Folder?   @relation(fields: [folderId], references: [id])
+
+  @@index([userId])
+  @@index([folderId])
+  @@index([category])
+  @@index([deletedAt])
+  @@map("files")
+}
+
+model Folder {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid @map("user_id")
+  name      String    @db.VarChar(255)
+  parentId  String?   @db.Uuid @map("parent_id")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Folder?   @relation("FolderChildren", fields: [parentId], references: [id])
+  children  Folder[]  @relation("FolderChildren")
+  files     File[]
+
+  @@index([userId])
+  @@map("folders")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid @map("user_id")
+  keyHash     String    @db.VarChar(255) @map("key_hash")
+  keyPrefix   String    @db.VarChar(10) @map("key_prefix")
+  name        String?   @db.VarChar(255)
+  permissions String[]  @default(["read", "write"])
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentSessions AgentSession[]
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model EmergencyContact {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid @map("user_id")
+  name              String    @db.VarChar(255)
+  email             String    @db.VarChar(255)
+  phone             String?   @db.VarChar(50)
+  unlockPhraseHint  String?   @map("unlock_phrase_hint") @db.Text
+  activated         Boolean   @default(false)
+  activatedAt       DateTime? @map("activated_at") @db.Timestamptz
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("emergency_contacts")
+}
+
+model AgentSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String?   @db.Uuid @map("user_id")
+  apiKeyId     String?   @db.Uuid @map("api_key_id")
+  agentName    String?   @db.VarChar(255) @map("agent_name")
+  actionsCount Int       @default(0) @map("actions_count")
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt      DateTime? @map("ended_at") @db.Timestamptz
+
+  user         User?     @relation(fields: [userId], references: [id])
+  apiKey       ApiKey?   @relation(fields: [apiKeyId], references: [id])
+
+  @@index([userId])
+  @@index([apiKeyId])
+  @@map("agent_sessions")
+}
