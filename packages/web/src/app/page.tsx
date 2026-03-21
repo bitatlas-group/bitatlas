@@ -393,19 +393,18 @@ export default function Home() {
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary rounded-full blur-[120px] translate-y-1/2 -translate-x-1/2 opacity-20" />
 
             <h2 className="relative z-10 font-headline font-extrabold text-4xl md:text-5xl text-on-primary tracking-tight">
-              Ready to secure your agent&apos;s mind?
+              Your agents deserve a vault,<br />not a folder.
             </h2>
             <p className="relative z-10 text-on-primary-container text-xl max-w-2xl mx-auto">
-              Join 10,000+ developers building the future of autonomous
-              intelligence with BitAtlas.
+              Start encrypting in under 5 minutes. Free tier included — no credit card required.
             </p>
 
             <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
               <button className="bg-on-primary text-primary px-10 py-5 rounded-2xl font-headline font-bold text-xl hover:bg-primary-fixed transition-all">
-                Create Free Account
+                Get Started Free
               </button>
               <button className="text-on-primary px-10 py-5 font-headline font-bold text-xl hover:underline underline-offset-8 transition-all">
-                Contact Sales
+                Read the Docs
               </button>
             </div>
           </div>
