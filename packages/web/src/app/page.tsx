@@ -7,17 +7,15 @@ export default function Home() {
       <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl">
         <div className="flex justify-between items-center w-full px-6 py-4 max-w-7xl mx-auto">
           {/* Logo */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center">
             <Image
-              src="/logo.jpg"
-              alt="BitAtlas"
-              width={28}
-              height={28}
-              className="rounded-lg"
+              src="/logo-full.jpg"
+              alt="BitAtlas — Secure Cloud for Humans & Agents"
+              width={160}
+              height={44}
+              className="h-8 w-auto object-contain"
+              priority
             />
-            <span className="text-xl font-bold tracking-tighter text-primary font-headline">
-              BitAtlas
-            </span>
           </div>
 
           {/* Nav links */}
@@ -419,17 +417,14 @@ export default function Home() {
         <div className="h-[1px] w-full bg-slate-200" />
         <div className="max-w-7xl mx-auto px-8 py-12 flex flex-col md:flex-row justify-between items-center gap-8">
           <div className="flex flex-col items-center md:items-start gap-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center">
               <Image
-                src="/logo.jpg"
+                src="/logo-full.jpg"
                 alt="BitAtlas"
-                width={24}
-                height={24}
-                className="rounded"
+                width={140}
+                height={38}
+                className="h-7 w-auto object-contain"
               />
-              <span className="text-lg font-bold text-primary font-headline">
-                BitAtlas
-              </span>
             </div>
             <p className="text-xs tracking-wide uppercase font-semibold text-slate-500">
               © 2026 BitAtlas Inc. Secure Intelligence Layer.
