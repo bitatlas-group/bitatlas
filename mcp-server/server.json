@@ -19,14 +19,21 @@
       "environmentVariables": [
         {
           "name": "BITATLAS_API_KEY",
-          "description": "Your BitAtlas API key (starts with ba_). Get one at https://bitatlas.io/dashboard",
+          "description": "Your BitAtlas API key (starts with ba_). Generate one at https://bitatlas.com/dashboard/settings",
           "isRequired": true,
           "format": "string",
           "isSecret": true
         },
         {
+          "name": "BITATLAS_MASTER_KEY",
+          "description": "Your hex-encoded 256-bit master key (64 hex chars). Required for file upload and download. Derived from your password client-side — never sent to BitAtlas servers.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
           "name": "BITATLAS_API_URL",
-          "description": "BitAtlas API base URL",
+          "description": "BitAtlas API base URL (default: https://api.bitatlas.com)",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -36,7 +43,7 @@
   ],
   "icons": [
     {
-      "src": "https://bitatlas.io/icon.png"
+      "src": "https://bitatlas.com/icon.png"
     }
   ]
 }

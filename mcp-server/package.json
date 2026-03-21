@@ -2,7 +2,7 @@
   "name": "@bitatlas/mcp-server",
   "version": "1.0.0",
   "mcpName": "io.github.bitatlas-group/bitatlas",
-  "description": "BitAtlas MCP Server - Zero-Knowledge Cloud Drive for Humans and Agents",
+  "description": "BitAtlas MCP Server — Zero-Knowledge Cloud Drive for Humans and Agents",
   "main": "index.js",
   "bin": {
     "bitatlas-mcp": "./index.js"
@@ -17,5 +17,13 @@
   "keywords": ["mcp", "encryption", "vault", "zero-knowledge", "ai-agent", "document-storage", "bitatlas"],
   "author": "BitAtlas Group",
   "license": "MIT",
-  "type": "commonjs"
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

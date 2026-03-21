@@ -1,170 +1,570 @@
 #!/usr/bin/env node
-const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
-const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-const {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} = require("@modelcontextprotocol/sdk/types.js");
-const axios = require("axios");
-const { z } = require("zod");
-require("dotenv").config();
+'use strict';
 
-const API_URL = process.env.BITATLAS_API_URL || "https://api.bitatlas.io/api/v1";
+const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
+const axios = require('axios');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config();
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+const API_URL = process.env.BITATLAS_API_URL || 'https://api.bitatlas.com';
 const API_KEY = process.env.BITATLAS_API_KEY;
+const MASTER_KEY_HEX = process.env.BITATLAS_MASTER_KEY;
 
 if (!API_KEY) {
-  console.error("BITATLAS_API_KEY environment variable is required");
+  console.error('Error: BITATLAS_API_KEY is required. Generate one at https://bitatlas.com/dashboard/settings');
   process.exit(1);
 }
+
+/** Returns the master key as a 32-byte Buffer. Throws if not configured or invalid. */
+function getMasterKey() {
+  if (!MASTER_KEY_HEX) {
+    throw new Error(
+      'BITATLAS_MASTER_KEY is required for encrypt/decrypt operations. ' +
+      'Set it to your hex-encoded 256-bit master key (64 hex characters).'
+    );
+  }
+  const key = Buffer.from(MASTER_KEY_HEX, 'hex');
+  if (key.length !== 32) {
+    throw new Error(
+      `BITATLAS_MASTER_KEY must be a 64-character hex string (32 bytes). Got ${MASTER_KEY_HEX.length} characters.`
+    );
+  }
+  return key;
+}
+
+// ---------------------------------------------------------------------------
+// API Client
+// ---------------------------------------------------------------------------
 
 const api = axios.create({
   baseURL: API_URL,
   headers: {
-    "x-api-key": API_KEY,
-    "Content-Type": "application/json",
+    Authorization: `Bearer ${API_KEY}`,
+    'Content-Type': 'application/json',
   },
 });
+
+// ---------------------------------------------------------------------------
+// Node.js Crypto — ported from sdk/encryption/fileEncryption.ts
+//
+// Protocol (matches Web Crypto SDK):
+//   - File blob in S3       = AES-256-GCM ciphertext only (NO auth tag)
+//   - authTag in DB         = 16-byte GCM auth tag for the file (base64)
+//   - ownerEncryptedKey     = base64(encryptedFileKey || 16-byte key auth tag)
+//   - ownerIV               = base64 IV used to encrypt the file key
+//   - fileIV                = base64 IV used to encrypt the file
+// ---------------------------------------------------------------------------
+
+/**
+ * AES-256-GCM encrypt.
+ * Returns { combined: Buffer (ciphertext + 16-byte authTag), iv: Buffer }.
+ * Appending the auth tag matches the Web Crypto API output format.
+ */
+function aesGcmEncrypt(plaintext, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const authTag = cipher.getAuthTag(); // always 16 bytes for GCM
+  return { combined: Buffer.concat([ciphertext, authTag]), iv };
+}
+
+/**
+ * AES-256-GCM decrypt.
+ * Expects combined = ciphertext || 16-byte authTag (last 16 bytes = tag).
+ */
+function aesGcmDecrypt(combined, key, iv) {
+  const authTag = combined.slice(-16);
+  const ciphertext = combined.slice(0, -16);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+/**
+ * Encrypt a file buffer using a random per-file key wrapped with the master key.
+ *
+ * Returns:
+ *   encryptedBlob     — Buffer (ciphertext only, no auth tag) — uploaded to S3
+ *   ownerEncryptedKey — base64(encrypted file key + key auth tag)
+ *   ownerIV           — base64 IV used for key encryption
+ *   fileIV            — base64 IV used for file encryption
+ *   authTag           — base64 file auth tag (stored in DB separately)
+ */
+function encryptFileBuffer(fileBuffer, masterKey) {
+  // 1. Generate a random 256-bit file key
+  const fileKey = crypto.randomBytes(32);
+
+  // 2. Encrypt the file
+  const fileIV = crypto.randomBytes(12);
+  const fileCipher = crypto.createCipheriv('aes-256-gcm', fileKey, fileIV);
+  const encryptedBlob = Buffer.concat([fileCipher.update(fileBuffer), fileCipher.final()]);
+  const fileAuthTag = fileCipher.getAuthTag();
+
+  // 3. Encrypt the file key with the master key
+  const { combined: ownerEncKeyBuf, iv: ownerIV } = aesGcmEncrypt(fileKey, masterKey);
+
+  return {
+    encryptedBlob,
+    ownerEncryptedKey: ownerEncKeyBuf.toString('base64'),
+    ownerIV: ownerIV.toString('base64'),
+    fileIV: fileIV.toString('base64'),
+    authTag: fileAuthTag.toString('base64'),
+  };
+}
+
+/**
+ * Decrypt a file buffer.
+ *   encryptedBlob — ciphertext-only Buffer (auth tag is stored separately)
+ *   authTag       — base64 string of the 16-byte file auth tag
+ */
+function decryptFileBuffer(encryptedBlob, ownerEncryptedKey, ownerIV, fileIV, authTag, masterKey) {
+  // 1. Decrypt the file key
+  const ownerEncKeyBuf = Buffer.from(ownerEncryptedKey, 'base64');
+  const ownerIVBuf = Buffer.from(ownerIV, 'base64');
+  const fileKey = aesGcmDecrypt(ownerEncKeyBuf, masterKey, ownerIVBuf);
+
+  // 2. Decrypt the file content (Node.js needs authTag set separately)
+  const fileIVBuf = Buffer.from(fileIV, 'base64');
+  const authTagBuf = Buffer.from(authTag, 'base64');
+  const blobBuf = Buffer.isBuffer(encryptedBlob) ? encryptedBlob : Buffer.from(encryptedBlob);
+
+  const decipher = crypto.createDecipheriv('aes-256-gcm', fileKey, fileIVBuf);
+  decipher.setAuthTag(authTagBuf);
+  return Buffer.concat([decipher.update(blobBuf), decipher.final()]);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const TEXT_MIME_PREFIXES = [
+  'text/',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/typescript',
+  'application/yaml',
+  'application/x-yaml',
+  'application/x-sh',
+  'application/x-python',
+];
+
+function isTextMime(mimeType) {
+  if (!mimeType) return false;
+  return TEXT_MIME_PREFIXES.some((p) => mimeType.startsWith(p));
+}
+
+const MIME_MAP = {
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.ts': 'application/typescript',
+  '.tsx': 'application/typescript',
+  '.jsx': 'application/javascript',
+  '.json': 'application/json',
+  '.xml': 'application/xml',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+  '.csv': 'text/csv',
+  '.sh': 'text/x-sh',
+  '.py': 'text/x-python',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg',
+  '.zip': 'application/zip',
+  '.tar': 'application/x-tar',
+  '.gz': 'application/gzip',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+function guessMime(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_MAP[ext] || 'application/octet-stream';
+}
+
+function formatFileMeta(f) {
+  return {
+    id: f.id,
+    name: f.name,
+    mimeType: f.mimeType,
+    sizeBytes: f.originalSizeBytes || f.sizeBytes,
+    category: f.category || null,
+    folderId: f.folderId || null,
+    createdAt: f.createdAt,
+  };
+}
+
+function ok(str) {
+  return { content: [{ type: 'text', text: str }] };
+}
+
+// ---------------------------------------------------------------------------
+// MCP Server
+// ---------------------------------------------------------------------------
 
 const server = new Server(
-  {
-    name: "bitatlas-vault",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
+  { name: 'bitatlas-vault', version: '1.0.0' },
+  { capabilities: { tools: {} } }
 );
 
-/**
- * List available tools.
- */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "whoami",
-        description: "Discovery tool to get the agent's profile, available endpoints, and encryption guide.",
-        inputSchema: { type: "object", properties: {} },
-      },
-      {
-        name: "list_vault_files",
-        description: "List all encrypted files currently stored in the BitAtlas vault.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            category: {
-              type: "string",
-              description: "Filter by category (IDENTITY, TAX, LEGAL, etc.)",
-            },
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: 'bitatlas_vault_status',
+      description: 'Get vault health status, file count, and storage usage.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'bitatlas_list_files',
+      description: 'List files in the vault. Optionally filter by folder, category, or search term.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          folderId: { type: 'string', description: 'Filter by folder ID' },
+          category: {
+            type: 'string',
+            enum: ['identity', 'financial', 'legal', 'medical', 'digital'],
+            description: 'Filter by category',
           },
+          search: { type: 'string', description: 'Search by file name' },
         },
       },
-      {
-        name: "get_file_metadata",
-        description: "Get detailed metadata and encryption info for a specific file.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            fileId: {
-              type: "string",
-              description: "The unique ID of the file",
-            },
+    },
+    {
+      name: 'bitatlas_search',
+      description: 'Search vault files by a query string, optionally narrowed to a category.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query (file name)' },
+          category: {
+            type: 'string',
+            enum: ['identity', 'financial', 'legal', 'medical', 'digital'],
+            description: 'Narrow results to this category',
           },
-          required: ["fileId"],
         },
+        required: ['query'],
       },
-    ],
-  };
-});
+    },
+    {
+      name: 'bitatlas_get_file',
+      description:
+        'Get file metadata and download + decrypt the file content. ' +
+        'Returns decrypted content as UTF-8 text for text files, or base64 for binary files. ' +
+        'Requires BITATLAS_MASTER_KEY.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_id: { type: 'string', description: 'File UUID' },
+        },
+        required: ['file_id'],
+      },
+    },
+    {
+      name: 'bitatlas_upload_file',
+      description:
+        'Read a local file, encrypt it client-side with AES-256-GCM, and upload it to the vault. ' +
+        'Requires BITATLAS_MASTER_KEY. Files over 100 MB are not supported via MCP.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string', description: 'Absolute or relative path to the local file' },
+          name: { type: 'string', description: 'Override display name (defaults to the filename)' },
+          category: {
+            type: 'string',
+            enum: ['identity', 'financial', 'legal', 'medical', 'digital'],
+            description: 'File category',
+          },
+          folder_id: { type: 'string', description: 'Destination folder ID (omit for root)' },
+        },
+        required: ['file_path'],
+      },
+    },
+    {
+      name: 'bitatlas_delete_file',
+      description: 'Permanently delete a file from the vault.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_id: { type: 'string', description: 'File UUID to delete' },
+        },
+        required: ['file_id'],
+      },
+    },
+    {
+      name: 'bitatlas_create_folder',
+      description: 'Create a new folder in the vault.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Folder name' },
+          parent_id: { type: 'string', description: 'Parent folder ID (omit to create at root)' },
+        },
+        required: ['name'],
+      },
+    },
+  ],
+}));
 
-/**
- * Handle tool calls.
- */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  const { name, arguments: args = {} } = request.params;
 
   try {
-    if (name === "whoami") {
-      // Mock response for now or call real /agents/whoami if ready
-      // Based on Claw report recommendations: include endpoint map + encryption guide
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              name: "BitAtlas Agent",
-              version: "1.0.0",
-              availableEndpoints: {
-                list_files: "GET /files",
-                get_file: "GET /files/:id",
-                upload_file: "POST /files/upload",
-                whoami: "GET /agents/whoami"
-              },
-              encryption: {
-                algorithm: "AES-256-GCM",
-                keySize: 32,
-                ivSize: 12,
-                format: "base64",
-                blobStructure: "ciphertext || authTag (16 bytes)",
-                guide: "To upload: 1. Generate 256-bit file key. 2. Encrypt file with AES-256-GCM. 3. Encrypt file key with BitAtlas Master Key. 4. POST blob + encrypted keys."
-              },
-              nextSteps: [
-                "Call list_vault_files to see current storage",
-                "Use get_file_metadata for specific file encryption params"
-              ]
-            }, null, 2),
-          },
-        ],
-      };
+    // -----------------------------------------------------------------------
+    // bitatlas_vault_status
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_vault_status') {
+      const [statusRes, filesRes] = await Promise.all([
+        api.get('/status'),
+        api.get('/vault/files'),
+      ]);
+      const files = filesRes.data.files || [];
+      const totalBytes = files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+
+      return ok(JSON.stringify({
+        status: statusRes.data.status,
+        checks: statusRes.data.checks,
+        vault: {
+          fileCount: files.length,
+          storageUsedBytes: totalBytes,
+          storageUsedMB: (totalBytes / 1048576).toFixed(2),
+        },
+      }, null, 2));
     }
 
-    if (name === "list_vault_files") {
-      const response = await api.get("/files", { params: args });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(response.data.files, null, 2),
-          },
-        ],
-      };
+    // -----------------------------------------------------------------------
+    // bitatlas_list_files
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_list_files') {
+      const params = {};
+      if (args.folderId) params.folderId = args.folderId;
+      if (args.category) params.category = args.category;
+      if (args.search) params.search = args.search;
+
+      const res = await api.get('/vault/files', { params });
+      const files = res.data.files || [];
+      return ok(JSON.stringify(files.map(formatFileMeta), null, 2));
     }
 
-    if (name === "get_file_metadata") {
-      const response = await api.get(`/files/${args.fileId}`);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(response.data, null, 2),
-          },
-        ],
-      };
+    // -----------------------------------------------------------------------
+    // bitatlas_search
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_search') {
+      if (!args.query) throw new Error('query is required');
+      const params = { search: args.query };
+      if (args.category) params.category = args.category;
+
+      const res = await api.get('/vault/files', { params });
+      const files = res.data.files || [];
+      return ok(
+        `Found ${files.length} file(s) matching "${args.query}":\n\n` +
+        JSON.stringify(files.map(formatFileMeta), null, 2)
+      );
     }
 
-    throw new Error(`Tool not found: ${name}`);
-  } catch (error) {
+    // -----------------------------------------------------------------------
+    // bitatlas_get_file
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_get_file') {
+      if (!args.file_id) throw new Error('file_id is required');
+      const masterKey = getMasterKey();
+
+      // Fetch metadata and pre-signed download URL in parallel
+      const [metaRes, urlRes] = await Promise.all([
+        api.get(`/vault/files/${args.file_id}`),
+        api.get(`/vault/files/${args.file_id}/download-url`),
+      ]);
+      const meta = metaRes.data;
+      const downloadUrl = urlRes.data.url;
+
+      // Download the encrypted blob (no auth headers needed for presigned URLs)
+      const blobRes = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
+      const encryptedBlob = Buffer.from(blobRes.data);
+
+      if (encryptedBlob.length > 50 * 1024 * 1024) {
+        return ok(JSON.stringify({
+          id: meta.id,
+          name: meta.name,
+          mimeType: meta.mimeType,
+          sizeBytes: meta.originalSizeBytes || meta.sizeBytes,
+          warning:
+            `File is ${(encryptedBlob.length / 1048576).toFixed(1)} MB. ` +
+            'Decrypting files this large in memory is not recommended. ' +
+            'Download manually via the web vault.',
+        }, null, 2));
+      }
+
+      const decrypted = decryptFileBuffer(
+        encryptedBlob,
+        meta.ownerEncryptedKey,
+        meta.ownerIV,
+        meta.fileIV,
+        meta.authTag,
+        masterKey
+      );
+
+      const asText = isTextMime(meta.mimeType);
+      return ok(JSON.stringify({
+        id: meta.id,
+        name: meta.name,
+        mimeType: meta.mimeType,
+        sizeBytes: decrypted.length,
+        category: meta.category || null,
+        folderId: meta.folderId || null,
+        createdAt: meta.createdAt,
+        encoding: asText ? 'utf8' : 'base64',
+        content: asText ? decrypted.toString('utf8') : decrypted.toString('base64'),
+      }, null, 2));
+    }
+
+    // -----------------------------------------------------------------------
+    // bitatlas_upload_file
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_upload_file') {
+      if (!args.file_path) throw new Error('file_path is required');
+      const masterKey = getMasterKey();
+
+      const filePath = path.resolve(args.file_path);
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`File not found: ${filePath}`);
+      }
+      const stats = fs.statSync(filePath);
+      if (stats.size > 100 * 1024 * 1024) {
+        throw new Error(
+          `File is ${(stats.size / 1048576).toFixed(1)} MB. ` +
+          'Files over 100 MB are not supported via MCP (memory limit). ' +
+          'Use the web vault for large files.'
+        );
+      }
+
+      const fileBuffer = fs.readFileSync(filePath);
+      const fileName = args.name || path.basename(filePath);
+      const mimeType = guessMime(filePath);
+
+      // Encrypt client-side
+      const encrypted = encryptFileBuffer(fileBuffer, masterKey);
+
+      // Generate a unique S3 object key
+      const storageKey = `files/${crypto.randomUUID()}`;
+
+      // Get presigned upload URL
+      const urlRes = await api.post('/vault/files/upload-url', {
+        key: storageKey,
+        contentType: 'application/octet-stream',
+      });
+      const uploadUrl = urlRes.data.url;
+
+      // Upload encrypted blob directly to S3 (no auth headers for presigned PUT)
+      await axios.put(uploadUrl, encrypted.encryptedBlob, {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      // Save metadata to API
+      const payload = {
+        name: fileName,
+        mimeType,
+        sizeBytes: encrypted.encryptedBlob.length,
+        originalSizeBytes: fileBuffer.length,
+        storageKey,
+        ownerEncryptedKey: encrypted.ownerEncryptedKey,
+        ownerIV: encrypted.ownerIV,
+        fileIV: encrypted.fileIV,
+        authTag: encrypted.authTag,
+      };
+      if (args.folder_id) payload.folderId = args.folder_id;
+      if (args.category) payload.category = args.category;
+
+      const fileRes = await api.post('/vault/files', payload);
+      const created = fileRes.data;
+
+      return ok(JSON.stringify({
+        success: true,
+        id: created.id,
+        name: fileName,
+        mimeType,
+        originalSizeBytes: fileBuffer.length,
+        encryptedSizeBytes: encrypted.encryptedBlob.length,
+        category: args.category || null,
+        folderId: args.folder_id || null,
+        message: `"${fileName}" encrypted and uploaded successfully.`,
+      }, null, 2));
+    }
+
+    // -----------------------------------------------------------------------
+    // bitatlas_delete_file
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_delete_file') {
+      if (!args.file_id) throw new Error('file_id is required');
+      await api.delete(`/vault/files/${args.file_id}`);
+      return ok(`File ${args.file_id} deleted successfully.`);
+    }
+
+    // -----------------------------------------------------------------------
+    // bitatlas_create_folder
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_create_folder') {
+      if (!args.name) throw new Error('name is required');
+      const payload = { name: args.name };
+      if (args.parent_id) payload.parentId = args.parent_id;
+
+      const res = await api.post('/folders', payload);
+      return ok(JSON.stringify({
+        success: true,
+        id: res.data.id,
+        name: res.data.name,
+        parentId: res.data.parentId || null,
+      }, null, 2));
+    }
+
+    throw new Error(`Unknown tool: ${name}`);
+
+  } catch (err) {
+    const msg =
+      err.response?.data?.error?.message ||
+      err.response?.data?.message ||
+      err.message;
     return {
       isError: true,
-      content: [
-        {
-          type: "text",
-          text: error.response?.data?.error?.message || error.message,
-        },
-      ],
+      content: [{ type: 'text', text: `Error: ${msg}` }],
     };
   }
 });
 
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("BitAtlas MCP Server running on stdio");
+  console.error('BitAtlas MCP Server running on stdio');
+  console.error(`API: ${API_URL}`);
+  console.error(`Master key: ${MASTER_KEY_HEX ? 'configured' : 'NOT SET (encrypt/decrypt unavailable)'}`);
 }
 
-main().catch((error) => {
-  console.error("Server error:", error);
+main().catch((err) => {
+  console.error('Fatal:', err);
   process.exit(1);
 });
