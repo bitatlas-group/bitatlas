@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -33,12 +34,18 @@ export default function Home() {
 
           {/* Auth buttons */}
           <div className="flex items-center gap-4">
-            <button className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary px-4 py-2">
+            <Link
+              href="/login"
+              className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary px-4 py-2"
+            >
               Log In
-            </button>
-            <button className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-headline font-semibold text-sm tracking-tight hover:brightness-110 transition-all">
+            </Link>
+            <Link
+              href="/register"
+              className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-headline font-semibold text-sm tracking-tight hover:brightness-110 transition-all"
+            >
               Sign Up
-            </button>
+            </Link>
           </div>
         </div>
         {/* Bottom rule — tonal, not a hard border */}
@@ -77,9 +84,12 @@ export default function Home() {
 
               {/* CTAs */}
               <div className="flex flex-col sm:flex-row gap-4 mt-4">
-                <button className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-8 py-4 rounded-xl font-headline font-bold text-lg hover:brightness-110 transition-all shadow-xl shadow-primary/10">
+                <Link
+                  href="/register"
+                  className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-8 py-4 rounded-xl font-headline font-bold text-lg hover:brightness-110 transition-all shadow-xl shadow-primary/10 text-center"
+                >
                   Get Started for Free
-                </button>
+                </Link>
                 <button className="glass-effect bg-surface-container-highest/50 text-on-surface px-8 py-4 rounded-xl font-headline font-bold text-lg border border-outline-variant/15 hover:bg-surface-container-highest transition-all">
                   View API Docs
                 </button>
@@ -400,9 +410,12 @@ export default function Home() {
             </p>
 
             <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
-              <button className="bg-on-primary text-primary px-10 py-5 rounded-2xl font-headline font-bold text-xl hover:bg-primary-fixed transition-all">
+              <Link
+                href="/register"
+                className="bg-on-primary text-primary px-10 py-5 rounded-2xl font-headline font-bold text-xl hover:bg-primary-fixed transition-all"
+              >
                 Get Started Free
-              </button>
+              </Link>
               <button className="text-on-primary px-10 py-5 font-headline font-bold text-xl hover:underline underline-offset-8 transition-all">
                 Read the Docs
               </button>
