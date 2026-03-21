@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Bitatlas | The Secure Intelligence Layer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-secondary-fixed": "#001e2f",
+              "secondary-fixed-dim": "#96cdf5",
+              "tertiary-fixed-dim": "#5dd8e2",
+              "primary": "#002046",
+              "secondary-container": "#9ed5fe",
+              "surface-variant": "#dfe3e8",
+              "surface-dim": "#d7dae0",
+              "secondary-fixed": "#c9e6ff",
+              "error": "#ba1a1a",
+              "outline": "#74777f",
+              "surface-bright": "#f7f9ff",
+              "tertiary": "#002528",
+              "inverse-surface": "#2d3135",
+              "on-tertiary-fixed-variant": "#004f54",
+              "on-primary-fixed": "#001b3d",
+              "on-surface": "#181c20",
+              "primary-container": "#1b365d",
+              "on-tertiary-fixed": "#002022",
+              "surface-tint": "#465f88",
+              "outline-variant": "#c4c6cf",
+              "on-primary": "#ffffff",
+              "error-container": "#ffdad6",
+              "on-tertiary": "#ffffff",
+              "on-secondary-container": "#205d81",
+              "primary-fixed": "#d6e3ff",
+              "on-primary-container": "#87a0cd",
+              "inverse-on-surface": "#eef1f7",
+              "tertiary-container": "#003c40",
+              "secondary": "#286487",
+              "surface-container-lowest": "#ffffff",
+              "on-background": "#181c20",
+              "on-error-container": "#93000a",
+              "on-secondary-fixed-variant": "#004c6e",
+              "surface-container-high": "#e5e8ee",
+              "tertiary-fixed": "#7df4ff",
+              "background": "#f7f9ff",
+              "inverse-primary": "#aec7f7",
+              "on-secondary": "#ffffff",
+              "on-primary-fixed-variant": "#2e476f",
+              "surface": "#f7f9ff",
+              "surface-container-low": "#f1f4fa",
+              "primary-fixed-dim": "#aec7f7",
+              "on-tertiary-container": "#24aeb8",
+              "on-surface-variant": "#44474e",
+              "surface-container": "#ebeef4",
+              "on-error": "#ffffff"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+      .glass-effect {
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface selection:bg-secondary-container selection:text-on-secondary-container">
+<!-- Top Navigation -->
+<nav class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl">
+<div class="flex justify-between items-center w-full px-6 py-4 max-w-7xl mx-auto">
+<div class="text-xl font-bold tracking-tighter text-blue-950 dark:text-white font-headline">Bitatlas</div>
+<div class="hidden md:flex gap-8 items-center">
+<a class="font-manrope font-medium text-sm tracking-tight text-slate-600 dark:text-slate-400 hover:text-blue-900 transition-colors" href="#">Product</a>
+<a class="font-manrope font-medium text-sm tracking-tight text-slate-600 dark:text-slate-400 hover:text-blue-900 transition-colors" href="#">Pricing</a>
+<a class="font-manrope font-medium text-sm tracking-tight text-slate-600 dark:text-slate-400 hover:text-blue-900 transition-colors" href="#">Developers</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="font-manrope font-medium text-sm tracking-tight text-slate-600 dark:text-slate-400 hover:text-blue-900 px-4 py-2">Log In</button>
+<button class="bg-gradient-to-br from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-manrope font-semibold text-sm tracking-tight hover:brightness-110 transition-all">Sign Up</button>
+</div>
+</div>
+<div class="bg-slate-100/50 dark:bg-slate-800/50 h-[1px] w-full absolute bottom-0"></div>
+</nav>
+<main class="pt-24">
+<!-- Hero Section -->
+<section class="relative px-6 py-24 md:py-32 overflow-hidden">
+<div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+<div class="lg:col-span-7 flex flex-col gap-8">
+<div class="inline-flex items-center gap-2 bg-surface-container-highest px-3 py-1 rounded-full self-start">
+<span class="material-symbols-outlined text-sm text-on-tertiary-container" style="font-variation-settings: 'FILL' 1;">security</span>
+<span class="text-[0.6875rem] font-headline font-bold uppercase tracking-widest text-on-tertiary-container">Now in Private Beta</span>
+</div>
+<h1 class="font-headline font-extrabold text-5xl md:text-7xl leading-[1.1] tracking-tight text-primary">
+                        The Secure Storage Layer <br/>
+<span class="text-secondary">for your AI Agents</span>
+</h1>
+<p class="text-xl text-on-surface-variant max-w-xl leading-relaxed">
+                        The Dropbox for the agentic world. End-to-end zero-knowledge encryption designed for autonomous workflows and high-trust human-AI collaboration.
+                    </p>
+<div class="flex flex-col sm:flex-row gap-4 mt-4">
+<button class="bg-gradient-to-br from-primary to-primary-container text-on-primary px-8 py-4 rounded-xl font-headline font-bold text-lg hover:brightness-110 transition-all shadow-xl shadow-primary/10">
+                            Get Started for Free
+                        </button>
+<button class="glass-effect bg-surface-container-highest/50 text-on-surface px-8 py-4 rounded-xl font-headline font-bold text-lg border border-outline-variant/15 hover:bg-surface-container-highest transition-all">
+                            View API Docs
+                        </button>
+</div>
+<div class="flex items-center gap-6 pt-8 grayscale opacity-60">
+<span class="text-xs font-bold uppercase tracking-widest text-outline">Trusted by leading labs</span>
+<div class="flex gap-8 items-center">
+<div class="h-6 w-24 bg-surface-container-highest rounded-lg"></div>
+<div class="h-6 w-24 bg-surface-container-highest rounded-lg"></div>
+<div class="h-6 w-24 bg-surface-container-highest rounded-lg"></div>
+</div>
+</div>
+</div>
+<div class="lg:col-span-5 relative">
+<div class="relative z-10 aspect-square rounded-[2rem] overflow-hidden shadow-2xl">
+<img alt="Abstract 3D network visualization" class="w-full h-full object-cover" data-alt="Abstract 3D glowing blue network nodes and connections" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAv1I9l1XIlKjyvyz2g_BjRaHzktqbxHW92vk_7svu0TDUi1qvV9KEMb1n6ql2pIF20ZSx2suZI_6-TCv4VlYUCP0gNdYSVsLVPkYufuuy65RfU3CVsaEmruyJ4vqRqb6ExUlo2ZmLzpqsRCGeohha9GANPNQ6Qf95C2lOy3dSG3rp2kg8s-5rtVVZ-_87Zw9-8v2wcMsD_a7R2vz63VX_pmU2Wh8pGPaKw_YpT79Qy3pJV_Z8TPNMN8a-MmCvH4ZPYFAQmuU0ISMeb"/>
+<div class="absolute inset-0 bg-gradient-to-t from-primary/40 to-transparent"></div>
+</div>
+<!-- Decorative Elements -->
+<div class="absolute -top-12 -right-12 w-64 h-64 bg-tertiary-fixed-dim/20 rounded-full blur-3xl -z-10"></div>
+<div class="absolute -bottom-12 -left-12 w-64 h-64 bg-primary-fixed/30 rounded-full blur-3xl -z-10"></div>
+</div>
+</div>
+</section>
+<!-- Features Bento Grid -->
+<section class="bg-surface-container-low py-24">
+<div class="max-w-7xl mx-auto px-6">
+<div class="text-center mb-16 space-y-4">
+<h2 class="font-headline font-extrabold text-4xl text-primary tracking-tight">Built for the Agentic Frontier</h2>
+<p class="text-on-surface-variant max-w-2xl mx-auto">Hardware-level security meets cloud-scale flexibility. Give your agents the memory they need without compromising your privacy.</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Feature 1 -->
+<div class="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border border-outline-variant/10">
+<div class="w-14 h-14 rounded-2xl bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-3xl" style="font-variation-settings: 'FILL' 1;">shield_lock</span>
+</div>
+<h3 class="font-headline font-bold text-2xl text-primary">Zero-Knowledge Encryption</h3>
+<p class="text-on-surface-variant leading-relaxed">Your data is encrypted locally before it ever leaves your agent's environment. We never hold the keys, meaning we can't see your data even if we wanted to.</p>
+</div>
+<!-- Feature 2 -->
+<div class="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border border-outline-variant/10">
+<div class="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-secondary text-3xl" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+</div>
+<h3 class="font-headline font-bold text-2xl text-primary">Agent-First Storage</h3>
+<p class="text-on-surface-variant leading-relaxed">Native support for long-term vector memory, structured JSON state, and secure binary objects. Optimized for the latency requirements of LLMs.</p>
+</div>
+<!-- Feature 3 -->
+<div class="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border border-outline-variant/10">
+<div class="w-14 h-14 rounded-2xl bg-tertiary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-tertiary text-3xl" style="font-variation-settings: 'FILL' 1;">cloud_sync</span>
+</div>
+<h3 class="font-headline font-bold text-2xl text-primary">Seamless Integration</h3>
+<p class="text-on-surface-variant leading-relaxed">One-line SDKs for Python, Node, and Rust. Direct integrations with LangChain, AutoGPT, and CrewAI frameworks right out of the box.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- "Why Bitatlas?" Vault Section -->
+<section class="py-32 bg-surface">
+<div class="max-w-7xl mx-auto px-6">
+<div class="flex flex-col lg:flex-row gap-20 items-center">
+<div class="lg:w-1/2 space-y-12">
+<div class="space-y-6">
+<h2 class="font-headline font-extrabold text-4xl md:text-5xl text-primary tracking-tight">Why Bitatlas?</h2>
+<p class="text-lg text-on-surface-variant leading-relaxed">
+                                Traditional cloud storage wasn't built for the scale or the security needs of autonomous agents. Bitatlas provides the missing infrastructure for persistent agentic intelligence.
+                            </p>
+</div>
+<div class="space-y-8">
+<div class="flex gap-6">
+<div class="flex-shrink-0 w-12 h-12 rounded-full bg-tertiary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-on-tertiary-container text-2xl">verified</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-xl text-primary">Verifiable Integrity</h4>
+<p class="text-on-surface-variant">Every byte stored is cryptographically signed, ensuring agents never execute corrupted or tampered code.</p>
+</div>
+</div>
+<div class="flex gap-6">
+<div class="flex-shrink-0 w-12 h-12 rounded-full bg-secondary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-on-secondary-container text-2xl">bolt</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-xl text-primary">Edge Persistence</h4>
+<p class="text-on-surface-variant">Global edge network ensures that your agents have sub-50ms access to their state anywhere in the world.</p>
+</div>
+</div>
+<div class="flex gap-6">
+<div class="flex-shrink-0 w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary-fixed-variant text-2xl">policy</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-xl text-primary">Privacy Governance</h4>
+<p class="text-on-surface-variant">Granular access controls allow you to define exactly which agent can see which data, and for how long.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="lg:w-1/2 bg-surface-container-high p-8 rounded-[3rem] relative">
+<div class="bg-surface-container-lowest rounded-[2rem] p-6 shadow-xl border border-outline-variant/20">
+<!-- Visual representation of the 'Vault' UI -->
+<div class="flex justify-between items-center mb-8">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-sm" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+<span class="font-headline font-bold text-primary">Secure Vault: Agent_734</span>
+</div>
+<div class="flex items-center gap-2 bg-tertiary-container px-3 py-1 rounded-full">
+<div class="w-2 h-2 rounded-full bg-tertiary-fixed animate-pulse"></div>
+<span class="text-[10px] font-bold text-on-tertiary-container uppercase tracking-tighter">Encrypted Session</span>
+</div>
+</div>
+<div class="space-y-4">
+<div class="h-12 bg-surface-container rounded-xl w-full flex items-center px-4 justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant">description</span>
+<div class="h-2 w-32 bg-outline-variant/30 rounded"></div>
+</div>
+<div class="h-2 w-12 bg-outline-variant/30 rounded"></div>
+</div>
+<div class="h-12 bg-surface-container rounded-xl w-full flex items-center px-4 justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant">folder</span>
+<div class="h-2 w-24 bg-outline-variant/30 rounded"></div>
+</div>
+<div class="h-2 w-12 bg-outline-variant/30 rounded"></div>
+</div>
+<div class="h-32 bg-primary-container/5 rounded-xl border border-dashed border-primary/20 flex flex-col items-center justify-center gap-3">
+<span class="material-symbols-outlined text-primary/40 text-3xl">upload_file</span>
+<span class="text-xs font-bold text-primary/40 uppercase tracking-widest">Awaiting Agent Input</span>
+</div>
+</div>
+</div>
+<!-- Decorative element behind -->
+<div class="absolute -z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[110%] h-[90%] bg-gradient-to-br from-secondary/5 to-primary/5 rounded-[4rem] rotate-2"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- CTA Section -->
+<section class="max-w-7xl mx-auto px-6 mb-24">
+<div class="bg-primary p-12 md:p-20 rounded-[3rem] text-center space-y-8 relative overflow-hidden">
+<div class="absolute top-0 right-0 w-96 h-96 bg-primary-container rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2 opacity-50"></div>
+<div class="absolute bottom-0 left-0 w-96 h-96 bg-secondary rounded-full blur-[120px] translate-y-1/2 -translate-x-1/2 opacity-20"></div>
+<h2 class="relative z-10 font-headline font-extrabold text-4xl md:text-5xl text-on-primary tracking-tight">Ready to secure your agent's mind?</h2>
+<p class="relative z-10 text-on-primary-container text-xl max-w-2xl mx-auto">Join 10,000+ developers building the future of autonomous intelligence with Bitatlas.</p>
+<div class="relative z-10 flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+<button class="bg-on-primary text-primary px-10 py-5 rounded-2xl font-headline font-bold text-xl hover:bg-primary-fixed transition-all">
+                        Create Free Account
+                    </button>
+<button class="text-on-primary px-10 py-5 font-headline font-bold text-xl hover:underline underline-offset-8 transition-all">
+                        Contact Sales
+                    </button>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="bg-slate-50 dark:bg-slate-950 w-full border-t border-slate-200 dark:border-slate-800">
+<div class="max-w-7xl mx-auto px-8 py-12 flex flex-col md:flex-row justify-between items-center gap-8">
+<div class="flex flex-col items-center md:items-start gap-4">
+<div class="text-lg font-bold text-blue-900 dark:text-blue-100 font-headline">Bitatlas</div>
+<p class="font-inter text-xs tracking-wide uppercase font-semibold text-slate-500">© 2024 Bitatlas Inc. Secure Intelligence Layer.</p>
+</div>
+<div class="flex flex-wrap justify-center gap-8">
+<a class="font-inter text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-blue-900 transition-colors underline decoration-blue-500/30 underline-offset-4" href="#">Privacy Policy</a>
+<a class="font-inter text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-blue-900 transition-colors underline decoration-blue-500/30 underline-offset-4" href="#">Terms of Service</a>
+<a class="font-inter text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-blue-900 transition-colors underline decoration-blue-500/30 underline-offset-4" href="#">Security Whitepaper</a>
+<a class="font-inter text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-blue-900 transition-colors underline decoration-blue-500/30 underline-offset-4" href="#">Status</a>
+<a class="font-inter text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-blue-900 transition-colors underline decoration-blue-500/30 underline-offset-4" href="#">Contact</a>
+</div>
+</div>
+</footer>
+</body></html>

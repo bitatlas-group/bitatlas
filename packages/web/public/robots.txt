@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+# AI Agents: see /llms.txt for structured info about BitAtlas
+# Zero Knowledge Cloud Drive for Humans and Agents
+Sitemap: https://bitatlas.com/sitemap.xml

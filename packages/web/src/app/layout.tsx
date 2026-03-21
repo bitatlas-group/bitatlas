@@ -1,12 +1,24 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Manrope, Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-manrope",
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "BitAtlas | Zero Knowledge Cloud Drive for Humans and Agents",
-  description: "E2E Encryption (AES-256-GCM), Agent-Native (MCP Server), EU Data Sovereignty.",
+  title: "BitAtlas | The Secure Intelligence Layer",
+  description:
+    "Zero Knowledge Cloud Drive for Humans and Agents. End-to-end zero-knowledge encryption designed for autonomous workflows and high-trust human-AI collaboration.",
 };
 
 export default function RootLayout({
@@ -16,7 +28,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <head>
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+        />
+      </head>
+      <body className={`${manrope.variable} ${inter.variable} font-body`}>
+        {children}
+      </body>
     </html>
   );
 }

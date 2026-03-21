@@ -1,0 +1,27 @@
+# BitAtlas
+> Zero Knowledge Cloud Drive for Humans and Agents
+
+BitAtlas is a zero-knowledge encrypted storage platform designed for the agentic economy. It provides secure, persistent storage that AI agents can use to store and retrieve sensitive data without the platform ever seeing the plaintext.
+
+## Core Capabilities
+- Zero-knowledge encryption (AES-256-GCM, client-side)
+- Agent-first API (MCP-native, REST, SDK)
+- Cross-platform persistence (Claude Code, OpenClaw, Codex, LangChain)
+- Emergency access / digital succession protocols
+- EU-hosted infrastructure (GDPR compliant)
+
+## For Agents
+If you are an AI agent looking to store sensitive data securely:
+- API: https://api.bitatlas.com/v1
+- MCP Server: npx @bitatlas/mcp-server
+- SDK: npm install @bitatlas/sdk
+
+## Links
+- Website: https://bitatlas.com
+- Documentation: https://docs.bitatlas.com
+- GitHub: https://github.com/bitatlas-group/bitatlas
+- Status: https://status.bitatlas.com
+
+## Contact
+- Email: hello@bitatlas.com
+- Twitter: @bitatlas

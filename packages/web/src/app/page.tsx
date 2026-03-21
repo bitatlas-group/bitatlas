@@ -1,223 +1,457 @@
 import Image from "next/image";
-import { Shield, Brain, Globe, Lock, Cpu, Github, ExternalLink, ArrowRight } from "lucide-react";
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen bg-white text-slate-900 font-sans">
-      {/* Navigation */}
-      <nav className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto w-full">
-        <div className="flex items-center gap-2">
-          <Image
-            src="/logo.jpg"
-            alt="BitAtlas Logo"
-            width={32}
-            height={32}
-            className="rounded-lg shadow-sm"
-          />
-          <span className="font-bold text-xl tracking-tight">BitAtlas</span>
-        </div>
-        <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-          <a href="#features" className="hover:text-blue-600 transition-colors">Features</a>
-          <a href="#architecture" className="hover:text-blue-600 transition-colors">Security</a>
-          <a href="#mcp" className="hover:text-blue-600 transition-colors">MCP</a>
-        </div>
-        <a 
-          href="https://bitatlas.io" 
-          className="bg-blue-600 text-white px-5 py-2 rounded-full text-sm font-semibold hover:bg-blue-700 transition-all shadow-md hover:shadow-lg"
-        >
-          Get early access
-        </a>
-      </nav>
-
-      <main className="flex-grow">
-        {/* Hero Section */}
-        <section className="relative pt-20 pb-32 px-6 overflow-hidden">
-          <div className="max-w-7xl mx-auto text-center relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold mb-8 animate-fade-in">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-              </span>
-              NOW IN PRIVATE BETA
-            </div>
-            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 leading-[1.1]">
-              Zero Knowledge Cloud Drive <br className="hidden md:block" />
-              <span className="text-blue-600">for Humans and Agents</span>
-            </h1>
-            <p className="max-w-2xl mx-auto text-xl text-slate-600 mb-10 leading-relaxed">
-              The first privacy-first storage platform designed for the AI era. 
-              End-to-end encrypted, agent-native, and built for EU data sovereignty.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <button className="w-full sm:w-auto px-8 py-4 bg-blue-600 text-white rounded-xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl hover:shadow-blue-200/50 flex items-center justify-center gap-2">
-                Get Early Access <ArrowRight size={20} />
-              </button>
-              <a 
-                href="https://github.com/bitatlas-group/bitatlas" 
-                className="w-full sm:w-auto px-8 py-4 bg-slate-50 text-slate-700 rounded-xl font-bold text-lg hover:bg-slate-100 transition-all border border-slate-200 flex items-center justify-center gap-2"
-              >
-                <Github size={20} /> View Source
-              </a>
-            </div>
-          </div>
-          
-          {/* Subtle background decoration */}
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-blue-50 rounded-full blur-3xl -z-10 opacity-50"></div>
-        </section>
-
-        {/* Features Section */}
-        <section id="features" className="py-24 px-6 bg-slate-50">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">Built for the future of work</h2>
-              <p className="text-slate-600 max-w-2xl mx-auto">Secure by default, intelligent by design.</p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 mb-6">
-                  <Shield size={24} />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-slate-900">Secure Vault</h3>
-                <p className="text-slate-600 leading-relaxed">
-                  Your files are encrypted before they even leave your device. Only you hold the keys. No one else, not even us, can access your data.
-                </p>
-              </div>
-              
-              <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
-                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center text-purple-600 mb-6">
-                  <Brain size={24} />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-slate-900">Agent-Native</h3>
-                <p className="text-slate-600 leading-relaxed">
-                  First-class support for AI agents through our MCP Server. Grant granular, secure access to your agents to interact with your data.
-                </p>
-              </div>
-              
-              <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
-                <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600 mb-6">
-                  <Globe size={24} />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-slate-900">EU Sovereignty</h3>
-                <p className="text-slate-600 leading-relaxed">
-                  Hosted and operated within the EU. Fully GDPR compliant, ensuring your data remains under the protection of EU privacy laws.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Architecture Section */}
-        <section id="architecture" className="py-24 px-6 border-t border-slate-100">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex flex-col md:flex-row items-center gap-16">
-              <div className="flex-1">
-                <div className="inline-block px-3 py-1 bg-slate-100 rounded text-xs font-bold text-slate-500 mb-4 uppercase tracking-widest">
-                  Encryption Standard
-                </div>
-                <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-6">Military-Grade Zero Knowledge Architecture</h2>
-                <p className="text-lg text-slate-600 mb-8 leading-relaxed">
-                  BitAtlas uses <strong>AES-256-GCM</strong> encryption for data at rest and in transit. Our zero-knowledge protocol ensures that encryption keys never leave your machine.
-                </p>
-                <ul className="space-y-4">
-                  {[
-                    "E2E Encryption (AES-256-GCM)",
-                    "Client-side key generation",
-                    "No plaintext data ever hits our servers",
-                    "Open-source encryption SDK"
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-center gap-3 text-slate-700 font-medium">
-                      <div className="text-blue-500"><Lock size={18} /></div>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="flex-1 bg-slate-900 rounded-3xl p-8 md:p-12 text-blue-400 font-mono text-sm overflow-hidden shadow-2xl">
-                <div className="flex gap-2 mb-6">
-                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                  <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                </div>
-                <div className="space-y-2 opacity-80">
-                  <p>{"// BitAtlas Secure Key Derivation"}</p>
-                  <p className="text-blue-300">const salt = crypto.getRandomValues(new Uint8Array(16));</p>
-                  <p className="text-blue-300">const key = await deriveKey(password, salt);</p>
-                  <p><span className="text-purple-400">const</span> encrypted = <span className="text-purple-400">await</span> encrypt(data, key, <span className="text-yellow-400">'AES-256-GCM'</span>);</p>
-                  <p className="text-slate-500">{"// Uploading only the encrypted blob"}</p>
-                  <p className="text-blue-300">await upload(encrypted);</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* MCP Section */}
-        <section id="mcp" className="py-24 px-6 bg-blue-600 text-white overflow-hidden relative">
-          <div className="max-w-7xl mx-auto relative z-10">
-            <div className="flex flex-col md:flex-row items-center gap-16">
-              <div className="flex-1 order-2 md:order-1">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-6 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
-                    <Cpu className="mb-4" />
-                    <h4 className="font-bold mb-2">Claude / ChatGPT</h4>
-                    <p className="text-sm opacity-80">Direct integration via MCP Server.</p>
-                  </div>
-                  <div className="p-6 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 mt-8">
-                    <Shield className="mb-4" />
-                    <h4 className="font-bold mb-2">Scoped Access</h4>
-                    <p className="text-sm opacity-80">Permission-based file sharing for agents.</p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex-1 order-1 md:order-2">
-                <h2 className="text-3xl md:text-4xl font-bold mb-6">The first drive with an MCP heartbeat</h2>
-                <p className="text-xl opacity-90 mb-8 leading-relaxed">
-                  We believe agents should have their own secure workspace. With the <strong>Model Context Protocol (MCP)</strong>, BitAtlas allows you to give your AI assistants a persistent, encrypted "vault" they can read from and write to.
-                </p>
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-white/20 p-2 rounded-lg">
-                      <ExternalLink size={20} />
-                    </div>
-                    <div>
-                      <h4 className="font-bold">Model Context Protocol</h4>
-                      <p className="opacity-80">Industry-standard protocol for agentic data interaction.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Abstract circles */}
-          <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-[600px] h-[600px] bg-white/5 rounded-full blur-3xl"></div>
-        </section>
-      </main>
-
-      {/* Footer */}
-      <footer className="py-12 px-6 border-t border-slate-100">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+    <div className="bg-surface font-body text-on-surface selection:bg-secondary-container selection:text-on-secondary-container">
+      {/* ── Navigation ── */}
+      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl">
+        <div className="flex justify-between items-center w-full px-6 py-4 max-w-7xl mx-auto">
+          {/* Logo */}
           <div className="flex items-center gap-2">
             <Image
               src="/logo.jpg"
-              alt="BitAtlas Logo"
-              width={24}
-              height={24}
-              className="rounded shadow-sm"
+              alt="BitAtlas"
+              width={28}
+              height={28}
+              className="rounded-lg"
             />
-            <span className="font-bold tracking-tight">BitAtlas</span>
+            <span className="text-xl font-bold tracking-tighter text-primary font-headline">
+              BitAtlas
+            </span>
           </div>
-          
-          <div className="flex items-center gap-8 text-sm text-slate-500">
-            <a href="https://bitatlas.io" className="hover:text-blue-600">bitatlas.io</a>
-            <a href="https://github.com/bitatlas-group/bitatlas" className="flex items-center gap-1 hover:text-blue-600">
-              <Github size={16} /> GitHub
-            </a>
+
+          {/* Nav links */}
+          <div className="hidden md:flex gap-8 items-center">
+            {["Product", "Pricing", "Developers"].map((label) => (
+              <a
+                key={label}
+                href="#"
+                className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors"
+              >
+                {label}
+              </a>
+            ))}
           </div>
-          
-          <div className="text-sm text-slate-400">
-            © 2024 BitAtlas. Built for the privacy era.
+
+          {/* Auth buttons */}
+          <div className="flex items-center gap-4">
+            <button className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary px-4 py-2">
+              Log In
+            </button>
+            <button className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-headline font-semibold text-sm tracking-tight hover:brightness-110 transition-all">
+              Sign Up
+            </button>
+          </div>
+        </div>
+        {/* Bottom rule — tonal, not a hard border */}
+        <div className="bg-slate-100/50 h-[1px] w-full absolute bottom-0" />
+      </nav>
+
+      <main className="pt-24">
+        {/* ── Hero ── */}
+        <section className="relative px-6 py-24 md:py-32 overflow-hidden">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+            {/* Copy */}
+            <div className="lg:col-span-7 flex flex-col gap-8">
+              {/* Beta badge */}
+              <div className="inline-flex items-center gap-2 bg-surface-container-highest px-3 py-1 rounded-full self-start">
+                <span
+                  className="material-symbols-outlined text-sm text-on-tertiary-container"
+                  style={{ fontVariationSettings: "'FILL' 1" }}
+                >
+                  security
+                </span>
+                <span className="text-[0.6875rem] font-headline font-bold uppercase tracking-widest text-on-tertiary-container">
+                  Now in Private Beta
+                </span>
+              </div>
+
+              <h1 className="font-headline font-extrabold text-5xl md:text-7xl leading-[1.1] tracking-tight text-primary">
+                The Secure Storage Layer <br />
+                <span className="text-secondary">for your AI Agents</span>
+              </h1>
+
+              <p className="text-xl text-on-surface-variant max-w-xl leading-relaxed">
+                The Dropbox for the agentic world. End-to-end zero-knowledge
+                encryption designed for autonomous workflows and high-trust
+                human-AI collaboration.
+              </p>
+
+              {/* CTAs */}
+              <div className="flex flex-col sm:flex-row gap-4 mt-4">
+                <button className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-8 py-4 rounded-xl font-headline font-bold text-lg hover:brightness-110 transition-all shadow-xl shadow-primary/10">
+                  Get Started for Free
+                </button>
+                <button className="glass-effect bg-surface-container-highest/50 text-on-surface px-8 py-4 rounded-xl font-headline font-bold text-lg border border-outline-variant/15 hover:bg-surface-container-highest transition-all">
+                  View API Docs
+                </button>
+              </div>
+
+              {/* Compliance badges (replaces placeholder logos) */}
+              <div className="flex flex-wrap items-center gap-4 pt-8 opacity-70">
+                <span className="text-xs font-bold uppercase tracking-widest text-outline">
+                  Compliance
+                </span>
+                <div className="flex flex-wrap gap-3">
+                  {["EU-Hosted", "SOC 2", "GDPR Compliant"].map((badge) => (
+                    <span
+                      key={badge}
+                      className="px-3 py-1 bg-surface-container-high rounded text-xs font-bold text-on-surface-variant uppercase tracking-wide border border-outline-variant/20"
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Hero visual: mock vault UI */}
+            <div className="lg:col-span-5 relative">
+              <div className="relative z-10 aspect-square rounded-[2rem] overflow-hidden shadow-2xl">
+                <div className="w-full h-full bg-gradient-to-br from-primary via-primary-container to-tertiary p-8 flex flex-col gap-5">
+                  {/* Vault header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center">
+                        <span
+                          className="material-symbols-outlined text-on-primary-container"
+                          style={{
+                            fontSize: "18px",
+                            fontVariationSettings: "'FILL' 1",
+                          }}
+                        >
+                          lock
+                        </span>
+                      </div>
+                      <span className="text-xs font-headline font-bold text-on-primary-container">
+                        Vault: Agent_734
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-tertiary-container px-2 py-1 rounded-full">
+                      <div className="w-1.5 h-1.5 rounded-full bg-tertiary-fixed animate-pulse" />
+                      <span className="text-[9px] font-bold text-on-tertiary-container uppercase tracking-tighter">
+                        Encrypted
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* File rows */}
+                  <div className="space-y-2 flex-1">
+                    {[
+                      { icon: "description", w: "w-28" },
+                      { icon: "folder", w: "w-20" },
+                      { icon: "smart_toy", w: "w-32" },
+                    ].map((row, i) => (
+                      <div
+                        key={i}
+                        className="h-10 bg-white/10 rounded-xl flex items-center px-3 gap-2"
+                      >
+                        <span
+                          className="material-symbols-outlined text-on-primary-container"
+                          style={{ fontSize: "18px" }}
+                        >
+                          {row.icon}
+                        </span>
+                        <div
+                          className={`h-1.5 ${row.w} bg-on-primary-container/30 rounded`}
+                        />
+                        <div className="ml-auto h-1.5 w-10 bg-on-primary-container/20 rounded" />
+                      </div>
+                    ))}
+
+                    {/* Drop zone */}
+                    <div className="h-20 bg-white/5 rounded-xl border border-dashed border-on-primary-container/20 flex flex-col items-center justify-center gap-2 mt-2">
+                      <span
+                        className="material-symbols-outlined text-on-primary-container/40"
+                        style={{ fontSize: "28px" }}
+                      >
+                        upload_file
+                      </span>
+                      <span className="text-[9px] font-bold text-on-primary-container/40 uppercase tracking-widest">
+                        Awaiting Agent Input
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Status bar */}
+                  <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                    <span
+                      className="material-symbols-outlined text-on-tertiary-container"
+                      style={{ fontSize: "16px" }}
+                    >
+                      security
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-on-primary-container">
+                      AES-256-GCM Active
+                    </span>
+                  </div>
+                </div>
+
+                {/* Gradient vignette */}
+                <div className="absolute inset-0 bg-gradient-to-t from-primary/40 to-transparent pointer-events-none" />
+              </div>
+
+              {/* Decorative blobs */}
+              <div className="absolute -top-12 -right-12 w-64 h-64 bg-tertiary-fixed-dim/20 rounded-full blur-3xl -z-10" />
+              <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-primary-fixed/30 rounded-full blur-3xl -z-10" />
+            </div>
+          </div>
+        </section>
+
+        {/* ── Features Bento Grid ── */}
+        <section className="bg-surface-container-low py-24">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-16 space-y-4">
+              <h2 className="font-headline font-extrabold text-4xl text-primary tracking-tight">
+                Built for the Agentic Frontier
+              </h2>
+              <p className="text-on-surface-variant max-w-2xl mx-auto">
+                Hardware-level security meets cloud-scale flexibility. Give your
+                agents the memory they need without compromising your privacy.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[
+                {
+                  icon: "shield_lock",
+                  iconBg: "bg-primary-container",
+                  iconColor: "text-on-primary",
+                  title: "Zero-Knowledge Encryption",
+                  desc: "Your data is encrypted locally before it ever leaves your agent's environment. We never hold the keys, meaning we can't see your data even if we wanted to.",
+                },
+                {
+                  icon: "smart_toy",
+                  iconBg: "bg-secondary",
+                  iconColor: "text-on-secondary",
+                  title: "Agent-First Storage",
+                  desc: "Native support for long-term vector memory, structured JSON state, and secure binary objects. Optimized for the latency requirements of LLMs.",
+                },
+                {
+                  icon: "cloud_sync",
+                  iconBg: "bg-tertiary",
+                  iconColor: "text-on-tertiary",
+                  title: "Seamless Integration",
+                  desc: "One-line SDKs for Python, Node, and Rust. Direct integrations with LangChain, AutoGPT, and CrewAI frameworks right out of the box.",
+                },
+              ].map((card) => (
+                <div
+                  key={card.title}
+                  className="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border border-outline-variant/10"
+                >
+                  <div
+                    className={`w-14 h-14 rounded-2xl ${card.iconBg} flex items-center justify-center`}
+                  >
+                    <span
+                      className={`material-symbols-outlined ${card.iconColor} text-3xl`}
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      {card.icon}
+                    </span>
+                  </div>
+                  <h3 className="font-headline font-bold text-2xl text-primary">
+                    {card.title}
+                  </h3>
+                  <p className="text-on-surface-variant leading-relaxed">
+                    {card.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Why BitAtlas ── */}
+        <section className="py-32 bg-surface">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="flex flex-col lg:flex-row gap-20 items-center">
+              {/* Left: copy + bullet list */}
+              <div className="lg:w-1/2 space-y-12">
+                <div className="space-y-6">
+                  <h2 className="font-headline font-extrabold text-4xl md:text-5xl text-primary tracking-tight">
+                    Why BitAtlas?
+                  </h2>
+                  <p className="text-lg text-on-surface-variant leading-relaxed">
+                    Traditional cloud storage wasn&apos;t built for the scale or
+                    the security needs of autonomous agents. BitAtlas provides
+                    the missing infrastructure for persistent agentic
+                    intelligence.
+                  </p>
+                </div>
+
+                <div className="space-y-8">
+                  {[
+                    {
+                      bg: "bg-tertiary-container",
+                      icon: "verified",
+                      iconColor: "text-on-tertiary-container",
+                      title: "Verifiable Integrity",
+                      desc: "Every byte stored is cryptographically signed, ensuring agents never execute corrupted or tampered code.",
+                    },
+                    {
+                      bg: "bg-secondary-container",
+                      icon: "bolt",
+                      iconColor: "text-on-secondary-container",
+                      title: "Edge Persistence",
+                      desc: "Global edge network ensures that your agents have sub-50ms access to their state anywhere in the world.",
+                    },
+                    {
+                      bg: "bg-primary-fixed",
+                      icon: "policy",
+                      iconColor: "text-on-primary-fixed-variant",
+                      title: "Privacy Governance",
+                      desc: "Granular access controls allow you to define exactly which agent can see which data, and for how long.",
+                    },
+                  ].map((item) => (
+                    <div key={item.title} className="flex gap-6">
+                      <div
+                        className={`flex-shrink-0 w-12 h-12 rounded-full ${item.bg} flex items-center justify-center`}
+                      >
+                        <span
+                          className={`material-symbols-outlined ${item.iconColor} text-2xl`}
+                        >
+                          {item.icon}
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="font-headline font-bold text-xl text-primary">
+                          {item.title}
+                        </h4>
+                        <p className="text-on-surface-variant">{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right: vault card illustration */}
+              <div className="lg:w-1/2 bg-surface-container-high p-8 rounded-[3rem] relative">
+                <div className="bg-surface-container-lowest rounded-[2rem] p-6 shadow-xl border border-outline-variant/20">
+                  <div className="flex justify-between items-center mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center">
+                        <span
+                          className="material-symbols-outlined text-white text-sm"
+                          style={{ fontVariationSettings: "'FILL' 1" }}
+                        >
+                          lock
+                        </span>
+                      </div>
+                      <span className="font-headline font-bold text-primary">
+                        Secure Vault: Agent_734
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-tertiary-container px-3 py-1 rounded-full">
+                      <div className="w-2 h-2 rounded-full bg-tertiary-fixed animate-pulse" />
+                      <span className="text-[10px] font-bold text-on-tertiary-container uppercase tracking-tighter">
+                        Encrypted Session
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="h-12 bg-surface-container rounded-xl w-full flex items-center px-4 justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined text-on-surface-variant">
+                          description
+                        </span>
+                        <div className="h-2 w-32 bg-outline-variant/30 rounded" />
+                      </div>
+                      <div className="h-2 w-12 bg-outline-variant/30 rounded" />
+                    </div>
+
+                    <div className="h-12 bg-surface-container rounded-xl w-full flex items-center px-4 justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined text-on-surface-variant">
+                          folder
+                        </span>
+                        <div className="h-2 w-24 bg-outline-variant/30 rounded" />
+                      </div>
+                      <div className="h-2 w-12 bg-outline-variant/30 rounded" />
+                    </div>
+
+                    <div className="h-32 bg-primary-container/5 rounded-xl border border-dashed border-primary/20 flex flex-col items-center justify-center gap-3">
+                      <span className="material-symbols-outlined text-primary/40 text-3xl">
+                        upload_file
+                      </span>
+                      <span className="text-xs font-bold text-primary/40 uppercase tracking-widest">
+                        Awaiting Agent Input
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rotated glow behind card */}
+                <div className="absolute -z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[110%] h-[90%] bg-gradient-to-br from-secondary/5 to-primary/5 rounded-[4rem] rotate-2" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── CTA Section ── */}
+        <section className="max-w-7xl mx-auto px-6 mb-24">
+          <div className="bg-primary p-12 md:p-20 rounded-[3rem] text-center space-y-8 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-primary-container rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2 opacity-50" />
+            <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary rounded-full blur-[120px] translate-y-1/2 -translate-x-1/2 opacity-20" />
+
+            <h2 className="relative z-10 font-headline font-extrabold text-4xl md:text-5xl text-on-primary tracking-tight">
+              Ready to secure your agent&apos;s mind?
+            </h2>
+            <p className="relative z-10 text-on-primary-container text-xl max-w-2xl mx-auto">
+              Join 10,000+ developers building the future of autonomous
+              intelligence with BitAtlas.
+            </p>
+
+            <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+              <button className="bg-on-primary text-primary px-10 py-5 rounded-2xl font-headline font-bold text-xl hover:bg-primary-fixed transition-all">
+                Create Free Account
+              </button>
+              <button className="text-on-primary px-10 py-5 font-headline font-bold text-xl hover:underline underline-offset-8 transition-all">
+                Contact Sales
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* ── Footer ── */}
+      <footer className="bg-slate-50 w-full">
+        <div className="h-[1px] w-full bg-slate-200" />
+        <div className="max-w-7xl mx-auto px-8 py-12 flex flex-col md:flex-row justify-between items-center gap-8">
+          <div className="flex flex-col items-center md:items-start gap-4">
+            <div className="flex items-center gap-2">
+              <Image
+                src="/logo.jpg"
+                alt="BitAtlas"
+                width={24}
+                height={24}
+                className="rounded"
+              />
+              <span className="text-lg font-bold text-primary font-headline">
+                BitAtlas
+              </span>
+            </div>
+            <p className="text-xs tracking-wide uppercase font-semibold text-slate-500">
+              © 2026 BitAtlas Inc. Secure Intelligence Layer.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-8">
+            {[
+              "Privacy Policy",
+              "Terms of Service",
+              "Security Whitepaper",
+              "Status",
+              "Contact",
+            ].map((link) => (
+              <a
+                key={link}
+                href="#"
+                className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
+              >
+                {link}
+              </a>
+            ))}
           </div>
         </div>
       </footer>

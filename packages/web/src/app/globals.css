@@ -1,30 +1,80 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* ── Color Tokens (Material Design 3 / BitAtlas palette) ── */
+  --color-primary: #002046;
+  --color-primary-container: #1b365d;
+  --color-on-primary: #ffffff;
+  --color-primary-fixed: #d6e3ff;
+  --color-primary-fixed-dim: #aec7f7;
+  --color-on-primary-fixed: #001b3d;
+  --color-on-primary-fixed-variant: #2e476f;
+  --color-on-primary-container: #87a0cd;
+  --color-inverse-primary: #aec7f7;
+
+  --color-secondary: #286487;
+  --color-secondary-container: #9ed5fe;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #205d81;
+  --color-secondary-fixed: #c9e6ff;
+  --color-secondary-fixed-dim: #96cdf5;
+  --color-on-secondary-fixed: #001e2f;
+  --color-on-secondary-fixed-variant: #004c6e;
+
+  --color-tertiary: #002528;
+  --color-tertiary-container: #003c40;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #24aeb8;
+  --color-tertiary-fixed: #7df4ff;
+  --color-tertiary-fixed-dim: #5dd8e2;
+  --color-on-tertiary-fixed: #002022;
+  --color-on-tertiary-fixed-variant: #004f54;
+
+  --color-surface: #f7f9ff;
+  --color-surface-dim: #d7dae0;
+  --color-surface-bright: #f7f9ff;
+  --color-surface-variant: #dfe3e8;
+  --color-on-surface: #181c20;
+  --color-on-surface-variant: #44474e;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f1f4fa;
+  --color-surface-container: #ebeef4;
+  --color-surface-container-high: #e5e8ee;
+  --color-surface-container-highest: #dfe3e8;
+  --color-inverse-surface: #2d3135;
+  --color-inverse-on-surface: #eef1f7;
+
+  --color-background: #f7f9ff;
+  --color-on-background: #181c20;
+
+  --color-outline: #74777f;
+  --color-outline-variant: #c4c6cf;
+
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #93000a;
+
+  --color-surface-tint: #465f88;
+
+  /* ── Typography ── */
+  --font-headline: var(--font-manrope), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  --font-label: var(--font-inter), sans-serif;
+
+  /* ── Border Radius ── */
+  --radius: 0.125rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Glassmorphism utility */
+.glass-effect {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.8s ease-out forwards;
+/* Material Symbols default variation */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
