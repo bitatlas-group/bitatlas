@@ -1,23 +1,29 @@
 {
-  "name": "@legacy-shield/mcp-server",
-  "version": "1.0.1",
-  "description": "Zero-knowledge document vault persistence for AI agents.",
-  "author": "Stephen Ballot",
-  "license": "ISC",
+  "name": "@bitatlas/mcp-server",
+  "version": "1.0.0",
+  "description": "Zero-Knowledge Cloud Drive for Humans and Agents — client-side AES-256-GCM encryption, presigned S3 uploads, 7 MCP tools.",
+  "author": "BitAtlas Group",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/stephenballot-ai/legacy-shield"
+    "url": "https://github.com/bitatlas-group/bitatlas"
   },
   "mcp": {
     "type": "stdio",
     "runtime": "node",
-    "install": "npm install",
-    "build": "npm run build",
-    "main": "packages/mcp-server/index.js",
+    "main": "index.js",
     "env": {
-      "LEGACY_SHIELD_API_KEY": {
-        "description": "Your LegacyShield Agent API Key",
+      "BITATLAS_API_KEY": {
+        "description": "Your BitAtlas API key (generate at bitatlas.com/vault/settings)",
         "required": true
+      },
+      "BITATLAS_MASTER_KEY": {
+        "description": "Your 256-bit hex-encoded master encryption key",
+        "required": true
+      },
+      "BITATLAS_API_URL": {
+        "description": "API base URL (default: https://api.bitatlas.com)",
+        "required": false
       }
     }
   }

@@ -51,9 +51,9 @@ export default function RegisterPage() {
           <Image
             src="/logo-full.jpg"
             alt="BitAtlas"
-            width={140}
-            height={38}
-            className="h-8 w-auto object-contain"
+            width={280}
+            height={76}
+            className="h-16 w-auto object-contain"
           />
         </Link>
       </div>

@@ -14,13 +14,21 @@
   "scripts": {
     "start": "node index.js"
   },
-  "keywords": ["mcp", "encryption", "vault", "zero-knowledge", "ai-agent", "document-storage", "bitatlas"],
+  "keywords": [
+    "mcp",
+    "encryption",
+    "vault",
+    "zero-knowledge",
+    "ai-agent",
+    "document-storage",
+    "bitatlas"
+  ],
   "author": "BitAtlas Group",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.0",
+    "axios": "^1.13.6",
     "dotenv": "^16.4.0"
   },
   "engines": {
