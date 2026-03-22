@@ -1,0 +1,68 @@
+import fs from 'fs';
+import path from 'path';
+import matter from 'gray-matter';
+
+const BLOG_DIR = path.join(process.cwd(), 'content', 'blog');
+
+export interface BlogPost {
+  slug: string;
+  title: string;
+  description: string;
+  date: string;
+  author: string;
+  keywords: string[];
+  readingTime: string;
+  content: string;
+}
+
+export function getAllPosts(): BlogPost[] {
+  if (!fs.existsSync(BLOG_DIR)) return [];
+
+  const files = fs
+    .readdirSync(BLOG_DIR)
+    .filter((f) => f.endsWith('.mdx') || f.endsWith('.md'));
+
+  const posts: BlogPost[] = [];
+
+  for (const file of files) {
+    const raw = fs.readFileSync(path.join(BLOG_DIR, file), 'utf-8');
+    const { data, content } = matter(raw);
+    if (!data.slug) continue;
+    posts.push({
+      slug: data.slug,
+      title: data.title,
+      description: data.description,
+      date: data.date,
+      author: data.author,
+      keywords: data.keywords || [],
+      readingTime: data.readingTime || '5 min read',
+      content,
+    });
+  }
+
+  return posts.sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+}
+
+export function getPostBySlug(slug: string): BlogPost | null {
+  return getAllPosts().find((p) => p.slug === slug) ?? null;
+}
+
+export function getAllSlugs(): { slug: string }[] {
+  if (!fs.existsSync(BLOG_DIR)) return [];
+
+  const files = fs
+    .readdirSync(BLOG_DIR)
+    .filter((f) => f.endsWith('.mdx') || f.endsWith('.md'));
+
+  const slugs: { slug: string }[] = [];
+
+  for (const file of files) {
+    const raw = fs.readFileSync(path.join(BLOG_DIR, file), 'utf-8');
+    const { data } = matter(raw);
+    if (data.slug) slugs.push({ slug: data.slug });
+  }
+
+  return slugs;
+}

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
+
 export default function Home() {
   return (
     <div className="bg-surface font-body text-on-surface selection:bg-secondary-container selection:text-on-secondary-container">
@@ -30,6 +31,12 @@ export default function Home() {
                 {label}
               </a>
             ))}
+            <Link
+              href="/blog"
+              className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors"
+            >
+              Blog
+            </Link>
           </div>
 
           {/* Auth buttons */}

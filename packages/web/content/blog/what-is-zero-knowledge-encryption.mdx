@@ -1,0 +1,119 @@
+---
+title: "How BitAtlas Uses AES-256-GCM for Client-Side Zero-Knowledge Encryption"
+description: "A technical deep-dive into BitAtlas's client-side encryption model: how AES-256-GCM works, why zero-knowledge matters for AI agents, and what happens under the hood when your data is encrypted before it ever leaves your device."
+date: "2026-03-22"
+author: "BitAtlas Engineering"
+slug: "what-is-zero-knowledge-encryption"
+keywords: ["AES-256-GCM", "zero-knowledge encryption", "client-side encryption", "AI agents", "secure storage", "WebCrypto API"]
+readingTime: "8 min read"
+---
+
+## The Problem with Server-Side Encryption
+
+Most cloud storage providers encrypt your data — but they do it on their servers, with keys they control. That means they *could* read your files. So could a rogue employee, a subpoena, or an attacker who gains access to their key management service.
+
+For personal files this is uncomfortable. For AI agent workflows — where agents process sensitive financial records, medical documents, or proprietary business data — it's a non-starter.
+
+BitAtlas takes a different approach: **your data is encrypted before it leaves your device or your agent's environment**. We never see the plaintext. We never hold the keys. That's what "zero-knowledge" actually means.
+
+## Why AES-256-GCM?
+
+BitAtlas uses **AES-256-GCM** (Advanced Encryption Standard, 256-bit key, Galois/Counter Mode) as the symmetric cipher for all file encryption. Here's why this specific combination matters:
+
+**AES-256** provides 256-bit key strength — computationally infeasible to brute-force with any foreseeable classical hardware. It's the algorithm used to protect US government classified information at the TOP SECRET level.
+
+**GCM (Galois/Counter Mode)** adds something critical beyond confidentiality: **authenticated encryption**. GCM produces an authentication tag alongside the ciphertext. When you decrypt, the tag is verified first. If anyone has tampered with even a single byte of the encrypted payload — whether in transit or at rest — decryption fails loudly rather than silently returning corrupted data.
+
+This matters enormously for agent workflows. An AI agent that executes code from storage needs to know that code hasn't been silently altered. With AES-256-GCM, cryptographic integrity is guaranteed by the cipher itself.
+
+## The Encryption Flow
+
+Here's what happens when you or an agent uploads a file to BitAtlas:
+
+### 1. Key Derivation
+
+A 256-bit content encryption key (CEK) is derived using the **Web Crypto API** (`crypto.subtle`) directly in the browser or Node.js runtime — never on our servers:
+
+```javascript
+const key = await crypto.subtle.generateKey(
+  { name: 'AES-GCM', length: 256 },
+  true,          // extractable, so we can wrap it
+  ['encrypt', 'decrypt']
+);
+```
+
+The master key used to wrap per-file CEKs is derived from your password and a random salt using **PBKDF2** (600,000 iterations, SHA-256). The salt is stored alongside your account but the password never leaves your device.
+
+### 2. Generating the IV
+
+AES-GCM requires a 12-byte **initialization vector (IV)** — also called a nonce — that must be unique for every encryption operation using the same key. We generate this using the cryptographically secure random number generator:
+
+```javascript
+const iv = crypto.getRandomValues(new Uint8Array(12));
+```
+
+**Reusing an IV with the same key is catastrophic** in GCM mode — it completely breaks both confidentiality and integrity. BitAtlas generates a fresh random IV for every file version, making IV collision statistically impossible.
+
+### 3. Encrypting the Payload
+
+The file bytes are encrypted in the browser using the derived key and fresh IV:
+
+```javascript
+const ciphertext = await crypto.subtle.encrypt(
+  { name: 'AES-GCM', iv, tagLength: 128 },
+  key,
+  plaintext       // ArrayBuffer of original file bytes
+);
+// ciphertext = encrypted_bytes + 16-byte authentication tag (appended)
+```
+
+The resulting buffer contains the encrypted payload with the 128-bit GCM authentication tag appended. The tag is computed over the ciphertext and any Additional Authenticated Data (AAD) — in our case, the file's metadata (name, size, upload timestamp). This means metadata tampering is also detectable.
+
+### 4. What Leaves Your Device
+
+Only this reaches BitAtlas servers:
+
+- The IV (12 bytes, not secret — required for decryption)
+- The ciphertext + authentication tag (meaningless without the key)
+- Encrypted metadata
+- The wrapped CEK (encrypted with your account's public key or master key)
+
+The plaintext key material never leaves your runtime. Our servers store opaque blobs that we cannot decrypt.
+
+## Zero-Knowledge for AI Agents
+
+When an AI agent (running in LangChain, CrewAI, or a custom loop) needs to read or write files, the same model applies. The agent authenticates with a scoped **API token** that authorizes it to request pre-signed upload/download URLs. The encryption and decryption happen in the agent's runtime using the SDK:
+
+```python
+from bitatlas import Client
+
+client = Client(token=os.environ["BITATLAS_TOKEN"])
+
+# Encrypted client-side, uploaded as ciphertext
+client.vault.upload("agent-state.json", data=json_bytes)
+
+# Downloaded as ciphertext, decrypted client-side
+data = client.vault.download("agent-state.json")
+```
+
+The SDK handles key management, IV generation, and AES-256-GCM encryption transparently. Critically, the agent's encryption key is never transmitted to BitAtlas — only the ciphertext arrives on our infrastructure.
+
+## Integrity Verification
+
+Because GCM includes authenticated encryption, any bit flip in stored ciphertext — accidental or malicious — causes decryption to throw an error. Combined with cryptographic signatures on file metadata, BitAtlas provides:
+
+- **Confidentiality**: Only key holders can read plaintext
+- **Integrity**: Tampered ciphertext is detected before execution
+- **Authenticity**: The uploader's identity is bound to the encrypted blob
+
+This is why the BitAtlas dashboard displays "AES-256-GCM Active" — not as marketing, but as a precise statement about the cipher suite protecting your data at this moment.
+
+## What Zero-Knowledge Actually Guarantees
+
+Zero-knowledge means BitAtlas employees cannot read your files. It does not mean BitAtlas is unbreakable — it means the security boundary is your key, not our server. If you lose your password and have no recovery key configured, your data is unrecoverable by design.
+
+For developers building on BitAtlas, this is a feature: you can confidently store sensitive agent state, API credentials, and user documents knowing that a breach of BitAtlas infrastructure exposes only encrypted blobs — not your users' data.
+
+---
+
+*Questions about our encryption implementation? Read the [Security Whitepaper](#) or open a discussion in the developer forum.*
