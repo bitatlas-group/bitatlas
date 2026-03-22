@@ -339,7 +339,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         api.get('/vault/files'),
       ]);
       const files = filesRes.data.files || [];
-      const totalBytes = files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+      const totalBytes = files.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0);
 
       return ok(JSON.stringify({
         status: statusRes.data.status,
@@ -395,7 +395,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         api.get(`/vault/files/${args.file_id}/download-url`),
       ]);
       const meta = metaRes.data;
-      const downloadUrl = urlRes.data.url;
+      const downloadUrl = urlRes.data.downloadUrl;
+      const encMeta = urlRes.data.encryptionMetadata;
 
       // Download the encrypted blob (no auth headers needed for presigned URLs)
       const blobRes = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
@@ -416,10 +417,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const decrypted = decryptFileBuffer(
         encryptedBlob,
-        meta.ownerEncryptedKey,
-        meta.ownerIV,
-        meta.fileIV,
-        meta.authTag,
+        encMeta.ownerEncryptedKey,
+        encMeta.ownerIv,
+        encMeta.fileIv,
+        encMeta.authTag,
         masterKey
       );
 
@@ -464,15 +465,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Encrypt client-side
       const encrypted = encryptFileBuffer(fileBuffer, masterKey);
 
-      // Generate a unique S3 object key
-      const storageKey = `files/${crypto.randomUUID()}`;
-
-      // Get presigned upload URL
+      // Get presigned upload URL (API generates the storage key server-side)
       const urlRes = await api.post('/vault/files/upload-url', {
-        key: storageKey,
+        fileName,
         contentType: 'application/octet-stream',
       });
-      const uploadUrl = urlRes.data.url;
+      const { uploadUrl, storageKey } = urlRes.data;
 
       // Upload encrypted blob directly to S3 (no auth headers for presigned PUT)
       await axios.put(uploadUrl, encrypted.encryptedBlob, {
@@ -489,8 +487,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         originalSizeBytes: fileBuffer.length,
         storageKey,
         ownerEncryptedKey: encrypted.ownerEncryptedKey,
-        ownerIV: encrypted.ownerIV,
-        fileIV: encrypted.fileIV,
+        ownerIv: encrypted.ownerIV,
+        fileIv: encrypted.fileIV,
         authTag: encrypted.authTag,
       };
       if (args.folder_id) payload.folderId = args.folder_id;
