@@ -20,6 +20,8 @@ const envSchema = z.object({
   MINIO_SECRET_KEY: z.string().min(1),
   MINIO_BUCKET: z.string().default('bitatlas-vault'),
   MINIO_PRESIGNED_URL_EXPIRY: z.coerce.number().default(3600),
+  // Public-facing MinIO base URL for URL rewriting (e.g. MINIO_PUBLIC_URL=https://s3.bitatlas.com)
+  MINIO_PUBLIC_URL: z.string().default(''),
 
   CORS_ORIGINS: z.string().default('http://localhost:3001'),
 

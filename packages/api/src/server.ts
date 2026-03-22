@@ -17,6 +17,9 @@ import statusRoutes from './routes/status';
 
 const app = express();
 
+// Trust the first proxy (Nginx) so express-rate-limit can read X-Forwarded-For
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet());
 

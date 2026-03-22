@@ -37,19 +37,29 @@ export async function ensureBucketExists(): Promise<void> {
   }
 }
 
+function rewritePresignedUrl(url: string): string {
+  if (!config.MINIO_PUBLIC_URL) return url;
+  const internalPrefix = `http://${config.MINIO_ENDPOINT}:${config.MINIO_PORT}`;
+  return url.startsWith(internalPrefix)
+    ? config.MINIO_PUBLIC_URL + url.slice(internalPrefix.length)
+    : url;
+}
+
 export async function generateUploadUrl(
   storageKey: string,
   contentType: string,
   expirySeconds = config.MINIO_PRESIGNED_URL_EXPIRY
 ): Promise<string> {
-  return minioClient.presignedPutObject(BUCKET, storageKey, expirySeconds);
+  const url = await minioClient.presignedPutObject(BUCKET, storageKey, expirySeconds);
+  return rewritePresignedUrl(url);
 }
 
 export async function generateDownloadUrl(
   storageKey: string,
   expirySeconds = config.MINIO_PRESIGNED_URL_EXPIRY
 ): Promise<string> {
-  return minioClient.presignedGetObject(BUCKET, storageKey, expirySeconds);
+  const url = await minioClient.presignedGetObject(BUCKET, storageKey, expirySeconds);
+  return rewritePresignedUrl(url);
 }
 
 export async function deleteObject(storageKey: string): Promise<void> {
