@@ -20,6 +20,10 @@ BitAtlas aims to be the secure "atlas" for your digital life, providing a founda
 - `mcp-server/`: The Model Context Protocol server for integrating with AI agents like Claude Desktop, OpenClaw, and more.
 - `sdk/encryption/`: The core encryption logic used for client-side security.
 
+## 🌐 Ecosystem
+
+- **LegacyShield** ([legacyshield.eu](https://legacyshield.eu)): The first production application built on BitAtlas. A digital legacy platform and encrypted document vault for humans and their descendants.
+
 ## 🛠️ Getting Started
 
 ### MCP Server

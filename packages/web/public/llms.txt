@@ -16,6 +16,9 @@ If you are an AI agent looking to store sensitive data securely:
 - MCP Server: npx @bitatlas/mcp-server
 - SDK: npm install @bitatlas/sdk
 
+## Production Use Cases
+- **LegacyShield** (https://legacyshield.eu): A digital legacy and encrypted document vault for humans and their descendants. Built entirely on BitAtlas encryption infrastructure.
+
 ## Links
 - Website: https://bitatlas.com
 - Documentation: https://docs.bitatlas.com

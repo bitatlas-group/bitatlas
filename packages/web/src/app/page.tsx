@@ -422,6 +422,32 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* ── Trusted By Section ── */}
+        <section className="max-w-7xl mx-auto px-6 mb-24">
+          <div className="text-center space-y-8">
+            <h3 className="font-headline font-bold text-sm uppercase tracking-[0.2em] text-on-surface-variant/60">
+              Trusted by the next generation of apps
+            </h3>
+            <div className="flex justify-center items-center gap-12 grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all duration-500">
+              <a 
+                href="https://legacyshield.eu" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex flex-col items-center gap-3 group"
+              >
+                <div className="relative h-12 w-48 flex items-center justify-center">
+                  <span className="font-headline font-black text-2xl tracking-tighter text-primary group-hover:text-secondary transition-colors">
+                    LegacyShield
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/40 group-hover:text-primary transition-colors">
+                  First Production Customer
+                </span>
+              </a>
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* ── Footer ── */}
@@ -443,7 +469,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="flex flex-wrap justify-center gap-8">
+          <div className="flex flex-wrap justify-center gap-8 items-center">
             {[
               "Privacy Policy",
               "Terms of Service",
@@ -459,6 +485,13 @@ export default function Home() {
                 {link}
               </a>
             ))}
+            <a 
+              href="https://legacyshield.eu" 
+              target="_blank" 
+              className="text-xs tracking-wide uppercase font-bold text-primary hover:text-secondary transition-colors"
+            >
+              Used by LegacyShield
+            </a>
           </div>
         </div>
       </footer>
