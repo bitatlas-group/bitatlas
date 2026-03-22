@@ -4,6 +4,8 @@
 
 BitAtlas is a next-generation cloud storage platform designed with privacy and AI agents in mind. It provides a secure, zero-knowledge environment where your most sensitive documents are encrypted client-side and accessible only to you and the agents you authorize.
 
+[![@bitatlas/mcp-server MCP server](https://glama.ai/mcp/servers/bitatlas-group/bitatlas/badges/card.svg)](https://glama.ai/mcp/servers/bitatlas-group/bitatlas)
+
 ## 🚀 Vision
 
 BitAtlas aims to be the secure "atlas" for your digital life, providing a foundation for both human productivity and AI agent assistance without compromising on privacy.
