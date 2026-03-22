@@ -12,9 +12,9 @@ export default function Home() {
             <Image
               src="/logo-full.jpg"
               alt="BitAtlas — Secure Cloud for Humans & Agents"
-              width={160}
-              height={44}
-              className="h-8 w-auto object-contain"
+              width={240}
+              height={66}
+              className="h-12 w-auto object-contain"
               priority
             />
           </div>
@@ -459,9 +459,9 @@ export default function Home() {
               <Image
                 src="/logo-full.jpg"
                 alt="BitAtlas"
-                width={140}
-                height={38}
-                className="h-7 w-auto object-contain"
+                width={200}
+                height={55}
+                className="h-10 w-auto object-contain"
               />
             </div>
             <p className="text-xs tracking-wide uppercase font-semibold text-slate-500">

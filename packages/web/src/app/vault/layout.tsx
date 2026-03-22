@@ -78,9 +78,9 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
             <Image
               src="/logo-full.jpg"
               alt="BitAtlas"
-              width={120}
-              height={33}
-              className="h-7 w-auto object-contain"
+              width={200}
+              height={55}
+              className="h-10 w-auto object-contain"
             />
           </Link>
         </div>
