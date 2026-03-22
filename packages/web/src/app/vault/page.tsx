@@ -113,10 +113,8 @@ function VaultContent() {
       setUploadStatus('Encrypting…');
       const encrypted = await encryptFile(file);
 
-      const storageKey = crypto.randomUUID();
-
       setUploadStatus('Getting upload URL…');
-      const { url } = await vaultApi.getUploadUrl(storageKey, file.type || 'application/octet-stream');
+      const { url, storageKey } = await vaultApi.getUploadUrl(file.name, file.type || 'application/octet-stream');
 
       setUploadStatus('Uploading…');
       const encryptedBuffer = await encrypted.encryptedBlob.arrayBuffer();

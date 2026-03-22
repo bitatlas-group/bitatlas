@@ -123,13 +123,14 @@ export const authApi = {
 
 // ── Vault file endpoints ──────────────────────────────────────────────────────
 export const vaultApi = {
-  listFiles: (params?: { folderId?: string; category?: string; search?: string }) => {
+  listFiles: async (params?: { folderId?: string; category?: string; search?: string }) => {
     const qs = new URLSearchParams();
     if (params?.folderId) qs.set('folderId', params.folderId);
     if (params?.category) qs.set('category', params.category);
     if (params?.search) qs.set('search', params.search);
     const query = qs.toString();
-    return request<VaultFile[]>(`/vault/files${query ? `?${query}` : ''}`);
+    const res = await request<{ files: VaultFile[]; total: number }>(`/vault/files${query ? `?${query}` : ''}`);
+    return res.files;
   },
 
   getFile: (id: string) => request<VaultFile>(`/vault/files/${id}`),
@@ -143,14 +144,18 @@ export const vaultApi = {
   deleteFile: (id: string) =>
     request<void>(`/vault/files/${id}`, { method: 'DELETE' }),
 
-  getUploadUrl: (key: string, contentType: string) =>
-    request<{ url: string }>('/vault/files/upload-url', {
+  getUploadUrl: async (fileName: string, contentType: string) => {
+    const res = await request<{ uploadUrl: string; storageKey: string }>('/vault/files/upload-url', {
       method: 'POST',
-      body: JSON.stringify({ key, contentType }),
-    }),
+      body: JSON.stringify({ fileName, contentType }),
+    });
+    return { url: res.uploadUrl, storageKey: res.storageKey };
+  },
 
-  getDownloadUrl: (id: string) =>
-    request<{ url: string }>(`/vault/files/${id}/download-url`),
+  getDownloadUrl: async (id: string) => {
+    const res = await request<{ downloadUrl: string; encryptionMetadata: any }>(`/vault/files/${id}/download-url`);
+    return { url: res.downloadUrl, encryptionMetadata: res.encryptionMetadata };
+  },
 };
 
 // ── Folder endpoints ──────────────────────────────────────────────────────────
