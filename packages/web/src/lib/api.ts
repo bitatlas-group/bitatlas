@@ -160,7 +160,10 @@ export const vaultApi = {
 
 // ── Folder endpoints ──────────────────────────────────────────────────────────
 export const foldersApi = {
-  list: () => request<Folder[]>('/folders'),
+  list: async () => {
+    const res = await request<{ folders: Folder[] }>('/folders');
+    return res.folders;
+  },
 
   create: (name: string, parentId?: string) =>
     request<Folder>('/folders', {
@@ -179,7 +182,10 @@ export const foldersApi = {
 
 // ── API Key endpoints ─────────────────────────────────────────────────────────
 export const keysApi = {
-  list: () => request<ApiKeyRecord[]>('/keys'),
+  list: async () => {
+    const res = await request<{ keys: ApiKeyRecord[] }>('/keys');
+    return res.keys;
+  },
 
   create: (name: string) =>
     request<{ key: ApiKeyRecord; apiKey: string }>('/keys', {
