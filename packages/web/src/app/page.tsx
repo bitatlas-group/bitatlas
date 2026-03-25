@@ -22,21 +22,9 @@ export default function Home() {
 
           {/* Nav links */}
           <div className="hidden md:flex gap-8 items-center">
-            {["Product", "Pricing", "Developers"].map((label) => (
-              <a
-                key={label}
-                href="#"
-                className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors"
-              >
-                {label}
-              </a>
-            ))}
-            <Link
-              href="/blog"
-              className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors"
-            >
-              Blog
-            </Link>
+            <a href="#features" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Product</a>
+            <a href="#why" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Why BitAtlas</a>
+            <Link href="/blog" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Blog</Link>
           </div>
 
           {/* Auth buttons */}
@@ -214,7 +202,7 @@ export default function Home() {
         </section>
 
         {/* ── Features Bento Grid ── */}
-        <section className="bg-surface-container-low py-24">
+        <section id="features" className="bg-surface-container-low py-24">
           <div className="max-w-7xl mx-auto px-6">
             <div className="text-center mb-16 space-y-4">
               <h2 className="font-headline font-extrabold text-4xl text-primary tracking-tight">
@@ -277,7 +265,7 @@ export default function Home() {
         </section>
 
         {/* ── Why BitAtlas ── */}
-        <section className="py-32 bg-surface">
+        <section id="why" className="py-32 bg-surface">
           <div className="max-w-7xl mx-auto px-6">
             <div className="flex flex-col lg:flex-row gap-20 items-center">
               {/* Left: copy + bullet list */}
@@ -492,6 +480,12 @@ export default function Home() {
                 {link}
               </a>
             ))}
+            <a
+              href="/blog"
+              className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
+            >
+              Blog
+            </a>
             <a 
               href="https://legacyshield.eu" 
               target="_blank" 
