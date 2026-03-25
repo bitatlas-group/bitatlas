@@ -474,7 +474,7 @@ export default function Home() {
             ].map((link) => (
               <a
                 key={link}
-                href="#"
+                href="/security"
                 className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
               >
                 {link}
