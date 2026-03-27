@@ -42,7 +42,10 @@ export default function VaultPage() {
     <Suspense
       fallback={
         <div className="flex items-center justify-center h-64">
-          <span className="material-symbols-outlined animate-spin text-on-surface-variant" style={{ fontSize: '32px' }}>
+          <span
+            className="material-symbols-outlined animate-spin"
+            style={{ fontSize: '32px', color: '#6B7280' }}
+          >
             progress_activity
           </span>
         </div>
@@ -77,10 +80,7 @@ function VaultContent() {
     setLoading(true);
     setError(null);
     try {
-      const data = await vaultApi.listFiles({
-        folderId,
-        search: search || undefined,
-      });
+      const data = await vaultApi.listFiles({ folderId, search: search || undefined });
       setFiles(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load files');
@@ -134,7 +134,10 @@ function VaultContent() {
       const encrypted = await encryptFile(file);
 
       setUploadStatus('Getting upload URL…');
-      const { url, storageKey } = await vaultApi.getUploadUrl(file.name, file.type || 'application/octet-stream');
+      const { url, storageKey } = await vaultApi.getUploadUrl(
+        file.name,
+        file.type || 'application/octet-stream'
+      );
 
       setUploadStatus('Uploading…');
       const encryptedBuffer = await encrypted.encryptedBlob.arrayBuffer();
@@ -210,14 +213,15 @@ function VaultContent() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full">
-      {/* Top bar */}
-      <div className="px-8 py-6 bg-surface-container-low border-b border-outline-variant/30">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 max-w-md relative">
+    <div style={{ backgroundColor: '#F3F1EE', minHeight: '100vh' }} className="flex flex-col">
+      {/* Search row */}
+      <div className="px-4 pt-5">
+        <div className="flex items-center gap-3">
+          {/* Search input — 80% width */}
+          <div className="relative" style={{ flex: '0 0 calc(100% - 60px)' }}>
             <span
-              className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant"
-              style={{ fontSize: '18px' }}
+              className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+              style={{ fontSize: '20px', color: '#9CA3AF' }}
             >
               search
             </span>
@@ -225,149 +229,181 @@ function VaultContent() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search files…"
-              className="w-full bg-surface-container-highest rounded-xl pl-9 pr-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+              placeholder="Search files..."
+              className="w-full bg-white rounded-xl pl-11 pr-4 outline-none focus:ring-2 focus:ring-blue-100 transition-all"
+              style={{ height: '48px', fontSize: '15px', color: '#1A2332' }}
             />
           </div>
 
-          <div className="flex items-center gap-3">
-            {uploading && (
-              <div className="flex items-center gap-2 bg-tertiary-container px-3 py-2 rounded-xl">
-                <span
-                  className="material-symbols-outlined text-tertiary-fixed-dim animate-spin"
-                  style={{ fontSize: '16px' }}
-                >
-                  progress_activity
-                </span>
-                <span className="text-xs font-bold text-tertiary-fixed-dim">{uploadStatus}</span>
-              </div>
-            )}
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="flex items-center gap-2 bg-gradient-to-br from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-headline font-semibold text-sm hover:brightness-110 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+          {/* Upload button — 48×48 dark navy */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title={uploading ? uploadStatus : 'Upload file'}
+            className="flex items-center justify-center transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+            style={{
+              width: '48px',
+              height: '48px',
+              backgroundColor: '#1A2332',
+              borderRadius: '10px',
+            }}
+          >
+            {uploading ? (
+              <span
+                className="material-symbols-outlined animate-spin"
+                style={{ fontSize: '20px', color: 'white' }}
+              >
+                progress_activity
+              </span>
+            ) : (
+              <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'white' }}>
                 upload_file
               </span>
-              Upload
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Sort row */}
+      <div className="px-4 mt-4 flex items-center gap-2">
+        <span
+          style={{
+            fontSize: '12px',
+            fontWeight: '600',
+            color: '#374151',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          Sort
+        </span>
+        {(['date', 'name', 'size'] as SortField[]).map((field) => {
+          const active = sortField === field;
+          const label = field.charAt(0).toUpperCase() + field.slice(1);
+          const arrow = sortDir === 'desc' ? ' ↓' : ' ↑';
+          return (
+            <button
+              key={field}
+              onClick={() => handleSort(field)}
+              style={
+                active
+                  ? {
+                      backgroundColor: 'white',
+                      border: '1px solid #D1D5DB',
+                      borderRadius: '999px',
+                      padding: '4px 14px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: '#1A2332',
+                      cursor: 'pointer',
+                    }
+                  : {
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px 8px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: '#6B7280',
+                      cursor: 'pointer',
+                    }
+              }
+            >
+              {active ? `${label}${arrow}` : label}
             </button>
-          </div>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={handleFileSelected}
-          />
-        </div>
-
-        {/* Sort bar */}
-        <div className="flex items-center gap-2 mt-4">
-          <span className="text-xs text-on-surface-variant mr-1">Sort:</span>
-          {(['date', 'name', 'size'] as SortField[]).map((field) => {
-            const active = sortField === field;
-            const label = field.charAt(0).toUpperCase() + field.slice(1);
-            return (
-              <button
-                key={field}
-                onClick={() => handleSort(field)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  active
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
-                }`}
-              >
-                {label}
-                {active && (
-                  <span
-                    className="material-symbols-outlined"
-                    style={{
-                      fontSize: '14px',
-                      transform: sortDir === 'asc' ? 'rotate(180deg)' : undefined,
-                      display: 'inline-block',
-                      transition: 'transform 0.2s',
-                    }}
-                  >
-                    arrow_downward
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+          );
+        })}
       </div>
 
       {/* Info banner */}
       {!bannerDismissed && (
-        <div className="mx-8 mt-4 flex items-center gap-3 bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-3 rounded-xl">
-          <span className="material-symbols-outlined text-blue-500" style={{ fontSize: '18px' }}>
-            folder_open
+        <div
+          className="mx-4 mt-4 flex items-center gap-3 rounded-xl px-4 py-3"
+          style={{ backgroundColor: '#F9DDD8' }}
+        >
+          <span
+            className="material-symbols-outlined shrink-0"
+            style={{ fontSize: '18px', color: '#8B4040' }}
+          >
+            info
           </span>
-          <span>
-            <span className="font-semibold">Move to folder</span> — folder organisation is coming soon.
+          <span style={{ fontSize: '14px', color: '#8B4040', flex: 1 }}>
+            Move to folder coming soon
           </span>
           <button
             onClick={() => setBannerDismissed(true)}
-            className="ml-auto hover:opacity-70 transition-opacity"
             aria-label="Dismiss"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#8B4040',
+              fontSize: '20px',
+              lineHeight: 1,
+              padding: '0 2px',
+            }}
           >
-            <span className="material-symbols-outlined text-blue-400" style={{ fontSize: '16px' }}>
-              close
-            </span>
+            ×
           </button>
         </div>
       )}
 
       {/* Error banner */}
       {error && (
-        <div className="mx-8 mt-4 bg-error-container text-on-error-container text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-          <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
+        <div
+          className="mx-4 mt-4 flex items-center gap-2 rounded-xl px-4 py-3"
+          style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}
+        >
+          <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px' }}>
             error
           </span>
-          {error}
+          <span style={{ fontSize: '14px', flex: 1 }}>{error}</span>
           <button
             onClick={() => setError(null)}
-            className="ml-auto hover:opacity-70 transition-opacity"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#991B1B',
+              fontSize: '20px',
+              lineHeight: 1,
+              padding: '0 2px',
+            }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-              close
-            </span>
+            ×
           </button>
         </div>
       )}
 
-      {/* File area */}
-      <div className="flex-1 overflow-auto px-8 py-6">
+      {/* File list */}
+      <div className="flex-1 px-4 mt-4 pb-6 flex flex-col gap-3">
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="flex flex-col items-center gap-3">
               <span
-                className="material-symbols-outlined text-on-surface-variant animate-spin"
-                style={{ fontSize: '32px' }}
+                className="material-symbols-outlined animate-spin"
+                style={{ fontSize: '32px', color: '#6B7280' }}
               >
                 progress_activity
               </span>
-              <p className="text-sm text-on-surface-variant">Loading your vault…</p>
+              <p style={{ fontSize: '14px', color: '#6B7280' }}>Loading your vault…</p>
             </div>
           </div>
         ) : sortedFiles.length === 0 ? (
           <EmptyState onUpload={() => fileInputRef.current?.click()} />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {sortedFiles.map((file) => (
-              <FileCard
-                key={file.id}
-                file={file}
-                downloading={downloading === file.id}
-                onDownload={() => handleDownload(file)}
-                onDelete={() => handleDelete(file.id)}
-              />
-            ))}
-          </div>
+          sortedFiles.map((file) => (
+            <FileCard
+              key={file.id}
+              file={file}
+              downloading={downloading === file.id}
+              onDownload={() => handleDownload(file)}
+              onDelete={() => handleDelete(file.id)}
+            />
+          ))
         )}
       </div>
+
+      <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelected} />
     </div>
   );
 }
@@ -384,80 +420,167 @@ function FileCard({
   onDownload: () => void;
   onDelete: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const icon = getFileIcon(file.mimeType);
 
   return (
-    <div className="bg-surface-container-lowest rounded-2xl p-4 flex flex-col gap-3 group hover:shadow-lg hover:shadow-primary/5 transition-all">
-      {/* Top row: icon + name/size + actions */}
-      <div className="flex items-start gap-3">
-        {/* File type icon */}
-        <div className="w-11 h-11 shrink-0 rounded-xl bg-primary/8 flex items-center justify-center">
+    <div
+      className="rounded-2xl relative"
+      style={{
+        backgroundColor: 'white',
+        padding: '20px',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
+      }}
+    >
+      {/* Row 1: file icon (top-left) + three-dot menu (top-right) */}
+      <div className="flex items-start justify-between">
+        <div
+          className="flex items-center justify-center rounded-lg shrink-0"
+          style={{ width: '44px', height: '44px', backgroundColor: '#F3F4F6' }}
+        >
           <span
-            className="material-symbols-outlined text-primary"
-            style={{ fontSize: '22px', fontVariationSettings: "'FILL' 1" }}
+            className="material-symbols-outlined"
+            style={{
+              fontSize: '24px',
+              color: '#374151',
+              fontVariationSettings: "'FILL' 1",
+            }}
           >
             {icon}
           </span>
         </div>
 
-        {/* Name + size */}
-        <div className="flex-1 min-w-0">
-          <p
-            className="font-headline font-bold text-sm text-on-surface leading-tight line-clamp-2"
-            title={file.name}
-          >
-            {file.name}
-          </p>
-          <p className="text-xs text-on-surface-variant mt-0.5">
-            {formatBytes(file.originalSizeBytes)}
-          </p>
-        </div>
-
-        {/* Actions — visible on hover */}
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        {/* Three-dot overflow menu */}
+        <div className="relative">
           <button
-            onClick={onDownload}
-            disabled={downloading}
-            title="Download & decrypt"
-            className="w-7 h-7 rounded-lg bg-surface-container flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all disabled:opacity-50"
+            onClick={() => setMenuOpen((v) => !v)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px',
+              color: '#9CA3AF',
+            }}
+            aria-label="More options"
           >
-            {downloading ? (
-              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '13px' }}>
-                progress_activity
-              </span>
-            ) : (
-              <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
-                download
-              </span>
-            )}
-          </button>
-          <button
-            onClick={onDelete}
-            title="Delete"
-            className="w-7 h-7 rounded-lg bg-surface-container flex items-center justify-center hover:bg-error-container hover:text-on-error-container transition-all"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
-              delete
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
+              more_vert
             </span>
           </button>
+
+          {menuOpen && (
+            <>
+              {/* Backdrop to close on outside click */}
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setMenuOpen(false)}
+              />
+              <div
+                className="absolute right-0 top-8 rounded-xl z-20 overflow-hidden"
+                style={{
+                  backgroundColor: 'white',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                  minWidth: '140px',
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDownload();
+                  }}
+                  disabled={downloading}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  style={{
+                    fontSize: '14px',
+                    color: '#1A2332',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {downloading ? (
+                    <span
+                      className="material-symbols-outlined animate-spin"
+                      style={{ fontSize: '16px' }}
+                    >
+                      progress_activity
+                    </span>
+                  ) : (
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
+                      download
+                    </span>
+                  )}
+                  Download
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDelete();
+                  }}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-red-50 transition-colors"
+                  style={{
+                    fontSize: '14px',
+                    color: '#DC2626',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
+                    delete
+                  </span>
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Upload date */}
-      <p className="text-xs text-on-surface-variant/70">
-        Uploaded {formatDate(file.createdAt)}
+      {/* Row 2: file name */}
+      <p
+        className="mt-3 font-bold leading-snug line-clamp-2"
+        style={{ fontSize: '16px', color: '#111827' }}
+        title={file.name}
+      >
+        {file.name}
       </p>
 
-      {/* Bottom row: ENCRYPTED badge */}
-      <div className="flex justify-end">
-        <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full">
+      {/* Row 3: size (left) + date (right) */}
+      <div className="flex items-center justify-between mt-1.5">
+        <span style={{ fontSize: '13px', color: '#9CA3AF' }}>
+          {formatBytes(file.originalSizeBytes)}
+        </span>
+        <span style={{ fontSize: '13px', color: '#9CA3AF' }}>{formatDate(file.createdAt)}</span>
+      </div>
+
+      {/* Row 4: ENCRYPTED badge */}
+      <div className="mt-3">
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full"
+          style={{ backgroundColor: '#0C5C4C', padding: '4px 12px' }}
+        >
           <span
             className="material-symbols-outlined"
-            style={{ fontSize: '11px', fontVariationSettings: "'FILL' 1" }}
+            style={{
+              fontSize: '12px',
+              color: 'white',
+              fontVariationSettings: "'FILL' 1",
+            }}
           >
             lock
           </span>
-          Encrypted
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: '700',
+              color: 'white',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+            }}
+          >
+            Encrypted
+          </span>
         </span>
       </div>
     </div>
@@ -468,24 +591,40 @@ function FileCard({
 function EmptyState({ onUpload }: { onUpload: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-96 gap-6">
-      <div className="w-24 h-24 rounded-[2rem] bg-primary/5 flex items-center justify-center">
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: '96px',
+          height: '96px',
+          borderRadius: '32px',
+          backgroundColor: 'rgba(26,35,50,0.06)',
+        }}
+      >
         <span
-          className="material-symbols-outlined text-primary/30"
-          style={{ fontSize: '48px' }}
+          className="material-symbols-outlined"
+          style={{ fontSize: '48px', color: 'rgba(26,35,50,0.25)' }}
         >
           shield_lock
         </span>
       </div>
-      <div className="text-center space-y-2">
-        <h3 className="font-headline font-bold text-xl text-primary">Your vault is empty</h3>
-        <p className="text-on-surface-variant text-sm max-w-xs">
+      <div className="text-center" style={{ maxWidth: '280px' }}>
+        <h3 className="font-bold text-xl" style={{ color: '#1A2332' }}>
+          Your vault is empty
+        </h3>
+        <p className="mt-2" style={{ fontSize: '14px', color: '#6B7280' }}>
           Upload files to encrypt them client-side with AES-256-GCM before they ever reach our
           servers.
         </p>
       </div>
       <button
         onClick={onUpload}
-        className="flex items-center gap-2 bg-gradient-to-br from-primary to-primary-container text-on-primary px-6 py-3 rounded-xl font-headline font-semibold text-sm hover:brightness-110 transition-all"
+        className="flex items-center gap-2 rounded-xl font-semibold transition-all hover:opacity-90"
+        style={{
+          backgroundColor: '#1A2332',
+          color: 'white',
+          padding: '12px 24px',
+          fontSize: '14px',
+        }}
       >
         <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
           upload_file
