@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState, useCallback } from 'react';
+import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
@@ -33,14 +33,8 @@ function getFileIcon(mimeType: string): string {
   return 'insert_drive_file';
 }
 
-const CATEGORIES = [
-  { value: '', label: 'All' },
-  { value: 'identity', label: 'Identity' },
-  { value: 'financial', label: 'Financial' },
-  { value: 'legal', label: 'Legal' },
-  { value: 'medical', label: 'Medical' },
-  { value: 'digital', label: 'Digital' },
-];
+type SortField = 'date' | 'name' | 'size';
+type SortDir = 'asc' | 'desc';
 
 // ── Root export — wraps in Suspense for useSearchParams ──────────────────────
 export default function VaultPage() {
@@ -69,11 +63,13 @@ function VaultContent() {
   const [files, setFiles] = useState<VaultFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -83,7 +79,6 @@ function VaultContent() {
     try {
       const data = await vaultApi.listFiles({
         folderId,
-        category: category || undefined,
         search: search || undefined,
       });
       setFiles(data);
@@ -92,17 +87,42 @@ function VaultContent() {
     } finally {
       setLoading(false);
     }
-  }, [folderId, category, search]);
+  }, [folderId, search]);
 
   useEffect(() => {
     if (user) loadFiles();
   }, [user, loadFiles]);
 
+  // ── Sorted files ────────────────────────────────────────────────────────────
+  const sortedFiles = useMemo(() => {
+    const sorted = [...files].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'date') {
+        cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sortField === 'name') {
+        cmp = a.name.localeCompare(b.name);
+      } else if (sortField === 'size') {
+        cmp = a.originalSizeBytes - b.originalSizeBytes;
+      }
+      return sortDir === 'desc' ? -cmp : cmp;
+    });
+    return sorted;
+  }, [files, sortField, sortDir]);
+
+  // ── Sort toggle ─────────────────────────────────────────────────────────────
+  function handleSort(field: SortField) {
+    if (field === sortField) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir(field === 'name' ? 'asc' : 'desc');
+    }
+  }
+
   // ── Upload flow ─────────────────────────────────────────────────────────────
   async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!e.target.files) return;
-    // Reset input so same file can be re-uploaded
     e.target.value = '';
     if (!file) return;
 
@@ -192,7 +212,7 @@ function VaultContent() {
   return (
     <div className="flex flex-col h-full">
       {/* Top bar */}
-      <div className="px-8 py-6 bg-surface-container-low">
+      <div className="px-8 py-6 bg-surface-container-low border-b border-outline-variant/30">
         <div className="flex items-center justify-between gap-4">
           <div className="flex-1 max-w-md relative">
             <span
@@ -243,23 +263,62 @@ function VaultContent() {
           />
         </div>
 
-        {/* Category chips */}
-        <div className="flex items-center gap-2 mt-4 flex-wrap">
-          {CATEGORIES.map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => setCategory(value)}
-              className={`px-3 py-1.5 rounded-full text-xs font-headline font-semibold transition-all ${
-                category === value
-                  ? 'bg-primary text-on-primary'
-                  : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        {/* Sort bar */}
+        <div className="flex items-center gap-2 mt-4">
+          <span className="text-xs text-on-surface-variant mr-1">Sort:</span>
+          {(['date', 'name', 'size'] as SortField[]).map((field) => {
+            const active = sortField === field;
+            const label = field.charAt(0).toUpperCase() + field.slice(1);
+            return (
+              <button
+                key={field}
+                onClick={() => handleSort(field)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  active
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
+                }`}
+              >
+                {label}
+                {active && (
+                  <span
+                    className="material-symbols-outlined"
+                    style={{
+                      fontSize: '14px',
+                      transform: sortDir === 'asc' ? 'rotate(180deg)' : undefined,
+                      display: 'inline-block',
+                      transition: 'transform 0.2s',
+                    }}
+                  >
+                    arrow_downward
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {/* Info banner */}
+      {!bannerDismissed && (
+        <div className="mx-8 mt-4 flex items-center gap-3 bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-3 rounded-xl">
+          <span className="material-symbols-outlined text-blue-500" style={{ fontSize: '18px' }}>
+            folder_open
+          </span>
+          <span>
+            <span className="font-semibold">Move to folder</span> — folder organisation is coming soon.
+          </span>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            className="ml-auto hover:opacity-70 transition-opacity"
+            aria-label="Dismiss"
+          >
+            <span className="material-symbols-outlined text-blue-400" style={{ fontSize: '16px' }}>
+              close
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Error banner */}
       {error && (
@@ -293,11 +352,11 @@ function VaultContent() {
               <p className="text-sm text-on-surface-variant">Loading your vault…</p>
             </div>
           </div>
-        ) : files.length === 0 ? (
+        ) : sortedFiles.length === 0 ? (
           <EmptyState onUpload={() => fileInputRef.current?.click()} />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {files.map((file) => (
+            {sortedFiles.map((file) => (
               <FileCard
                 key={file.id}
                 file={file}
@@ -328,10 +387,11 @@ function FileCard({
   const icon = getFileIcon(file.mimeType);
 
   return (
-    <div className="bg-surface-container-lowest rounded-2xl p-5 flex flex-col gap-3 group hover:shadow-lg hover:shadow-primary/5 transition-all">
-      {/* Header row */}
-      <div className="flex items-start justify-between">
-        <div className="w-11 h-11 rounded-xl bg-primary/8 flex items-center justify-center">
+    <div className="bg-surface-container-lowest rounded-2xl p-4 flex flex-col gap-3 group hover:shadow-lg hover:shadow-primary/5 transition-all">
+      {/* Top row: icon + name/size + actions */}
+      <div className="flex items-start gap-3">
+        {/* File type icon */}
+        <div className="w-11 h-11 shrink-0 rounded-xl bg-primary/8 flex items-center justify-center">
           <span
             className="material-symbols-outlined text-primary"
             style={{ fontSize: '22px', fontVariationSettings: "'FILL' 1" }}
@@ -340,23 +400,33 @@ function FileCard({
           </span>
         </div>
 
+        {/* Name + size */}
+        <div className="flex-1 min-w-0">
+          <p
+            className="font-headline font-bold text-sm text-on-surface leading-tight line-clamp-2"
+            title={file.name}
+          >
+            {file.name}
+          </p>
+          <p className="text-xs text-on-surface-variant mt-0.5">
+            {formatBytes(file.originalSizeBytes)}
+          </p>
+        </div>
+
         {/* Actions — visible on hover */}
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
           <button
             onClick={onDownload}
             disabled={downloading}
             title="Download & decrypt"
-            className="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all disabled:opacity-50"
+            className="w-7 h-7 rounded-lg bg-surface-container flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all disabled:opacity-50"
           >
             {downloading ? (
-              <span
-                className="material-symbols-outlined animate-spin"
-                style={{ fontSize: '14px' }}
-              >
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '13px' }}>
                 progress_activity
               </span>
             ) : (
-              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
                 download
               </span>
             )}
@@ -364,46 +434,30 @@ function FileCard({
           <button
             onClick={onDelete}
             title="Delete"
-            className="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center hover:bg-error-container hover:text-on-error-container transition-all"
+            className="w-7 h-7 rounded-lg bg-surface-container flex items-center justify-center hover:bg-error-container hover:text-on-error-container transition-all"
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
               delete
             </span>
           </button>
         </div>
       </div>
 
-      {/* File name */}
-      <p
-        className="font-headline font-semibold text-sm text-on-surface leading-tight line-clamp-2"
-        title={file.name}
-      >
-        {file.name}
+      {/* Upload date */}
+      <p className="text-xs text-on-surface-variant/70">
+        Uploaded {formatDate(file.createdAt)}
       </p>
 
-      {/* Meta */}
-      <div className="flex items-center justify-between text-xs text-on-surface-variant">
-        <span>{formatBytes(file.originalSizeBytes)}</span>
-        <span>{formatDate(file.createdAt)}</span>
-      </div>
-
-      {/* Category chip */}
-      {file.category && (
-        <span className="self-start text-[10px] font-bold uppercase tracking-wider bg-surface-container px-2 py-0.5 rounded-full text-on-surface-variant">
-          {file.category}
-        </span>
-      )}
-
-      {/* Vault Indicator */}
-      <div className="flex items-center gap-1.5 bg-tertiary-container px-2 py-1.5 rounded-xl self-start">
-        <span
-          className="material-symbols-outlined text-tertiary-fixed-dim"
-          style={{ fontSize: '12px', fontVariationSettings: "'FILL' 1" }}
-        >
-          lock
-        </span>
-        <span className="text-[9px] font-bold uppercase tracking-widest text-tertiary-fixed-dim">
-          AES-256-GCM
+      {/* Bottom row: ENCRYPTED badge */}
+      <div className="flex justify-end">
+        <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full">
+          <span
+            className="material-symbols-outlined"
+            style={{ fontSize: '11px', fontVariationSettings: "'FILL' 1" }}
+          >
+            lock
+          </span>
+          Encrypted
         </span>
       </div>
     </div>
