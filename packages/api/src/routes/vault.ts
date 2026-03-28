@@ -15,19 +15,19 @@ const VALID_CATEGORIES = ['identity', 'financial', 'legal', 'medical', 'digital'
 
 const createFileSchema = z.object({
   name: z.string().min(1).max(500),
-  mimeType: z.string().max(255).optional(),
+  mimeType: z.string().max(255).optional().nullable(),
   sizeBytes: z.number().int().positive(),
-  originalSizeBytes: z.number().int().positive().optional(),
+  originalSizeBytes: z.number().int().positive().optional().nullable(),
   storageKey: z.string().min(1).max(500),
   ownerEncryptedKey: z.string().min(1),
   ownerIv: z.string().min(1),
   fileIv: z.string().min(1),
   authTag: z.string().min(1),
-  emergencyEncryptedKey: z.string().optional(),
-  emergencyIv: z.string().optional(),
-  folderId: z.string().uuid().optional(),
-  category: z.enum(VALID_CATEGORIES).optional(),
-  tags: z.array(z.string().max(50)).max(20).optional(),
+  emergencyEncryptedKey: z.string().optional().nullable(),
+  emergencyIv: z.string().optional().nullable(),
+  folderId: z.string().uuid().optional().nullable(),
+  category: z.enum(VALID_CATEGORIES).optional().nullable(),
+  tags: z.array(z.string().max(50)).max(20).optional().nullable(),
 });
 
 const uploadUrlSchema = z.object({
@@ -36,10 +36,10 @@ const uploadUrlSchema = z.object({
 });
 
 const listFilesSchema = z.object({
-  folderId: z.string().uuid().optional(),
-  category: z.enum(VALID_CATEGORIES).optional(),
-  search: z.string().max(255).optional(),
-  includeDeleted: z.enum(['true', 'false']).optional(),
+  folderId: z.string().uuid().optional().nullable(),
+  category: z.enum(VALID_CATEGORIES).optional().nullable(),
+  search: z.string().max(255).optional().nullable(),
+  includeDeleted: z.enum(['true', 'false']).optional().nullable(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
