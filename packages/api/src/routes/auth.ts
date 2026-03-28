@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { prisma } from '../db/client';
-import { redis, sessionKey, refreshTokenKey } from '../services/redis';
+import { redis, sessionKey, refreshTokenKey, rotatedTokenKey } from '../services/redis';
 import {
   signAccessToken,
   signRefreshToken,

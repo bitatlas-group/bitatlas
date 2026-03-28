@@ -43,20 +43,29 @@ vi.mock('../db/client', () => ({
   },
 }));
 
-vi.mock('../services/redis', () => ({
-  redis: {
-    get: vi.fn(),
-    set: vi.fn(),
-    setex: vi.fn(),
-    del: vi.fn(),
-    ping: vi.fn().mockResolvedValue('PONG'),
-    connect: vi.fn().mockResolvedValue(undefined),
-    quit: vi.fn().mockResolvedValue(undefined),
-  },
-  sessionKey: (userId: string, sessionId: string) => `session:${userId}:${sessionId}`,
-  refreshTokenKey: (token: string) => `refresh:${token}`,
-  apiKeyRateLimitKey: (keyId: string) => `ratelimit:apikey:${keyId}`,
-}));
+vi.mock('../services/redis', () => {
+  const mockMulti = {
+    setex: vi.fn().mockReturnThis(),
+    del: vi.fn().mockReturnThis(),
+    exec: vi.fn().mockResolvedValue([]),
+  };
+  return {
+    redis: {
+      get: vi.fn(),
+      set: vi.fn(),
+      setex: vi.fn(),
+      del: vi.fn(),
+      ping: vi.fn().mockResolvedValue('PONG'),
+      connect: vi.fn().mockResolvedValue(undefined),
+      quit: vi.fn().mockResolvedValue(undefined),
+      multi: vi.fn().mockReturnValue(mockMulti),
+    },
+    sessionKey: (userId: string, sessionId: string) => `session:${userId}:${sessionId}`,
+    refreshTokenKey: (token: string) => `refresh:${token}`,
+    rotatedTokenKey: (token: string) => `rotated:${token}`,
+    apiKeyRateLimitKey: (keyId: string) => `ratelimit:apikey:${keyId}`,
+  };
+});
 
 vi.mock('../services/storage', () => ({
   generateUploadUrl: vi.fn().mockResolvedValue('https://minio.example.com/upload'),
@@ -258,11 +267,12 @@ describe('POST /auth/refresh', () => {
   it('rotates tokens and invalidates old session', async () => {
     const refreshToken = makeRefreshToken(TEST_USER_ID, TEST_SESSION_ID);
 
+    // First get: rotatedTokenKey check (no grace hit)
+    vi.mocked(redis.get).mockResolvedValueOnce(null);
+    // Second get: refreshTokenKey lookup
     vi.mocked(redis.get).mockResolvedValueOnce(
       JSON.stringify({ userId: TEST_USER_ID, sessionId: TEST_SESSION_ID }),
     );
-    vi.mocked(redis.del).mockResolvedValue(1);
-    vi.mocked(redis.setex).mockResolvedValue('OK');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as typeof mockUser);
 
     const res = await request(app)
@@ -276,25 +286,29 @@ describe('POST /auth/refresh', () => {
     });
     // New tokens must differ from the originals
     expect(res.body.refreshToken).not.toBe(refreshToken);
+    // multi.exec should have been called for atomic rotation
+    expect(vi.mocked(redis.multi)).toHaveBeenCalled();
   });
 
-  it('deletes old session and old refresh token from Redis', async () => {
+  it('uses multi for atomic token rotation', async () => {
     const refreshToken = makeRefreshToken(TEST_USER_ID, TEST_SESSION_ID);
 
+    vi.mocked(redis.get).mockResolvedValueOnce(null);
     vi.mocked(redis.get).mockResolvedValueOnce(
       JSON.stringify({ userId: TEST_USER_ID, sessionId: TEST_SESSION_ID }),
     );
-    vi.mocked(redis.del).mockResolvedValue(1);
-    vi.mocked(redis.setex).mockResolvedValue('OK');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as typeof mockUser);
 
     await request(app).post('/auth/refresh').send({ refreshToken });
 
-    // del called twice: old refresh token + old session
-    expect(vi.mocked(redis.del)).toHaveBeenCalledTimes(2);
+    const multi = vi.mocked(redis.multi).mock.results[0]?.value;
+    expect(multi.setex).toHaveBeenCalled();
+    expect(multi.del).toHaveBeenCalled();
+    expect(multi.exec).toHaveBeenCalled();
   });
 
   it('returns 401 for an invalid refresh token', async () => {
+    // rotatedTokenKey check first (no grace hit since JWT won't even verify)
     const res = await request(app)
       .post('/auth/refresh')
       .send({ refreshToken: 'not.a.valid.jwt' });
@@ -305,6 +319,9 @@ describe('POST /auth/refresh', () => {
 
   it('returns 401 when refresh token is revoked (not in Redis)', async () => {
     const refreshToken = makeRefreshToken(TEST_USER_ID, TEST_SESSION_ID);
+    // First get: rotatedTokenKey check (no grace hit)
+    vi.mocked(redis.get).mockResolvedValueOnce(null);
+    // Second get: refreshTokenKey lookup (not found — revoked)
     vi.mocked(redis.get).mockResolvedValueOnce(null);
 
     const res = await request(app)
@@ -317,6 +334,8 @@ describe('POST /auth/refresh', () => {
 
   it('returns 401 when an access token is submitted instead of refresh token', async () => {
     const accessToken = makeAccessToken(TEST_USER_ID, TEST_EMAIL, TEST_SESSION_ID);
+    // rotatedTokenKey check (no grace hit)
+    vi.mocked(redis.get).mockResolvedValueOnce(null);
 
     const res = await request(app)
       .post('/auth/refresh')
