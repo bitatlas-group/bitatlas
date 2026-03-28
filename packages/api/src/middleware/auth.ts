@@ -31,7 +31,7 @@ export function signAccessToken(userId: string, email: string, sessionId: string
   return jwt.sign(
     { sub: userId, email, sessionId, type: 'access' } satisfies JwtPayload,
     config.JWT_SECRET,
-    { expiresIn: config.JWT_ACCESS_EXPIRES_IN }
+    { expiresIn: config.JWT_ACCESS_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 }
 
@@ -39,7 +39,7 @@ export function signRefreshToken(userId: string, sessionId: string): string {
   return jwt.sign(
     { sub: userId, sessionId, type: 'refresh' },
     config.JWT_SECRET,
-    { expiresIn: config.JWT_REFRESH_EXPIRES_IN }
+    { expiresIn: config.JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 }
 
