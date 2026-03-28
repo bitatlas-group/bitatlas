@@ -3,6 +3,7 @@ name: Deploy BitAtlas
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -15,28 +16,70 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          script_stop: true
           script: |
+            set -euo pipefail
+
             cd /opt/bitatlas
             git fetch origin main && git reset --hard origin/main
-            
-            # Rebuild web
-            docker build -t bitatlas-web -f Dockerfile.web .
-            docker rm -f bitatlas-web-1 2>/dev/null || true
-            docker run -d --name bitatlas-web-1 \
-              --restart unless-stopped \
-              -p 127.0.0.1:3001:3001 \
-              -e NEXT_PUBLIC_API_URL=https://api.bitatlas.com \
-              --network legacyshield_internal \
-              bitatlas-web
-            
-            # Rebuild API
-            docker build -t bitatlas-api -f packages/api/Dockerfile .
-            docker rm -f bitatlas-api-1 2>/dev/null || true
-            docker run -d --name bitatlas-api-1 \
-              --restart unless-stopped \
-              --env-file /opt/bitatlas/.env.prod \
-              -p 127.0.0.1:4001:4001 \
-              --network legacyshield_internal \
-              bitatlas-api
-            
-            echo BitAtlas deployed successfully
+
+            # Always use docker compose — never manual docker run.
+            # This ensures correct network (bitatlas_internal), health checks,
+            # and dependency ordering are applied.
+            docker compose -f docker-compose.prod.yml build --no-cache api web
+            docker compose -f docker-compose.prod.yml up -d --force-recreate api web
+
+            # Wait for API to become healthy (up to 60s)
+            echo "Waiting for API health..."
+            for i in $(seq 1 12); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' bitatlas-api-1 2>/dev/null || echo "missing")
+              if [ "$STATUS" = "healthy" ]; then
+                echo "API is healthy after ~$((i * 5))s"
+                break
+              fi
+              if [ "$i" -eq 12 ]; then
+                echo "ERROR: API failed to become healthy within 60s"
+                docker logs bitatlas-api-1 --tail 30
+                exit 1
+              fi
+              sleep 5
+            done
+
+            # Smoke test: verify all subsystems via /status
+            RESPONSE=$(curl -sf http://127.0.0.1:4001/status || echo '{"status":"FAIL"}')
+            echo "Health check response: $RESPONSE"
+
+            if echo "$RESPONSE" | grep -q '"status":"ok"'; then
+              echo "✅ BitAtlas deployed and verified successfully"
+            else
+              echo "❌ Deployment health check failed"
+              docker logs bitatlas-api-1 --tail 50
+              exit 1
+            fi
+
+      - name: Verify external endpoints
+        run: |
+          sleep 5
+          # Verify API is reachable externally
+          API_STATUS=$(curl -sf https://api.bitatlas.com/status | jq -r '.status' || echo "FAIL")
+          echo "API status: $API_STATUS"
+
+          # Verify CORS headers
+          CORS_HEADER=$(curl -sf -H "Origin: https://bitatlas.com" -I https://api.bitatlas.com/status 2>&1 | grep -i "access-control-allow-origin" || echo "MISSING")
+          echo "CORS header: $CORS_HEADER"
+
+          # Verify web is serving
+          WEB_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://bitatlas.com || echo "FAIL")
+          echo "Web status: $WEB_STATUS"
+
+          if [ "$API_STATUS" != "ok" ]; then
+            echo "❌ API external health check failed"
+            exit 1
+          fi
+
+          if [ "$WEB_STATUS" != "200" ]; then
+            echo "❌ Web external health check failed"
+            exit 1
+          fi
+
+          echo "✅ All external endpoints verified"
