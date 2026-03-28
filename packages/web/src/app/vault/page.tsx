@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
@@ -446,9 +447,9 @@ function VaultContent() {
 // ── Folder Card ───────────────────────────────────────────────────────────────
 function FolderCard({ folder }: { folder: Folder }) {
   return (
-    <a
+    <Link
       href={`/vault?folderId=${folder.id}`}
-      className="rounded-2xl flex items-center gap-3 transition-all hover:shadow-md"
+      className="rounded-2xl flex items-center gap-3 transition-all active:scale-[0.98]"
       style={{ backgroundColor: 'white', padding: '14px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textDecoration: 'none' }}
     >
       <div className="flex items-center justify-center rounded-lg shrink-0"
@@ -458,10 +459,16 @@ function FolderCard({ folder }: { folder: Folder }) {
           folder
         </span>
       </div>
-      <span className="font-semibold truncate" style={{ fontSize: '14px', color: '#111827' }}>
-        {folder.name}
+      <div className="flex flex-col min-w-0">
+        <span className="font-semibold truncate" style={{ fontSize: '14px', color: '#111827' }}>
+          {folder.name}
+        </span>
+        <span style={{ fontSize: '11px', color: '#9CA3AF' }}>Folder</span>
+      </div>
+      <span className="material-symbols-outlined ml-auto shrink-0" style={{ fontSize: '18px', color: '#D1D5DB' }}>
+        chevron_right
       </span>
-    </a>
+    </Link>
   );
 }
 
