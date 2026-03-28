@@ -59,25 +59,49 @@ app.use((_req, res) => {
 // Error handler
 app.use(errorHandler);
 
+async function retryConnect(
+  name: string,
+  fn: () => Promise<void>,
+  maxRetries = 5,
+  delayMs = 3000,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      console.warn(`[${name}] Connection attempt ${attempt}/${maxRetries} failed:`, (err as Error).message);
+      if (attempt === maxRetries) throw err;
+      await new Promise(r => setTimeout(r, delayMs * attempt));
+    }
+  }
+}
+
 async function start() {
   try {
-    // Connect Redis
-    await redis.connect();
-    console.log('[Redis] Connected');
+    // Connect Redis (with retries — may start before Redis is fully ready)
+    await retryConnect('Redis', async () => {
+      await redis.connect();
+      console.log('[Redis] Connected');
+    });
 
-    // Ensure MinIO bucket exists
-    await ensureBucketExists();
-    console.log('[MinIO] Ready');
+    // Ensure MinIO bucket exists (with retries — MinIO health check can pass before API is ready)
+    await retryConnect('MinIO', async () => {
+      await ensureBucketExists();
+      console.log('[MinIO] Ready');
+    });
 
-    // Verify DB connection
-    await prisma.$connect();
-    console.log('[DB] Connected');
+    // Verify DB connection (with retries)
+    await retryConnect('DB', async () => {
+      await prisma.$connect();
+      console.log('[DB] Connected');
+    });
 
     app.listen(config.PORT, () => {
       console.log(`[API] BitAtlas API running on port ${config.PORT} (${config.NODE_ENV})`);
     });
   } catch (err) {
-    console.error('[Startup] Fatal error:', err);
+    console.error('[Startup] Fatal error after retries:', err);
     process.exit(1);
   }
 }
