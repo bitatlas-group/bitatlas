@@ -71,6 +71,8 @@ function VaultContent() {
 
   // Modal states
   const [moveTarget, setMoveTarget] = useState<VaultFile | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [previewFile, setPreviewFile] = useState<VaultFile | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
@@ -318,10 +320,31 @@ function VaultContent() {
                   </button>
                 );
               })}
-              {folders.length === 0 && (
-                <p className="px-4 py-4 text-center" style={{ fontSize: '14px', color: '#9CA3AF' }}>
-                  No folders yet. Create one from the sidebar.
-                </p>
+              {/* New folder inline */}
+              {creatingFolder ? (
+                <div className="px-4 py-2">
+                  <input autoFocus type="text" value={newFolderName}
+                    onChange={e => setNewFolderName(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && newFolderName.trim()) {
+                        const folder = await foldersApi.create(newFolderName.trim());
+                        setFolders(prev => [...prev, folder]);
+                        setNewFolderName(''); setCreatingFolder(false);
+                        if (moveTarget) handleMoveToFolder(moveTarget.id, folder.id);
+                      }
+                      if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
+                    }}
+                    placeholder="Folder name…"
+                    className="w-full bg-gray-100 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-200"
+                    style={{ color: '#1A2332' }} />
+                </div>
+              ) : (
+                <button onClick={() => setCreatingFolder(true)}
+                  className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors"
+                  style={{ fontSize: '15px', color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '20px', color: '#9CA3AF' }}>create_new_folder</span>
+                  New folder
+                </button>
               )}
             </div>
           </div>
