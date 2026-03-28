@@ -23,6 +23,9 @@ jobs:
             cd /opt/bitatlas
             git fetch origin main && git reset --hard origin/main
 
+            # Prune old Docker images to prevent disk full (broke deploy on March 28)
+            docker image prune -af --filter "until=1h" 2>/dev/null || true
+
             # Always use docker compose — never manual docker run.
             # This ensures correct network (bitatlas_internal), health checks,
             # and dependency ordering are applied.
