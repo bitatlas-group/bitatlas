@@ -229,6 +229,56 @@ router.post('/files', async (req: Request, res: Response): Promise<void> => {
   });
 });
 
+// PATCH /vault/files/:id — update file (move to folder, rename)
+const updateFileSchema = z.object({
+  folderId: z.string().uuid().nullable().optional(),
+  name: z.string().min(1).max(500).optional(),
+});
+
+router.patch('/files/:id', async (req: Request, res: Response): Promise<void> => {
+  const parsed = updateFileSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    return;
+  }
+
+  const userId = req.user!.id;
+  const { folderId, name } = parsed.data;
+
+  const file = await prisma.file.findFirst({
+    where: { id: req.params.id, userId, deletedAt: null },
+    select: { id: true },
+  });
+
+  if (!file) {
+    res.status(404).json({ error: 'File not found' });
+    return;
+  }
+
+  // Verify target folder belongs to user (if moving)
+  if (folderId !== undefined && folderId !== null) {
+    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    if (!folder) {
+      res.status(400).json({ error: 'Folder not found' });
+      return;
+    }
+  }
+
+  const updated = await prisma.file.update({
+    where: { id: file.id },
+    data: {
+      ...(folderId !== undefined ? { folderId } : {}),
+      ...(name !== undefined ? { name } : {}),
+    },
+  });
+
+  res.json({
+    ...updated,
+    sizeBytes: updated.sizeBytes.toString(),
+    originalSizeBytes: updated.originalSizeBytes?.toString() ?? null,
+  });
+});
+
 // DELETE /vault/files/:id — soft delete
 router.delete('/files/:id', async (req: Request, res: Response): Promise<void> => {
   const file = await prisma.file.findFirst({
