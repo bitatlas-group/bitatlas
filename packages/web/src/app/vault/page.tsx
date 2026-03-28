@@ -161,8 +161,8 @@ function VaultContent() {
         originalSizeBytes: file.size,
         storageKey,
         ownerEncryptedKey: encrypted.ownerEncryptedKey,
-        ownerIV: encrypted.ownerIV,
-        fileIV: encrypted.iv,
+        ownerIv: encrypted.ownerIV,
+        fileIv: encrypted.iv,
         authTag: encrypted.authTag,
         folderId: folderId ?? null,
         category: null,
@@ -191,8 +191,8 @@ function VaultContent() {
       const decrypted = await decryptFile(
         encryptedBlob,
         file.ownerEncryptedKey,
-        file.ownerIV,
-        file.fileIV,
+        file.ownerIv,
+        file.fileIv,
         file.authTag
       );
 

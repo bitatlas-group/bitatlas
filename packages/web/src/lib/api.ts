@@ -224,8 +224,8 @@ export interface VaultFile {
   originalSizeBytes: number;
   storageKey: string;
   ownerEncryptedKey: string;
-  ownerIV: string;
-  fileIV: string;
+  ownerIv: string;
+  fileIv: string;
   authTag: string;
   folderId: string | null;
   category: string | null;
@@ -240,8 +240,8 @@ export interface CreateFilePayload {
   originalSizeBytes: number;
   storageKey: string;
   ownerEncryptedKey: string;
-  ownerIV: string;
-  fileIV: string;
+  ownerIv: string;
+  fileIv: string;
   authTag: string;
   folderId?: string | null;
   category?: string | null;
