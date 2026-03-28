@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../db/client';
 import { requireAuth } from '../middleware/auth';
 import { uploadRateLimit } from '../middleware/rateLimit';
-import { generateUploadUrl, generateDownloadUrl } from '../services/storage';
+import { generateUploadUrl, generateDownloadUrl, deleteObject } from '../services/storage';
 
 const router = Router();
 
@@ -192,6 +192,25 @@ router.post('/files', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  // Enforce storage quota
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { storageUsedBytes: true, storageLimitBytes: true },
+  });
+  if (user) {
+    const used = Number(user.storageUsedBytes);
+    const limit = Number(user.storageLimitBytes);
+    if (used + data.sizeBytes > limit) {
+      res.status(413).json({
+        error: 'Storage quota exceeded',
+        used,
+        limit,
+        required: data.sizeBytes,
+      });
+      return;
+    }
+  }
+
   // Verify folder belongs to user if provided
   if (data.folderId) {
     const folder = await prisma.folder.findFirst({ where: { id: data.folderId, userId } });
@@ -284,11 +303,12 @@ router.patch('/files/:id', async (req: Request, res: Response): Promise<void> =>
   });
 });
 
-// DELETE /vault/files/:id — soft delete
+// DELETE /vault/files/:id — soft delete + S3 cleanup + quota update
 router.delete('/files/:id', async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.id;
   const file = await prisma.file.findFirst({
-    where: { id: req.params.id, userId: req.user!.id, deletedAt: null },
-    select: { id: true, sizeBytes: true },
+    where: { id: req.params.id, userId, deletedAt: null },
+    select: { id: true, sizeBytes: true, storageKey: true },
   });
 
   if (!file) {
@@ -296,9 +316,21 @@ router.delete('/files/:id', async (req: Request, res: Response): Promise<void> =
     return;
   }
 
+  // Soft delete in DB
   await prisma.file.update({
     where: { id: file.id },
     data: { deletedAt: new Date() },
+  });
+
+  // Decrement storage usage
+  await prisma.user.update({
+    where: { id: userId },
+    data: { storageUsedBytes: { decrement: Number(file.sizeBytes) } },
+  });
+
+  // Delete from S3 (async, don't block response)
+  deleteObject(file.storageKey).catch((err) => {
+    console.error(`[S3] Failed to delete ${file.storageKey}:`, err.message);
   });
 
   res.json({ ok: true });

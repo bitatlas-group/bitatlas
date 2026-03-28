@@ -16,9 +16,8 @@ export function errorHandler(
   }
 
   if (err instanceof Error) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[Error]', err);
-    }
+    // Always log errors — including production. Silent 500s are invisible.
+    console.error('[Error]', err.message, err.stack);
     res.status(500).json({ error: 'Internal server error' });
     return;
   }
