@@ -165,6 +165,15 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
 
   const { refreshToken } = parsed.data;
 
+  // 1. Check for a race condition: was this token ALREADY refreshed in the last 30s?
+  // This handles concurrent requests from the same client where the first one rotated the token.
+  const rotatedData = await redis.get(rotatedTokenKey(refreshToken));
+  if (rotatedData) {
+    const { accessToken, refreshToken: newRefreshToken } = JSON.parse(rotatedData);
+    res.json({ accessToken, refreshToken: newRefreshToken });
+    return;
+  }
+
   let payload: { sub: string; sessionId: string; type: string };
   try {
     payload = jwt.verify(refreshToken, config.JWT_SECRET) as typeof payload;
@@ -186,9 +195,8 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
 
   const stored = JSON.parse(storedData) as { userId: string; sessionId: string };
 
-  // Rotate: delete old refresh token, issue new pair
-  await redis.del(refreshTokenKey(refreshToken));
-
+  // 2. Perform rotation atomically
+  // Use new session ID
   const newSessionId = uuidv4();
   const newRefreshToken = signRefreshToken(stored.userId, newSessionId);
 
@@ -203,23 +211,39 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  // Move session to new sessionId
-  await redis.del(sessionKey(stored.userId, stored.sessionId));
-  await redis.setex(
+  const newAccessToken = signAccessToken(stored.userId, user.email, newSessionId);
+
+  // Use a transaction to rotate tokens and store the rotated mapping for grace period
+  const multi = redis.multi();
+
+  // Mark token as rotated (grace period: 30s)
+  multi.setex(
+    rotatedTokenKey(refreshToken),
+    30,
+    JSON.stringify({ accessToken: newAccessToken, refreshToken: newRefreshToken })
+  );
+
+  // Delete the old refresh token (to prevent long-term reuse)
+  multi.del(refreshTokenKey(refreshToken));
+
+  // Remove old session, create new one
+  multi.del(sessionKey(stored.userId, stored.sessionId));
+  multi.setex(
     sessionKey(stored.userId, newSessionId),
     7 * 24 * 60 * 60,
     JSON.stringify({ userId: stored.userId, createdAt: Date.now() })
   );
 
-  await redis.setex(
+  // Store the new refresh token
+  multi.setex(
     refreshTokenKey(newRefreshToken),
     7 * 24 * 60 * 60,
     JSON.stringify({ userId: stored.userId, sessionId: newSessionId })
   );
 
-  const finalAccessToken = signAccessToken(stored.userId, user.email, newSessionId);
+  await multi.exec();
 
-  res.json({ accessToken: finalAccessToken, refreshToken: newRefreshToken });
+  res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
 });
 
 // POST /auth/logout

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'rea
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
+import { useFolders } from '@/contexts/FolderContext';
 import { vaultApi, foldersApi, uploadToPresignedUrl, type VaultFile, type Folder } from '@/lib/api';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,11 +56,11 @@ export default function VaultPage() {
 function VaultContent() {
   const { user } = useAuth();
   const { encryptFile, decryptFile } = useCrypto();
+  const { folders, createFolder: createFolderCtx } = useFolders();
   const searchParams = useSearchParams();
   const folderId = searchParams.get('folderId') ?? undefined;
 
   const [files, setFiles] = useState<VaultFile[]>([]);
-  const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -93,13 +94,9 @@ function VaultContent() {
     }
   }, [folderId, search]);
 
-  const loadFolders = useCallback(async () => {
-    try { setFolders(await foldersApi.list()); } catch { /* silent */ }
-  }, []);
-
   useEffect(() => {
-    if (user) { loadFiles(); loadFolders(); }
-  }, [user, loadFiles, loadFolders]);
+    if (user) { loadFiles(); }
+  }, [user, loadFiles]);
 
   const sortedFiles = useMemo(() => {
     return [...files].sort((a, b) => {
@@ -110,6 +107,12 @@ function VaultContent() {
       return sortDir === 'desc' ? -cmp : cmp;
     });
   }, [files, sortField, sortDir]);
+
+  // Folders visible in the current view: root folders when no folderId, children when inside a folder
+  const visibleFolders = useMemo(() => {
+    return folders.filter(f => (folderId ? f.parentId === folderId : !f.parentId))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [folders, folderId]);
 
   function handleSort(field: SortField) {
     if (field === sortField) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -257,7 +260,7 @@ function VaultContent() {
         </div>
       )}
 
-      {/* File list */}
+      {/* Folder + File list */}
       <div className="flex-1 px-4 mt-4 pb-6 flex flex-col gap-3">
         {loading ? (
           <div className="flex items-center justify-center h-64">
@@ -266,16 +269,27 @@ function VaultContent() {
               <p style={{ fontSize: '14px', color: '#6B7280' }}>Loading your vault…</p>
             </div>
           </div>
-        ) : sortedFiles.length === 0 ? (
+        ) : sortedFiles.length === 0 && visibleFolders.length === 0 ? (
           <EmptyState onUpload={() => fileInputRef.current?.click()} />
         ) : (
-          sortedFiles.map(file => (
-            <FileCard key={file.id} file={file} downloading={downloading === file.id}
-              onTap={() => handlePreview(file)}
-              onDownload={() => handleDownload(file)}
-              onDelete={() => handleDelete(file.id)}
-              onMoveOpen={() => setMoveTarget(file)} />
-          ))
+          <>
+            {/* Folder cards */}
+            {visibleFolders.length > 0 && (
+              <div className="grid grid-cols-2 gap-3">
+                {visibleFolders.map(folder => (
+                  <FolderCard key={folder.id} folder={folder} />
+                ))}
+              </div>
+            )}
+            {/* File cards */}
+            {sortedFiles.map(file => (
+              <FileCard key={file.id} file={file} downloading={downloading === file.id}
+                onTap={() => handlePreview(file)}
+                onDownload={() => handleDownload(file)}
+                onDelete={() => handleDelete(file.id)}
+                onMoveOpen={() => setMoveTarget(file)} />
+            ))}
+          </>
         )}
       </div>
 
@@ -327,8 +341,7 @@ function VaultContent() {
                     onChange={e => setNewFolderName(e.target.value)}
                     onKeyDown={async e => {
                       if (e.key === 'Enter' && newFolderName.trim()) {
-                        const folder = await foldersApi.create(newFolderName.trim());
-                        setFolders(prev => [...prev, folder]);
+                        const folder = await createFolderCtx(newFolderName.trim());
                         setNewFolderName(''); setCreatingFolder(false);
                         if (moveTarget) handleMoveToFolder(moveTarget.id, folder.id);
                       }
@@ -427,6 +440,28 @@ function VaultContent() {
         }
       `}</style>
     </div>
+  );
+}
+
+// ── Folder Card ───────────────────────────────────────────────────────────────
+function FolderCard({ folder }: { folder: Folder }) {
+  return (
+    <a
+      href={`/vault?folderId=${folder.id}`}
+      className="rounded-2xl flex items-center gap-3 transition-all hover:shadow-md"
+      style={{ backgroundColor: 'white', padding: '14px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textDecoration: 'none' }}
+    >
+      <div className="flex items-center justify-center rounded-lg shrink-0"
+        style={{ width: '40px', height: '40px', backgroundColor: '#FEF3C7' }}>
+        <span className="material-symbols-outlined"
+          style={{ fontSize: '22px', color: '#D97706', fontVariationSettings: "'FILL' 1" }}>
+          folder
+        </span>
+      </div>
+      <span className="font-semibold truncate" style={{ fontSize: '14px', color: '#111827' }}>
+        {folder.name}
+      </span>
+    </a>
   );
 }
 

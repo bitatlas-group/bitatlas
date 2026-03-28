@@ -4,6 +4,7 @@ import cors from 'cors';
 import { corsOrigins } from './config';
 import { generalRateLimit } from './middleware/rateLimit';
 import { errorHandler } from './middleware/errorHandler';
+import { requestLogger } from './middleware/requestLogger';
 
 import authRoutes from './routes/auth';
 import vaultRoutes from './routes/vault';
@@ -12,6 +13,9 @@ import keyRoutes from './routes/keys';
 import statusRoutes from './routes/status';
 
 export const app = express();
+
+// Request logging (high priority)
+app.use(requestLogger);
 
 // Trust the first proxy (Nginx) so express-rate-limit can read X-Forwarded-For
 app.set('trust proxy', 1);
@@ -36,25 +40,6 @@ app.use(cors({
 // Body parsing
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Request logging for errors (4xx/5xx)
-app.use((req, res, next) => {
-  const origJson = res.json.bind(res);
-  res.json = function (body: unknown) {
-    if (res.statusCode >= 400) {
-      console.error(JSON.stringify({
-        _log: 'error_response',
-        status: res.statusCode,
-        method: req.method,
-        path: req.originalUrl,
-        resBody: JSON.stringify(body).substring(0, 500),
-        reqBody: JSON.stringify(req.body).substring(0, 500),
-      }));
-    }
-    return origJson(body);
-  };
-  next();
-});
 
 // Global rate limit
 app.use(generalRateLimit);

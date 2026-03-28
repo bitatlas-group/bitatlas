@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { logger } from '../services/logger';
 
 export function errorHandler(
   err: unknown,
@@ -17,10 +18,11 @@ export function errorHandler(
 
   if (err instanceof Error) {
     // Always log errors — including production. Silent 500s are invisible.
-    console.error('[Error]', err.message, err.stack);
+    logger.error({ err, message: err.message, stack: err.stack }, '[Error Handler]');
     res.status(500).json({ error: 'Internal server error' });
     return;
   }
 
+  logger.error({ err }, '[Error Handler] Unknown error');
   res.status(500).json({ error: 'Internal server error' });
 }
