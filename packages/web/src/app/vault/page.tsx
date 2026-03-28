@@ -109,6 +109,12 @@ function VaultContent() {
     });
   }, [files, sortField, sortDir]);
 
+  // Current folder for breadcrumb
+  const currentFolder = useMemo(() => {
+    if (!folderId) return null;
+    return folders.find(f => f.id === folderId) ?? null;
+  }, [folders, folderId]);
+
   // Folders visible in the current view: root folders when no folderId, children when inside a folder
   const visibleFolders = useMemo(() => {
     return folders.filter(f => (folderId ? f.parentId === folderId : !f.parentId))
@@ -228,8 +234,24 @@ function VaultContent() {
         </div>
       </div>
 
+      {/* Breadcrumb navigation */}
+      <div className="px-4 mt-4">
+        <div className="flex items-center gap-1.5" style={{ minHeight: '28px' }}>
+          <Link href="/vault" className="flex items-center gap-1" style={{ textDecoration: 'none' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '16px', color: folderId ? '#6B7280' : '#1A2332' }}>home</span>
+            <span style={{ fontSize: '13px', fontWeight: folderId ? '500' : '700', color: folderId ? '#6B7280' : '#1A2332' }}>My Vault</span>
+          </Link>
+          {currentFolder && (
+            <>
+              <span className="material-symbols-outlined" style={{ fontSize: '14px', color: '#D1D5DB' }}>chevron_right</span>
+              <span style={{ fontSize: '13px', fontWeight: '700', color: '#1A2332' }}>{currentFolder.name}</span>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Sort */}
-      <div className="px-4 mt-4 flex items-center gap-2">
+      <div className="px-4 mt-3 flex items-center gap-2">
         <span style={{ fontSize: '12px', fontWeight: '600', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sort</span>
         {(['date', 'name', 'size'] as SortField[]).map(field => {
           const active = sortField === field;
@@ -275,13 +297,9 @@ function VaultContent() {
         ) : (
           <>
             {/* Folder cards */}
-            {visibleFolders.length > 0 && (
-              <div className="grid grid-cols-2 gap-3">
-                {visibleFolders.map(folder => (
-                  <FolderCard key={folder.id} folder={folder} />
-                ))}
-              </div>
-            )}
+            {visibleFolders.map(folder => (
+              <FolderCard key={folder.id} folder={folder} />
+            ))}
             {/* File cards */}
             {sortedFiles.map(file => (
               <FileCard key={file.id} file={file} downloading={downloading === file.id}
@@ -449,23 +467,23 @@ function FolderCard({ folder }: { folder: Folder }) {
   return (
     <Link
       href={`/vault?folderId=${folder.id}`}
-      className="rounded-2xl flex items-center gap-3 transition-all active:scale-[0.98]"
-      style={{ backgroundColor: 'white', padding: '14px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textDecoration: 'none' }}
+      className="rounded-2xl flex items-start gap-3 transition-all active:scale-[0.98]"
+      style={{ backgroundColor: 'white', padding: '16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textDecoration: 'none' }}
     >
       <div className="flex items-center justify-center rounded-lg shrink-0"
-        style={{ width: '40px', height: '40px', backgroundColor: '#FEF3C7' }}>
+        style={{ width: '44px', height: '44px', backgroundColor: '#FEF3C7' }}>
         <span className="material-symbols-outlined"
-          style={{ fontSize: '22px', color: '#D97706', fontVariationSettings: "'FILL' 1" }}>
+          style={{ fontSize: '24px', color: '#D97706', fontVariationSettings: "'FILL' 1" }}>
           folder
         </span>
       </div>
-      <div className="flex flex-col min-w-0">
-        <span className="font-semibold truncate" style={{ fontSize: '14px', color: '#111827' }}>
+      <div className="flex-1 min-w-0">
+        <p className="font-bold leading-snug" style={{ fontSize: '15px', color: '#111827' }}>
           {folder.name}
-        </span>
-        <span style={{ fontSize: '11px', color: '#9CA3AF' }}>Folder</span>
+        </p>
+        <span style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px', display: 'block' }}>Folder</span>
       </div>
-      <span className="material-symbols-outlined ml-auto shrink-0" style={{ fontSize: '18px', color: '#D1D5DB' }}>
+      <span className="material-symbols-outlined shrink-0 mt-2.5" style={{ fontSize: '18px', color: '#D1D5DB' }}>
         chevron_right
       </span>
     </Link>
