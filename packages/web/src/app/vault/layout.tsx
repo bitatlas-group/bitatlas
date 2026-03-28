@@ -6,17 +6,18 @@ import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
-import { authApi, foldersApi, type Folder } from '@/lib/api';
+import { useFolders } from '@/contexts/FolderContext';
+import { authApi } from '@/lib/api';
 
 function VaultLayoutInner({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { clearMasterKey } = useCrypto();
+  const { folders, createFolder } = useFolders();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const selectedFolderId = searchParams.get('folderId');
 
-  const [folders, setFolders] = useState<Folder[]>([]);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -24,8 +25,6 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) {
       router.replace('/login');
-    } else {
-      loadFolders();
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -34,20 +33,10 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
     setSidebarOpen(false);
   }, [pathname, selectedFolderId]);
 
-  async function loadFolders() {
-    try {
-      const data = await foldersApi.list();
-      setFolders(data);
-    } catch {
-      // silently fail
-    }
-  }
-
   async function handleCreateFolder() {
     if (!newFolderName.trim()) return;
     try {
-      const folder = await foldersApi.create(newFolderName.trim());
-      setFolders((prev) => [...prev, folder]);
+      await createFolder(newFolderName.trim());
       setNewFolderName('');
       setCreatingFolder(false);
     } catch (err) {
