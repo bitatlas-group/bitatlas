@@ -5,6 +5,8 @@ import cors from 'cors';
 import { config, corsOrigins } from './config';
 import { generalRateLimit } from './middleware/rateLimit';
 import { errorHandler } from './middleware/errorHandler';
+import { requestLogger } from './middleware/requestLogger';
+import { logger } from './services/logger';
 import { redis } from './services/redis';
 import { ensureBucketExists } from './services/storage';
 import { prisma } from './db/client';
@@ -16,6 +18,9 @@ import keyRoutes from './routes/keys';
 import statusRoutes from './routes/status';
 
 const app = express();
+
+// Request logging (high priority)
+app.use(requestLogger);
 
 // Trust the first proxy (Nginx) so express-rate-limit can read X-Forwarded-For
 app.set('trust proxy', 1);
@@ -40,25 +45,6 @@ app.use(cors({
 // Body parsing
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Request logging for errors (4xx/5xx)
-app.use((req, res, next) => {
-  const origJson = res.json.bind(res);
-  res.json = function (body: unknown) {
-    if (res.statusCode >= 400) {
-      console.error(JSON.stringify({
-        _log: 'error_response',
-        status: res.statusCode,
-        method: req.method,
-        path: req.originalUrl,
-        resBody: JSON.stringify(body).substring(0, 500),
-        reqBody: JSON.stringify(req.body).substring(0, 500),
-      }));
-    }
-    return origJson(body);
-  };
-  next();
-});
 
 // Global rate limit
 app.use(generalRateLimit);
@@ -89,7 +75,7 @@ async function retryConnect(
       await fn();
       return;
     } catch (err) {
-      console.warn(`[${name}] Connection attempt ${attempt}/${maxRetries} failed:`, (err as Error).message);
+      logger.warn({ attempt, maxRetries, name, err: (err as Error).message }, `[${name}] Connection attempt failed`);
       if (attempt === maxRetries) throw err;
       await new Promise(r => setTimeout(r, delayMs * attempt));
     }
@@ -101,39 +87,40 @@ async function start() {
     // Connect Redis (with retries — may start before Redis is fully ready)
     await retryConnect('Redis', async () => {
       await redis.connect();
-      console.log('[Redis] Connected');
+      logger.info('[Redis] Connected');
     });
 
     // Ensure MinIO bucket exists (with retries — MinIO health check can pass before API is ready)
     await retryConnect('MinIO', async () => {
       await ensureBucketExists();
-      console.log('[MinIO] Ready');
+      logger.info('[MinIO] Ready');
     });
 
     // Verify DB connection (with retries)
     await retryConnect('DB', async () => {
       await prisma.$connect();
-      console.log('[DB] Connected');
+      logger.info('[DB] Connected');
     });
 
     app.listen(config.PORT, () => {
-      console.log(`[API] BitAtlas API running on port ${config.PORT} (${config.NODE_ENV})`);
+      logger.info({ port: config.PORT, env: config.NODE_ENV }, `[API] BitAtlas API running`);
     });
   } catch (err) {
-    console.error('[Startup] Fatal error after retries:', err);
+    logger.fatal({ err }, '[Startup] Fatal error after retries');
     process.exit(1);
   }
 }
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('[Shutdown] SIGTERM received, shutting down gracefully...');
+  logger.info('[Shutdown] SIGTERM received, shutting down gracefully...');
   await prisma.$disconnect();
   await redis.quit();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
+  logger.info('[Shutdown] SIGINT received');
   await prisma.$disconnect();
   await redis.quit();
   process.exit(0);

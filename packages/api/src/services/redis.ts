@@ -18,5 +18,8 @@ export const sessionKey = (userId: string, sessionId: string) =>
 export const refreshTokenKey = (token: string) =>
   `refresh:${token}`;
 
+export const rotatedTokenKey = (token: string) =>
+  `rotated:${token}`;
+
 export const apiKeyRateLimitKey = (keyId: string) =>
   `ratelimit:apikey:${keyId}`;
