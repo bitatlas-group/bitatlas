@@ -12,10 +12,10 @@
 export interface EncryptedFileData {
   encryptedBlob: Blob;
   ownerEncryptedKey: string;  // Base64
-  ownerIV: string;            // Base64
+  ownerIv: string;            // Base64 — matches API/DB field name
   emergencyEncryptedKey?: string;  // Base64
-  emergencyIV?: string;       // Base64
-  iv: string;                 // Base64 - IV for file encryption
+  emergencyIv?: string;       // Base64
+  fileIv: string;             // Base64 - IV for file encryption — matches API/DB field name
   authTag: string;            // Base64 - GCM auth tag
 }
 
@@ -56,21 +56,21 @@ export async function encryptFile(
   const fileKeyRaw = await crypto.subtle.exportKey('raw', fileKey);
 
   // 6. Encrypt file key with owner's master key
-  const ownerIV = crypto.getRandomValues(new Uint8Array(12));
+  const ownerIv = crypto.getRandomValues(new Uint8Array(12));
   const ownerEncryptedKeyBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: ownerIV },
+    { name: 'AES-GCM', iv: ownerIv },
     masterKey,
     fileKeyRaw
   );
 
   // 7. Encrypt file key with emergency key (if provided)
   let emergencyEncryptedKeyBuffer: ArrayBuffer | undefined;
-  let emergencyIV: Uint8Array | undefined;
+  let emergencyIv: Uint8Array | undefined;
 
   if (emergencyKey) {
-    emergencyIV = crypto.getRandomValues(new Uint8Array(12));
+    emergencyIv = crypto.getRandomValues(new Uint8Array(12));
     emergencyEncryptedKeyBuffer = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: emergencyIV as Uint8Array<ArrayBuffer> },
+      { name: 'AES-GCM', iv: emergencyIv as Uint8Array<ArrayBuffer> },
       emergencyKey,
       fileKeyRaw
     );
@@ -84,12 +84,12 @@ export async function encryptFile(
   return {
     encryptedBlob: new Blob([ciphertext]),
     ownerEncryptedKey: arrayBufferToBase64(ownerEncryptedKeyBuffer),
-    ownerIV: arrayBufferToBase64(ownerIV),
+    ownerIv: arrayBufferToBase64(ownerIv),
     emergencyEncryptedKey: emergencyEncryptedKeyBuffer
       ? arrayBufferToBase64(emergencyEncryptedKeyBuffer)
       : undefined,
-    emergencyIV: emergencyIV ? arrayBufferToBase64(emergencyIV) : undefined,
-    iv: arrayBufferToBase64(iv),
+    emergencyIv: emergencyIv ? arrayBufferToBase64(emergencyIv) : undefined,
+    fileIv: arrayBufferToBase64(iv),
     authTag: arrayBufferToBase64(authTag),
   };
 }
@@ -99,8 +99,8 @@ export async function encryptFile(
  *
  * @param encryptedBlob - Encrypted file blob
  * @param encryptedFileKey - File key encrypted with master/emergency key (Base64)
- * @param keyIV - IV used to encrypt file key (Base64)
- * @param fileIV - IV used to encrypt file (Base64)
+ * @param keyIv - IV used to encrypt file key (Base64)
+ * @param fileIv - IV used to encrypt file (Base64)
  * @param authTag - GCM authentication tag (Base64)
  * @param userKey - Master key or emergency key
  * @returns Decrypted file as ArrayBuffer
@@ -108,17 +108,17 @@ export async function encryptFile(
 export async function decryptFile(
   encryptedBlob: Blob,
   encryptedFileKey: string,
-  keyIV: string,
-  fileIV: string,
+  keyIv: string,
+  fileIv: string,
   authTag: string,
   userKey: CryptoKey
 ): Promise<ArrayBuffer> {
   // 1. Decrypt file key using master/emergency key
   const encryptedKeyBuffer = base64ToArrayBuffer(encryptedFileKey);
-  const keyIVBuffer = base64ToArrayBuffer(keyIV);
+  const keyIvBuffer = base64ToArrayBuffer(keyIv);
 
   const fileKeyRaw = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: keyIVBuffer },
+    { name: 'AES-GCM', iv: keyIvBuffer },
     userKey,
     encryptedKeyBuffer
   );
@@ -133,7 +133,7 @@ export async function decryptFile(
   );
 
   // 3. Read encrypted blob and append auth tag
-  const fileIVBuffer = base64ToArrayBuffer(fileIV);
+  const fileIvBuffer = base64ToArrayBuffer(fileIv);
   const authTagBuffer = base64ToArrayBuffer(authTag);
   const ciphertextBuffer = await encryptedBlob.arrayBuffer();
 
@@ -146,7 +146,7 @@ export async function decryptFile(
 
   // 4. Decrypt file content
   const decryptedContent = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: fileIVBuffer },
+    { name: 'AES-GCM', iv: fileIvBuffer },
     fileKey,
     encryptedContent
   );
@@ -178,30 +178,30 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
  */
 export async function reencryptFileKey(
   encryptedFileKey: string, // encrypted with oldKey (Base64)
-  keyIV: string,            // IV used with oldKey (Base64)
+  keyIv: string,            // IV used with oldKey (Base64)
   oldKey: CryptoKey,
   newKey: CryptoKey
 ): Promise<{ encryptedKey: string; iv: string }> {
   // 1. Decrypt with old key
   const encryptedKeyBuffer = base64ToArrayBuffer(encryptedFileKey);
-  const keyIVBuffer = base64ToArrayBuffer(keyIV);
+  const keyIvBuffer = base64ToArrayBuffer(keyIv);
 
   const fileKeyRaw = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: keyIVBuffer },
+    { name: 'AES-GCM', iv: keyIvBuffer },
     oldKey,
     encryptedKeyBuffer
   );
 
   // 2. Encrypt with new key
-  const newIV = crypto.getRandomValues(new Uint8Array(12));
+  const newIv = crypto.getRandomValues(new Uint8Array(12));
   const newEncryptedKeyBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: newIV },
+    { name: 'AES-GCM', iv: newIv },
     newKey,
     fileKeyRaw
   );
 
   return {
     encryptedKey: arrayBufferToBase64(newEncryptedKeyBuffer),
-    iv: arrayBufferToBase64(newIV)
+    iv: arrayBufferToBase64(newIv)
   };
 }

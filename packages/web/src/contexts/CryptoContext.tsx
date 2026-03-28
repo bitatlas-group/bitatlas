@@ -22,8 +22,8 @@ interface CryptoContextValue {
   decryptFile: (
     encryptedBlob: Blob,
     ownerEncryptedKey: string,
-    ownerIV: string,
-    fileIV: string,
+    ownerIv: string,
+    fileIv: string,
     authTag: string
   ) => Promise<ArrayBuffer>;
 }
@@ -54,12 +54,12 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
     async (
       encryptedBlob: Blob,
       ownerEncryptedKey: string,
-      ownerIV: string,
-      fileIV: string,
+      ownerIv: string,
+      fileIv: string,
       authTag: string
     ): Promise<ArrayBuffer> => {
       if (!masterKey) throw new Error('No master key — please log in again');
-      return _decryptFile(encryptedBlob, ownerEncryptedKey, ownerIV, fileIV, authTag, masterKey);
+      return _decryptFile(encryptedBlob, ownerEncryptedKey, ownerIv, fileIv, authTag, masterKey);
     },
     [masterKey]
   );
