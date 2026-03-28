@@ -32,6 +32,9 @@ jobs:
             docker compose -f docker-compose.prod.yml build --no-cache api web
             docker compose -f docker-compose.prod.yml up -d --force-recreate api web
 
+            # Run database migrations
+            docker compose -f docker-compose.prod.yml exec -T api npx prisma migrate deploy || echo "Migration skipped (first run or already applied)"
+
             # Wait for API to become healthy (up to 60s)
             echo "Waiting for API health..."
             for i in $(seq 1 12); do
