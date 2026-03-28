@@ -85,7 +85,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     volumes:
-      - minio_data:/data
+      - /mnt/HC_Volume_105189315/minio:/data
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
