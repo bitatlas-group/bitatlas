@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'rea
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
-import { vaultApi, uploadToPresignedUrl, type VaultFile } from '@/lib/api';
+import { vaultApi, foldersApi, uploadToPresignedUrl, type VaultFile, type Folder } from '@/lib/api';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatBytes(bytes: number): string {
@@ -36,7 +36,6 @@ function getFileIcon(mimeType: string): string {
 type SortField = 'date' | 'name' | 'size';
 type SortDir = 'asc' | 'desc';
 
-// ── Root export — wraps in Suspense for useSearchParams ──────────────────────
 export default function VaultPage() {
   return (
     <Suspense
@@ -64,15 +63,16 @@ function VaultContent() {
   const folderId = searchParams.get('folderId') ?? undefined;
 
   const [files, setFiles] = useState<VaultFile[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [moveTarget, setMoveTarget] = useState<VaultFile | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,11 +89,22 @@ function VaultContent() {
     }
   }, [folderId, search]);
 
-  useEffect(() => {
-    if (user) loadFiles();
-  }, [user, loadFiles]);
+  const loadFolders = useCallback(async () => {
+    try {
+      const data = await foldersApi.list();
+      setFolders(data);
+    } catch {
+      // silently fail
+    }
+  }, []);
 
-  // ── Sorted files ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (user) {
+      loadFiles();
+      loadFolders();
+    }
+  }, [user, loadFiles, loadFolders]);
+
   const sortedFiles = useMemo(() => {
     const sorted = [...files].sort((a, b) => {
       let cmp = 0;
@@ -109,7 +120,6 @@ function VaultContent() {
     return sorted;
   }, [files, sortField, sortDir]);
 
-  // ── Sort toggle ─────────────────────────────────────────────────────────────
   function handleSort(field: SortField) {
     if (field === sortField) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -211,14 +221,25 @@ function VaultContent() {
     }
   }
 
+  // ── Move to folder ─────────────────────────────────────────────────────────
+  async function handleMoveToFolder(fileId: string, targetFolderId: string | null) {
+    setError(null);
+    try {
+      await vaultApi.updateFile(fileId, { folderId: targetFolderId });
+      setMoveTarget(null);
+      await loadFiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move file');
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{ backgroundColor: '#F3F1EE', minHeight: '100vh' }} className="flex flex-col">
-      {/* Search row */}
+      {/* Search + upload row */}
       <div className="px-4 pt-5">
         <div className="flex items-center gap-3">
-          {/* Search input — 80% width */}
-          <div className="relative" style={{ flex: '0 0 calc(100% - 60px)' }}>
+          <div className="relative flex-1">
             <span
               className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
               style={{ fontSize: '20px', color: '#9CA3AF' }}
@@ -234,8 +255,6 @@ function VaultContent() {
               style={{ height: '48px', fontSize: '15px', color: '#1A2332' }}
             />
           </div>
-
-          {/* Upload button — 48×48 dark navy */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
@@ -249,10 +268,7 @@ function VaultContent() {
             }}
           >
             {uploading ? (
-              <span
-                className="material-symbols-outlined animate-spin"
-                style={{ fontSize: '20px', color: 'white' }}
-              >
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '20px', color: 'white' }}>
                 progress_activity
               </span>
             ) : (
@@ -266,15 +282,7 @@ function VaultContent() {
 
       {/* Sort row */}
       <div className="px-4 mt-4 flex items-center gap-2">
-        <span
-          style={{
-            fontSize: '12px',
-            fontWeight: '600',
-            color: '#374151',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-          }}
-        >
+        <span style={{ fontSize: '12px', fontWeight: '600', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
           Sort
         </span>
         {(['date', 'name', 'size'] as SortField[]).map((field) => {
@@ -287,25 +295,8 @@ function VaultContent() {
               onClick={() => handleSort(field)}
               style={
                 active
-                  ? {
-                      backgroundColor: 'white',
-                      border: '1px solid #D1D5DB',
-                      borderRadius: '999px',
-                      padding: '4px 14px',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      color: '#1A2332',
-                      cursor: 'pointer',
-                    }
-                  : {
-                      background: 'none',
-                      border: 'none',
-                      padding: '4px 8px',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: '#6B7280',
-                      cursor: 'pointer',
-                    }
+                  ? { backgroundColor: 'white', border: '1px solid #D1D5DB', borderRadius: '999px', padding: '4px 14px', fontSize: '13px', fontWeight: '600', color: '#1A2332', cursor: 'pointer' }
+                  : { background: 'none', border: 'none', padding: '4px 8px', fontSize: '13px', fontWeight: '500', color: '#6B7280', cursor: 'pointer' }
               }
             >
               {active ? `${label}${arrow}` : label}
@@ -314,60 +305,24 @@ function VaultContent() {
         })}
       </div>
 
-      {/* Info banner */}
-      {!bannerDismissed && (
-        <div
-          className="mx-4 mt-4 flex items-center gap-3 rounded-xl px-4 py-3"
-          style={{ backgroundColor: '#F9DDD8' }}
-        >
-          <span
-            className="material-symbols-outlined shrink-0"
-            style={{ fontSize: '18px', color: '#8B4040' }}
-          >
-            info
+      {/* Upload progress */}
+      {uploading && uploadStatus && (
+        <div className="mx-4 mt-4 flex items-center gap-3 rounded-xl px-4 py-3" style={{ backgroundColor: '#DBEAFE' }}>
+          <span className="material-symbols-outlined animate-spin shrink-0" style={{ fontSize: '18px', color: '#1E40AF' }}>
+            progress_activity
           </span>
-          <span style={{ fontSize: '14px', color: '#8B4040', flex: 1 }}>
-            Move to folder coming soon
-          </span>
-          <button
-            onClick={() => setBannerDismissed(true)}
-            aria-label="Dismiss"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: '#8B4040',
-              fontSize: '20px',
-              lineHeight: 1,
-              padding: '0 2px',
-            }}
-          >
-            ×
-          </button>
+          <span style={{ fontSize: '14px', color: '#1E40AF' }}>{uploadStatus}</span>
         </div>
       )}
 
       {/* Error banner */}
       {error && (
-        <div
-          className="mx-4 mt-4 flex items-center gap-2 rounded-xl px-4 py-3"
-          style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}
-        >
-          <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px' }}>
-            error
-          </span>
+        <div className="mx-4 mt-4 flex items-center gap-2 rounded-xl px-4 py-3" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>
+          <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px' }}>error</span>
           <span style={{ fontSize: '14px', flex: 1 }}>{error}</span>
           <button
             onClick={() => setError(null)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: '#991B1B',
-              fontSize: '20px',
-              lineHeight: 1,
-              padding: '0 2px',
-            }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991B1B', fontSize: '20px', lineHeight: 1, padding: '0 2px' }}
           >
             ×
           </button>
@@ -379,10 +334,7 @@ function VaultContent() {
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="flex flex-col items-center gap-3">
-              <span
-                className="material-symbols-outlined animate-spin"
-                style={{ fontSize: '32px', color: '#6B7280' }}
-              >
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '32px', color: '#6B7280' }}>
                 progress_activity
               </span>
               <p style={{ fontSize: '14px', color: '#6B7280' }}>Loading your vault…</p>
@@ -395,13 +347,23 @@ function VaultContent() {
             <FileCard
               key={file.id}
               file={file}
+              folders={folders}
+              currentFolderId={folderId}
               downloading={downloading === file.id}
               onDownload={() => handleDownload(file)}
               onDelete={() => handleDelete(file.id)}
+              onMove={(targetFolderId) => handleMoveToFolder(file.id, targetFolderId)}
+              moveOpen={moveTarget?.id === file.id}
+              onMoveToggle={() => setMoveTarget(moveTarget?.id === file.id ? null : file)}
             />
           ))
         )}
       </div>
+
+      {/* Move modal backdrop */}
+      {moveTarget && (
+        <div className="fixed inset-0 z-30 bg-black/30" onClick={() => setMoveTarget(null)} />
+      )}
 
       <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelected} />
     </div>
@@ -411,14 +373,24 @@ function VaultContent() {
 // ── File Card ─────────────────────────────────────────────────────────────────
 function FileCard({
   file,
+  folders,
+  currentFolderId,
   downloading,
   onDownload,
   onDelete,
+  onMove,
+  moveOpen,
+  onMoveToggle,
 }: {
   file: VaultFile;
+  folders: Folder[];
+  currentFolderId?: string;
   downloading: boolean;
   onDownload: () => void;
   onDelete: () => void;
+  onMove: (folderId: string | null) => void;
+  moveOpen: boolean;
+  onMoveToggle: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const icon = getFileIcon(file.mimeType);
@@ -426,109 +398,91 @@ function FileCard({
   return (
     <div
       className="rounded-2xl relative"
-      style={{
-        backgroundColor: 'white',
-        padding: '20px',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
-      }}
+      style={{ backgroundColor: 'white', padding: '16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)' }}
     >
-      {/* Row 1: file icon (top-left) + three-dot menu (top-right) */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start gap-3">
+        {/* File icon */}
         <div
           className="flex items-center justify-center rounded-lg shrink-0"
           style={{ width: '44px', height: '44px', backgroundColor: '#F3F4F6' }}
         >
           <span
             className="material-symbols-outlined"
-            style={{
-              fontSize: '24px',
-              color: '#374151',
-              fontVariationSettings: "'FILL' 1",
-            }}
+            style={{ fontSize: '24px', color: '#374151', fontVariationSettings: "'FILL' 1" }}
           >
             {icon}
           </span>
         </div>
 
-        {/* Three-dot overflow menu */}
-        <div className="relative">
+        {/* File info — takes remaining space */}
+        <div className="flex-1 min-w-0">
+          <p className="font-bold leading-snug line-clamp-2" style={{ fontSize: '15px', color: '#111827' }} title={file.name}>
+            {file.name}
+          </p>
+          <div className="flex items-center gap-3 mt-1">
+            <span style={{ fontSize: '12px', color: '#9CA3AF' }}>{formatBytes(file.originalSizeBytes)}</span>
+            <span style={{ fontSize: '12px', color: '#9CA3AF' }}>{formatDate(file.createdAt)}</span>
+          </div>
+          {/* Encrypted badge */}
+          <div className="mt-2">
+            <span
+              className="inline-flex items-center gap-1 rounded-full"
+              style={{ backgroundColor: '#0C5C4C', padding: '2px 10px' }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'white', fontVariationSettings: "'FILL' 1" }}>
+                lock
+              </span>
+              <span style={{ fontSize: '10px', fontWeight: '700', color: 'white', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Encrypted
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {/* Three-dot menu */}
+        <div className="relative shrink-0">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              color: '#9CA3AF',
-            }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9CA3AF' }}
             aria-label="More options"
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
-              more_vert
-            </span>
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>more_vert</span>
           </button>
 
           {menuOpen && (
             <>
-              {/* Backdrop to close on outside click */}
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setMenuOpen(false)}
-              />
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div
                 className="absolute right-0 top-8 rounded-xl z-20 overflow-hidden"
-                style={{
-                  backgroundColor: 'white',
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                  minWidth: '140px',
-                }}
+                style={{ backgroundColor: 'white', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: '160px' }}
               >
                 <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onDownload();
-                  }}
+                  onClick={() => { setMenuOpen(false); onDownload(); }}
                   disabled={downloading}
                   className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors disabled:opacity-50"
-                  style={{
-                    fontSize: '14px',
-                    color: '#1A2332',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
+                  style={{ fontSize: '14px', color: '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}
                 >
                   {downloading ? (
-                    <span
-                      className="material-symbols-outlined animate-spin"
-                      style={{ fontSize: '16px' }}
-                    >
-                      progress_activity
-                    </span>
+                    <span className="material-symbols-outlined animate-spin" style={{ fontSize: '16px' }}>progress_activity</span>
                   ) : (
-                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                      download
-                    </span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>download</span>
                   )}
                   Download
                 </button>
                 <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onDelete();
-                  }}
-                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-red-50 transition-colors"
-                  style={{
-                    fontSize: '14px',
-                    color: '#DC2626',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
+                  onClick={() => { setMenuOpen(false); onMoveToggle(); }}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                  style={{ fontSize: '14px', color: '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                    delete
-                  </span>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>drive_file_move</span>
+                  Move to folder
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); onDelete(); }}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-red-50 transition-colors"
+                  style={{ fontSize: '14px', color: '#DC2626', background: 'none', border: 'none', cursor: 'pointer' }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
                   Delete
                 </button>
               </div>
@@ -537,52 +491,52 @@ function FileCard({
         </div>
       </div>
 
-      {/* Row 2: file name */}
-      <p
-        className="mt-3 font-bold leading-snug line-clamp-2"
-        style={{ fontSize: '16px', color: '#111827' }}
-        title={file.name}
-      >
-        {file.name}
-      </p>
-
-      {/* Row 3: size (left) + date (right) */}
-      <div className="flex items-center justify-between mt-1.5">
-        <span style={{ fontSize: '13px', color: '#9CA3AF' }}>
-          {formatBytes(file.originalSizeBytes)}
-        </span>
-        <span style={{ fontSize: '13px', color: '#9CA3AF' }}>{formatDate(file.createdAt)}</span>
-      </div>
-
-      {/* Row 4: ENCRYPTED badge */}
-      <div className="mt-3">
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full"
-          style={{ backgroundColor: '#0C5C4C', padding: '4px 12px' }}
+      {/* Move to folder panel */}
+      {moveOpen && (
+        <div
+          className="mt-3 rounded-xl overflow-hidden"
+          style={{ backgroundColor: '#F9FAFB', border: '1px solid #E5E7EB' }}
         >
-          <span
-            className="material-symbols-outlined"
-            style={{
-              fontSize: '12px',
-              color: 'white',
-              fontVariationSettings: "'FILL' 1",
-            }}
+          <div className="px-3 py-2" style={{ borderBottom: '1px solid #E5E7EB' }}>
+            <span style={{ fontSize: '12px', fontWeight: '600', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Move to
+            </span>
+          </div>
+          {/* Root / All files option */}
+          <button
+            onClick={() => onMove(null)}
+            disabled={!file.folderId}
+            className="flex items-center gap-2 w-full px-3 py-2.5 text-left hover:bg-gray-100 transition-colors disabled:opacity-40"
+            style={{ fontSize: '14px', color: '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}
           >
-            lock
-          </span>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: '700',
-              color: 'white',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Encrypted
-          </span>
-        </span>
-      </div>
+            <span className="material-symbols-outlined" style={{ fontSize: '16px', color: '#6B7280' }}>home</span>
+            All files (root)
+          </button>
+          {folders.map((folder) => {
+            const isCurrent = file.folderId === folder.id;
+            return (
+              <button
+                key={folder.id}
+                onClick={() => onMove(folder.id)}
+                disabled={isCurrent}
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-left hover:bg-gray-100 transition-colors disabled:opacity-40"
+                style={{ fontSize: '14px', color: isCurrent ? '#9CA3AF' : '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px', color: isCurrent ? '#9CA3AF' : '#6B7280' }}>
+                  folder
+                </span>
+                {folder.name}
+                {isCurrent && <span style={{ fontSize: '11px', color: '#9CA3AF', marginLeft: 'auto' }}>current</span>}
+              </button>
+            );
+          })}
+          {folders.length === 0 && (
+            <p className="px-3 py-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>
+              No folders yet. Create one from the sidebar.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -593,42 +547,24 @@ function EmptyState({ onUpload }: { onUpload: () => void }) {
     <div className="flex flex-col items-center justify-center h-96 gap-6">
       <div
         className="flex items-center justify-center"
-        style={{
-          width: '96px',
-          height: '96px',
-          borderRadius: '32px',
-          backgroundColor: 'rgba(26,35,50,0.06)',
-        }}
+        style={{ width: '96px', height: '96px', borderRadius: '32px', backgroundColor: 'rgba(26,35,50,0.06)' }}
       >
-        <span
-          className="material-symbols-outlined"
-          style={{ fontSize: '48px', color: 'rgba(26,35,50,0.25)' }}
-        >
+        <span className="material-symbols-outlined" style={{ fontSize: '48px', color: 'rgba(26,35,50,0.25)' }}>
           shield_lock
         </span>
       </div>
       <div className="text-center" style={{ maxWidth: '280px' }}>
-        <h3 className="font-bold text-xl" style={{ color: '#1A2332' }}>
-          Your vault is empty
-        </h3>
+        <h3 className="font-bold text-xl" style={{ color: '#1A2332' }}>Your vault is empty</h3>
         <p className="mt-2" style={{ fontSize: '14px', color: '#6B7280' }}>
-          Upload files to encrypt them client-side with AES-256-GCM before they ever reach our
-          servers.
+          Upload files to encrypt them client-side with AES-256-GCM before they ever reach our servers.
         </p>
       </div>
       <button
         onClick={onUpload}
         className="flex items-center gap-2 rounded-xl font-semibold transition-all hover:opacity-90"
-        style={{
-          backgroundColor: '#1A2332',
-          color: 'white',
-          padding: '12px 24px',
-          fontSize: '14px',
-        }}
+        style={{ backgroundColor: '#1A2332', color: 'white', padding: '12px 24px', fontSize: '14px' }}
       >
-        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-          upload_file
-        </span>
+        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
         Upload your first file
       </button>
     </div>

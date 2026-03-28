@@ -8,7 +8,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
 import { authApi, foldersApi, type Folder } from '@/lib/api';
 
-// ── Inner layout — uses useSearchParams, must be inside Suspense ──────────────
 function VaultLayoutInner({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { clearMasterKey } = useCrypto();
@@ -20,6 +19,7 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -28,6 +28,11 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
       loadFolders();
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close sidebar on navigation
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname, selectedFolderId]);
 
   async function loadFolders() {
     try {
@@ -70,10 +75,50 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen bg-surface overflow-hidden">
+      {/* ── Mobile header ── */}
+      <div
+        className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4"
+        style={{ height: '56px', backgroundColor: '#F3F1EE', borderBottom: '1px solid #E5E7EB' }}
+      >
+        <button
+          onClick={() => setSidebarOpen(true)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: '24px', color: '#1A2332' }}>
+            menu
+          </span>
+        </button>
+        <Link href="/">
+          <Image
+            src="/logo-full.jpg"
+            alt="BitAtlas"
+            width={140}
+            height={38}
+            className="h-8 w-auto object-contain"
+          />
+        </Link>
+        <div style={{ width: '32px' }} /> {/* Spacer for centering */}
+      </div>
+
+      {/* ── Mobile sidebar backdrop ── */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-30 bg-black/30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* ── Sidebar ── */}
-      <aside className="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
-        {/* Logo */}
-        <div className="px-5 py-5">
+      <aside
+        className={`
+          fixed md:relative z-40 md:z-auto
+          w-64 md:w-60 flex-shrink-0 bg-surface-container-low flex flex-col h-full
+          transition-transform duration-200 ease-out
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
+      >
+        {/* Logo + close (mobile) */}
+        <div className="px-5 py-5 flex items-center justify-between">
           <Link href="/">
             <Image
               src="/logo-full.jpg"
@@ -83,6 +128,15 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
               className="h-10 w-auto object-contain"
             />
           </Link>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '22px', color: '#6B7280' }}>
+              close
+            </span>
+          </button>
         </div>
 
         {/* Nav items */}
@@ -101,10 +155,7 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
               >
                 <span
                   className="material-symbols-outlined"
-                  style={{
-                    fontSize: '20px',
-                    fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0",
-                  }}
+                  style={{ fontSize: '20px', fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }}
                 >
                   {icon}
                 </span>
@@ -125,13 +176,10 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
               className="text-on-surface-variant hover:text-primary transition-colors"
               title="New folder"
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-                add
-              </span>
+              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
             </button>
           </div>
 
-          {/* New folder input */}
           {creatingFolder && (
             <div className="px-3 mb-2">
               <input
@@ -155,7 +203,6 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
             </div>
           )}
 
-          {/* All files link */}
           <Link
             href="/vault"
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all ${
@@ -164,9 +211,7 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
                 : 'text-on-surface-variant hover:bg-surface-container/60'
             }`}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-              home
-            </span>
+            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>home</span>
             All files
           </Link>
 
@@ -180,9 +225,7 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
                   : 'text-on-surface-variant hover:bg-surface-container/60'
               }`}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                folder
-              </span>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder</span>
               <span className="truncate">{folder.name}</span>
             </Link>
           ))}
@@ -198,9 +241,7 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
               onClick={handleLogout}
               className="mt-2 flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-error transition-colors"
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-                logout
-              </span>
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>logout</span>
               Sign out
             </button>
           </div>
@@ -208,12 +249,11 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
       </aside>
 
       {/* ── Main content ── */}
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto pt-14 md:pt-0">{children}</main>
     </div>
   );
 }
 
-// ── Exported layout — wraps inner in Suspense for useSearchParams ─────────────
 export default function VaultLayout({ children }: { children: ReactNode }) {
   return (
     <Suspense fallback={null}>

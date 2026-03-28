@@ -141,6 +141,12 @@ export const vaultApi = {
       body: JSON.stringify(data),
     }),
 
+  updateFile: (id: string, data: { folderId?: string | null; name?: string }) =>
+    request<VaultFile>(`/vault/files/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
   deleteFile: (id: string) =>
     request<void>(`/vault/files/${id}`, { method: 'DELETE' }),
 
