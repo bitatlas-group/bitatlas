@@ -16,6 +16,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthUser;
+      apiKeyPermissions?: string[];
     }
   }
 }
@@ -124,8 +125,24 @@ async function handleApiKeyAuth(
     }).catch(() => {});
 
     req.user = { id: apiKey.user.id, email: apiKey.user.email };
+    req.apiKeyPermissions = apiKey.permissions as string[];
     next();
   } catch {
     res.status(500).json({ error: 'Authentication error' });
   }
+}
+
+export function requirePermission(permission: string) {
+  return function (req: Request, res: Response, next: NextFunction): void {
+    // JWT auth → full access (apiKeyPermissions not set)
+    if (req.apiKeyPermissions === undefined) {
+      next();
+      return;
+    }
+    if (req.apiKeyPermissions.includes(permission)) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: `API key missing '${permission}' permission` });
+  };
 }

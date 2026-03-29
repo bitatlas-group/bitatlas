@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { prisma } from '../db/client';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requirePermission } from '../middleware/auth';
 import { uploadRateLimit } from '../middleware/rateLimit';
 import { generateUploadUrl, generateDownloadUrl, deleteObject } from '../services/storage';
 
@@ -30,9 +30,12 @@ const createFileSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).optional().nullable(),
 });
 
+const MAX_FILE_SIZE_BYTES = 104857600; // 100 MB
+
 const uploadUrlSchema = z.object({
   fileName: z.string().min(1).max(500),
   contentType: z.string().max(255).default('application/octet-stream'),
+  maxSizeBytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).default(MAX_FILE_SIZE_BYTES),
 });
 
 const listFilesSchema = z.object({
@@ -45,7 +48,7 @@ const listFilesSchema = z.object({
 });
 
 // GET /vault/files
-router.get('/files', async (req: Request, res: Response): Promise<void> => {
+router.get('/files', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
   const parsed = listFilesSchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
@@ -73,10 +76,6 @@ router.get('/files', async (req: Request, res: Response): Promise<void> => {
         sizeBytes: true,
         originalSizeBytes: true,
         storageKey: true,
-        ownerEncryptedKey: true,
-        ownerIv: true,
-        fileIv: true,
-        authTag: true,
         folderId: true,
         category: true,
         tags: true,
@@ -104,7 +103,7 @@ router.get('/files', async (req: Request, res: Response): Promise<void> => {
 });
 
 // GET /vault/files/:id
-router.get('/files/:id', async (req: Request, res: Response): Promise<void> => {
+router.get('/files/:id', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
   const file = await prisma.file.findFirst({
     where: { id: req.params.id, userId: req.user!.id, deletedAt: null },
   });
@@ -122,7 +121,7 @@ router.get('/files/:id', async (req: Request, res: Response): Promise<void> => {
 });
 
 // POST /vault/files/upload-url — generate presigned upload URL
-router.post('/files/upload-url', uploadRateLimit, async (req: Request, res: Response): Promise<void> => {
+router.post('/files/upload-url', uploadRateLimit, requirePermission('write'), async (req: Request, res: Response): Promise<void> => {
   const parsed = uploadUrlSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
@@ -141,7 +140,7 @@ router.post('/files/upload-url', uploadRateLimit, async (req: Request, res: Resp
 });
 
 // GET /vault/files/:id/download-url
-router.get('/files/:id/download-url', async (req: Request, res: Response): Promise<void> => {
+router.get('/files/:id/download-url', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
   const file = await prisma.file.findFirst({
     where: { id: req.params.id, userId: req.user!.id, deletedAt: null },
     select: {
@@ -176,7 +175,7 @@ router.get('/files/:id/download-url', async (req: Request, res: Response): Promi
 });
 
 // POST /vault/files — register file after upload
-router.post('/files', async (req: Request, res: Response): Promise<void> => {
+router.post('/files', requirePermission('write'), async (req: Request, res: Response): Promise<void> => {
   const parsed = createFileSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
@@ -189,6 +188,12 @@ router.post('/files', async (req: Request, res: Response): Promise<void> => {
   // Verify storage key belongs to this user
   if (!data.storageKey.startsWith(`user/${userId}/`)) {
     res.status(403).json({ error: 'Invalid storage key' });
+    return;
+  }
+
+  // Enforce per-file size limit (100 MB)
+  if (data.sizeBytes > MAX_FILE_SIZE_BYTES) {
+    res.status(413).json({ error: 'File exceeds maximum allowed size of 100 MB', maxSizeBytes: MAX_FILE_SIZE_BYTES });
     return;
   }
 
@@ -259,7 +264,7 @@ const updateFileSchema = z.object({
   name: z.string().min(1).max(500).optional(),
 });
 
-router.patch('/files/:id', async (req: Request, res: Response): Promise<void> => {
+router.patch('/files/:id', requirePermission('write'), async (req: Request, res: Response): Promise<void> => {
   const parsed = updateFileSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
@@ -304,7 +309,7 @@ router.patch('/files/:id', async (req: Request, res: Response): Promise<void> =>
 });
 
 // DELETE /vault/files/:id — soft delete + S3 cleanup + quota update
-router.delete('/files/:id', async (req: Request, res: Response): Promise<void> => {
+router.delete('/files/:id', requirePermission('delete'), async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.id;
   const file = await prisma.file.findFirst({
     where: { id: req.params.id, userId, deletedAt: null },
