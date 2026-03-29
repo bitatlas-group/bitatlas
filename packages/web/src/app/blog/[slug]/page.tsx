@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     keywords: post.keywords.join(', '),
     authors: [{ name: post.author }],
     alternates: {
-      canonical: `https://bitatlas.io/blog/${slug}`,
+      canonical: `https://bitatlas.com/blog/${slug}`,
     },
     openGraph: {
       title: post.title,
@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       type: 'article',
       publishedTime: post.date,
       siteName: 'BitAtlas',
-      url: `https://bitatlas.io/blog/${slug}`,
+      url: `https://bitatlas.com/blog/${slug}`,
     },
   };
 }
@@ -52,7 +52,7 @@ export default async function BlogPostPage({ params }: Props) {
     publisher: {
       '@type': 'Organization',
       name: 'BitAtlas',
-      url: 'https://bitatlas.io',
+      url: 'https://bitatlas.com',
     },
     mainEntityOfPage: `https://bitatlas.io/blog/${slug}`,
     keywords: post.keywords.join(', '),
@@ -81,15 +81,8 @@ export default async function BlogPostPage({ params }: Props) {
           </Link>
 
           <div className="hidden md:flex gap-8 items-center">
-            {(['Product', 'Pricing', 'Developers'] as const).map((label) => (
-              <a
-                key={label}
-                href="#"
-                className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors"
-              >
-                {label}
-              </a>
-            ))}
+            <Link href="/#features" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Product</Link>
+            <Link href="/#why" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Why BitAtlas</Link>
             <Link
               href="/blog"
               className="font-headline font-medium text-sm tracking-tight text-primary transition-colors"
@@ -206,21 +199,27 @@ export default async function BlogPostPage({ params }: Props) {
               />
             </Link>
             <p className="text-xs tracking-wide uppercase font-semibold text-slate-500">
-              © 2026 BitAtlas Inc. Secure Intelligence Layer.
+              © 2026 BitAtlas. Zero-Knowledge Cloud Storage.
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-8 items-center">
-            {['Privacy Policy', 'Terms of Service', 'Security Whitepaper', 'Status', 'Contact'].map(
-              (link) => (
-                <a
-                  key={link}
-                  href="#"
-                  className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
-                >
-                  {link}
-                </a>
-              )
-            )}
+            {[
+              { label: "Security", href: "/security" },
+              { label: "Blog", href: "/blog" },
+              { label: "GitHub", href: "https://github.com/bitatlas-group/bitatlas" },
+              { label: "npm", href: "https://www.npmjs.com/package/@bitatlas/mcp-server" },
+              { label: "Contact", href: "mailto:support@bitatlas.com" },
+            ].map((link) => (
+              <a
+                key={link.label}
+                href={link.href}
+                target={link.href.startsWith("http") || link.href.startsWith("mailto") ? "_blank" : undefined}
+                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
+              >
+                {link.label}
+              </a>
+            ))}
           </div>
         </div>
       </footer>
