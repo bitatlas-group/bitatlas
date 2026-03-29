@@ -85,18 +85,23 @@ export default function Home() {
                 >
                   Get Started for Free
                 </Link>
-                <button className="glass-effect bg-surface-container-highest/50 text-on-surface px-8 py-4 rounded-xl font-headline font-bold text-lg border border-outline-variant/15 hover:bg-surface-container-highest transition-all">
-                  View API Docs
-                </button>
+                <a
+                  href="https://github.com/bitatlas-group/bitatlas"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="glass-effect bg-surface-container-highest/50 text-on-surface px-8 py-4 rounded-xl font-headline font-bold text-lg border border-outline-variant/15 hover:bg-surface-container-highest transition-all text-center"
+                >
+                  View on GitHub
+                </a>
               </div>
 
-              {/* Compliance badges (replaces placeholder logos) */}
+              {/* Compliance badges */}
               <div className="flex flex-wrap items-center gap-4 pt-8 opacity-70">
                 <span className="text-xs font-bold uppercase tracking-widest text-outline">
-                  Compliance
+                  Built with
                 </span>
                 <div className="flex flex-wrap gap-3">
-                  {["EU-Hosted", "SOC 2", "GDPR Compliant"].map((badge) => (
+                  {["EU-Hosted", "AES-256-GCM", "Zero-Knowledge", "Open Source"].map((badge) => (
                     <span
                       key={badge}
                       className="px-3 py-1 bg-surface-container-high rounded text-xs font-bold text-on-surface-variant uppercase tracking-wide border border-outline-variant/20"
@@ -228,14 +233,14 @@ export default function Home() {
                   iconBg: "bg-secondary",
                   iconColor: "text-on-secondary",
                   title: "Agent-First Storage",
-                  desc: "Native support for long-term vector memory, structured JSON state, and secure binary objects. Optimized for the latency requirements of LLMs.",
+                  desc: "MCP server with 7 tools for upload, download, search, and file management. Your AI agents get encrypted persistent storage via a single npm package.",
                 },
                 {
                   icon: "cloud_sync",
                   iconBg: "bg-tertiary",
                   iconColor: "text-on-tertiary",
-                  title: "Seamless Integration",
-                  desc: "One-line SDKs for Python, Node, and Rust. Direct integrations with LangChain, AutoGPT, and CrewAI frameworks right out of the box.",
+                  title: "Simple Integration",
+                  desc: "Install with npx @bitatlas/mcp-server and connect to Claude, Cursor, or any MCP-compatible client. Open source on GitHub — MIT licensed.",
                 },
               ].map((card) => (
                 <div
@@ -295,8 +300,8 @@ export default function Home() {
                       bg: "bg-secondary-container",
                       icon: "bolt",
                       iconColor: "text-on-secondary-container",
-                      title: "Edge Persistence",
-                      desc: "Global edge network ensures that your agents have sub-50ms access to their state anywhere in the world.",
+                      title: "EU Infrastructure",
+                      desc: "Hosted on Hetzner in Germany. Your data stays in the EU, governed by EU law. No US CLOUD Act exposure.",
                     },
                     {
                       bg: "bg-primary-fixed",
@@ -411,9 +416,14 @@ export default function Home() {
               >
                 Get Started Free
               </Link>
-              <button className="text-on-primary px-10 py-5 font-headline font-bold text-xl hover:underline underline-offset-8 transition-all">
-                Read the Docs
-              </button>
+              <a
+                href="https://github.com/bitatlas-group/bitatlas"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-on-primary px-10 py-5 font-headline font-bold text-xl hover:underline underline-offset-8 transition-all"
+              >
+                View on GitHub
+              </a>
             </div>
           </div>
         </section>
@@ -460,35 +470,32 @@ export default function Home() {
               />
             </div>
             <p className="text-xs tracking-wide uppercase font-semibold text-slate-500">
-              © 2026 BitAtlas Inc. Secure Intelligence Layer.
+              © 2026 BitAtlas. Zero-Knowledge Cloud Storage.
             </p>
           </div>
 
           <div className="flex flex-wrap justify-center gap-8 items-center">
             {[
-              "Privacy Policy",
-              "Terms of Service",
-              "Security Whitepaper",
-              "Status",
-              "Contact",
+              { label: "Security", href: "/security" },
+              { label: "Blog", href: "/blog" },
+              { label: "GitHub", href: "https://github.com/bitatlas-group/bitatlas" },
+              { label: "npm", href: "https://www.npmjs.com/package/@bitatlas/mcp-server" },
+              { label: "Contact", href: "mailto:support@bitatlas.com" },
             ].map((link) => (
               <a
-                key={link}
-                href="/security"
+                key={link.label}
+                href={link.href}
+                target={link.href.startsWith("http") || link.href.startsWith("mailto") ? "_blank" : undefined}
+                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
                 className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
               >
-                {link}
+                {link.label}
               </a>
             ))}
-            <a
-              href="/blog"
-              className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
-            >
-              Blog
-            </a>
             <a 
               href="https://legacyshield.eu" 
               target="_blank" 
+              rel="noopener noreferrer"
               className="text-xs tracking-wide uppercase font-bold text-primary hover:text-secondary transition-colors"
             >
               Used by LegacyShield
