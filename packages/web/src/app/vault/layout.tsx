@@ -77,14 +77,13 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
             menu
           </span>
         </button>
-        <Link href="/">
-          <Image
-            src="/logo-full.jpg"
-            alt="BitAtlas"
-            width={140}
-            height={38}
-            className="h-8 w-auto object-contain"
-          />
+        <Link href="/" className="flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-primary" style={{ fontSize: '22px' }}>
+            shield_lock
+          </span>
+          <span className="font-headline font-bold text-on-surface text-base tracking-tight">
+            bitatlas
+          </span>
         </Link>
         <div style={{ width: '32px' }} /> {/* Spacer for centering */}
       </div>
