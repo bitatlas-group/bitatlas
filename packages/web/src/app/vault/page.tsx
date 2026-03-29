@@ -156,11 +156,13 @@ function VaultContent() {
 
   // ── Decrypt helper (shared by download + preview) ───────────────────────────
   async function decryptVaultFile(file: VaultFile): Promise<ArrayBuffer> {
-    const { url } = await vaultApi.getDownloadUrl(file.id);
+    const { url, encryptionMetadata } = await vaultApi.getDownloadUrl(file.id);
     const res = await fetch(url);
     if (!res.ok) throw new Error('Download failed');
     const encryptedBlob = await res.blob();
-    return decryptFile(encryptedBlob, file.ownerEncryptedKey, file.ownerIv, file.fileIv, file.authTag);
+    // Use encryption metadata from download endpoint (not file list)
+    const meta = encryptionMetadata || file;
+    return decryptFile(encryptedBlob, meta.ownerEncryptedKey, meta.ownerIv, meta.fileIv, meta.authTag);
   }
 
   // ── Download ────────────────────────────────────────────────────────────────
