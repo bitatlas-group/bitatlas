@@ -1,4 +1,4 @@
-# BitAtlas 🦞
+# BitAtlas
 
 **Zero Knowledge Cloud Drive for Humans and Agents**
 
