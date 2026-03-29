@@ -1,6 +1,11 @@
 node_modules/
 .next/
 .env
-.env.prod
-.env.local
+.env.*
 *.log
+*.pem
+*.key
+.DS_Store
+dist/
+out/
+coverage/
