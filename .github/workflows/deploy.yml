@@ -16,6 +16,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          command_timeout: 15m
           script_stop: true
           script: |
             set -euo pipefail
@@ -29,7 +30,7 @@ jobs:
             # Always use docker compose — never manual docker run.
             # This ensures correct network (bitatlas_internal), health checks,
             # and dependency ordering are applied.
-            docker compose -f docker-compose.prod.yml build --no-cache api web
+            docker compose -f docker-compose.prod.yml build api web
             docker compose -f docker-compose.prod.yml up -d --force-recreate api web
 
             # Run database migrations
