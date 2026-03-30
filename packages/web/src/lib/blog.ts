@@ -27,9 +27,9 @@ export function getAllPosts(): BlogPost[] {
   for (const file of files) {
     const raw = fs.readFileSync(path.join(BLOG_DIR, file), 'utf-8');
     const { data, content } = matter(raw);
-    if (!data.slug) continue;
+    const slug = data.slug || file.replace(/\.(mdx?|md)$/, '');
     posts.push({
-      slug: data.slug,
+      slug,
       title: data.title,
       description: data.description,
       date: data.date,
@@ -61,7 +61,8 @@ export function getAllSlugs(): { slug: string }[] {
   for (const file of files) {
     const raw = fs.readFileSync(path.join(BLOG_DIR, file), 'utf-8');
     const { data } = matter(raw);
-    if (data.slug) slugs.push({ slug: data.slug });
+    const slug = data.slug || file.replace(/\.(mdx?|md)$/, '');
+    slugs.push({ slug });
   }
 
   return slugs;
