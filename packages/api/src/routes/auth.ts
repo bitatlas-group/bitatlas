@@ -32,6 +32,13 @@ const refreshSchema = z.object({
 
 // POST /auth/register
 router.post('/register', authRateLimit, async (req: Request, res: Response): Promise<void> => {
+  // Server-side honeypot check — bots send this field, humans don't
+  if (req.body.website) {
+    // Silently accept to avoid tipping off the bot
+    res.status(201).json({ user: { id: 'ok' } });
+    return;
+  }
+
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });

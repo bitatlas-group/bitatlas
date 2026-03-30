@@ -15,6 +15,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [website, setWebsite] = useState(''); // honeypot
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,12 +23,15 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(null);
 
+    // Honeypot — bots fill this, humans don't see it
+    if (website) return;
+
     if (password !== confirm) {
       setError('Passwords do not match');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    if (password.length < 12) {
+      setError('Password must be at least 12 characters');
       return;
     }
 
@@ -112,7 +116,7 @@ export default function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              placeholder="Min. 8 characters"
+              placeholder="Min. 12 characters"
               className="w-full bg-surface-container-highest rounded-xl px-4 py-3 text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20 transition-all font-body text-sm"
             />
           </div>
@@ -129,6 +133,20 @@ export default function RegisterPage() {
               required
               placeholder="••••••••"
               className="w-full bg-surface-container-highest rounded-xl px-4 py-3 text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20 transition-all font-body text-sm"
+            />
+          </div>
+
+          {/* Honeypot — hidden from humans, bots auto-fill it */}
+          <div className="absolute opacity-0 top-0 left-0 h-0 w-0 -z-10" aria-hidden="true">
+            <label htmlFor="website">Website</label>
+            <input
+              type="text"
+              id="website"
+              name="website"
+              autoComplete="off"
+              tabIndex={-1}
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
             />
           </div>
 
