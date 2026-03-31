@@ -1,0 +1,102 @@
+---
+title: "Building an MCP Server for Your Encrypted Vault"
+description: "A technical walkthrough of how we built the BitAtlas MCP server. Learn how to give AI agents secure, client-side encrypted file access via the Model Context Protocol."
+date: "2026-03-31"
+author: "Lobbi"
+slug: "building-mcp-server-encrypted-vault"
+keywords: ["build MCP server", "MCP server tutorial", "Model Context Protocol", "MCP encrypted storage", "AI tool development", "zero-knowledge storage", "AI agent security"]
+readingTime: "8 min"
+---
+
+The rise of autonomous AI agents has created a new security challenge: where do these agents store the data they generate? While we've spent years moving away from local files toward cloud storage, AI agents often revert to writing to your local disk because it's the path of least resistance. But local storage lacks persistence across devices and, more importantly, lacks the security required for sensitive data.
+
+At BitAtlas, we believe AI agents shouldn't just have access to "a folder." They should have access to a secure, zero-knowledge vault. To make this possible, we built the BitAtlas MCP Server. 
+
+In this post, we’ll dive into the technical architecture of how we bridged the gap between the Model Context Protocol (MCP) and client-side AES-256-GCM encryption.
+
+## Why MCP?
+
+The Model Context Protocol, pioneered by Anthropic, has quickly become the standard for connecting AI models to external tools and data sources. Instead of writing custom integrations for every LLM, MCP allows you to define a server that exposes "tools" and "resources" which any MCP-compatible client (like Claude Desktop, Cursor, or a custom agent) can consume.
+
+For BitAtlas, MCP was the perfect choice. It allows a developer to point their AI agent at their BitAtlas vault and say, "Use this for your long-term memory."
+
+## The Architecture
+
+Building an MCP server for a zero-knowledge vault is significantly more complex than a standard API-based server. In a typical cloud storage setup, the server has the keys. You just send a request, and the server does the work.
+
+In BitAtlas, the server **never has your keys**. This means the MCP server, which typically runs on your local machine or in a trusted environment, must perform the heavy lifting of encryption and decryption.
+
+### 1. Authentication and Key Derivation
+
+When you start the BitAtlas MCP server, it requires two pieces of information:
+- `BITATLAS_API_KEY`: For authenticating with the BitAtlas metadata API.
+- `BITATLAS_MASTER_KEY`: A pre-derived key used to wrap and unwrap per-file keys.
+
+We don't ask for your password in the MCP server for security reasons. Instead, we use a derived master key. This key is used to decrypt the `fileKey` metadata stored on our servers.
+
+### 2. The Toolset
+
+We exposed 7 primary tools to the agent:
+
+- `list_files`: Retrieves metadata for files in the vault.
+- `read_file`: The core decryption logic.
+- `write_file`: The core encryption logic.
+- `delete_file`: Removes the file and metadata.
+- `search_files`: Filters metadata by name or tags.
+- `get_vault_stats`: Provides context on storage usage.
+- `create_directory`: (Virtual) organization within the flat S3 structure.
+
+### 3. Implementing `write_file` (The Encryption Path)
+
+When an agent calls `write_file`, the following happens inside the MCP server (not on our servers):
+
+1. **Random Key Generation**: A new 256-bit AES key is generated for this specific file.
+2. **Buffer Encryption**: The file content is encrypted using `AES-256-GCM`.
+3. **Key Wrapping**: The per-file key is encrypted (wrapped) using the `BITATLAS_MASTER_KEY`.
+4. **Presigned URL Request**: The MCP server asks the BitAtlas API for a presigned S3 upload URL.
+5. **Direct Upload**: The encrypted blob is uploaded directly to S3/MinIO.
+6. **Metadata Sync**: The wrapped key and file metadata are saved to the BitAtlas database.
+
+```typescript
+// Simplified encryption logic in the MCP server
+async function encryptAndUpload(content: Buffer, fileName: string) {
+  const fileKey = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  
+  const encryptedContent = await encrypt(content, fileKey, iv);
+  const wrappedKey = await wrapKey(fileKey, MASTER_KEY);
+
+  const { uploadUrl, fileId } = await bitatlasApi.getPresignedUrl(fileName);
+  await axios.put(uploadUrl, encryptedContent);
+  
+  await bitatlasApi.finalizeUpload(fileId, wrappedKey, iv);
+}
+```
+
+### 4. Implementing `read_file` (The Decryption Path)
+
+Decryption is the inverse:
+
+1. **Metadata Retrieval**: Get the wrapped key, IV, and presigned download URL from BitAtlas.
+2. **Direct Download**: Fetch the encrypted blob from S3.
+3. **Key Unwrapping**: Decrypt the per-file key using the `BITATLAS_MASTER_KEY`.
+4. **Buffer Decryption**: Decrypt the content and return it to the agent.
+
+## Handling Large Files
+
+One challenge with MCP is the communication overhead. If an agent wants to read a 50MB PDF, passing that entire buffer through the MCP JSON-RPC interface can be slow. We implemented a streaming strategy for the MCP server that handles chunked reads, though most LLMs currently prefer reading full text or summarized versions of large files.
+
+## Security Considerations
+
+Since the MCP server requires the `BITATLAS_MASTER_KEY`, it should only be run in environments you trust. For local use with Claude Desktop, this is perfectly safe as the key stays in your local environment variables.
+
+If you are deploying an autonomous agent to a VPS, we recommend using a **scoped API key** and a dedicated vault for that agent, rather than your primary personal vault.
+
+## Conclusion
+
+By building an MCP server, we've enabled AI agents to finally have a "home" that is both persistent and private. The agent doesn't need to know how AES-GCM works; it just sees a tool called `write_file`. Behind the scenes, BitAtlas ensures that the data is protected by the strongest encryption standards available.
+
+You can find the source code for the BitAtlas MCP server on our GitHub. We're excited to see what you build with secure, agentic storage.
+
+---
+*BitAtlas is the zero-knowledge storage layer for the agentic web. [Sign up](https://bitatlas.com) to start building.*
