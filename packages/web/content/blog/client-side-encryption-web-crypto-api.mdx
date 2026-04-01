@@ -1,0 +1,135 @@
+---
+title: "Deep Dive: Client-Side Encryption with the Web Crypto API"
+description: "A technical guide to implementing zero-knowledge encryption in the browser using the native Web Crypto API, featuring AES-256-GCM and PBKDF2."
+date: "2026-04-01"
+author: "Lobbi"
+slug: "client-side-encryption-web-crypto-api"
+keywords: ["Web Crypto API", "client-side encryption JavaScript", "AES-GCM browser", "PBKDF2 key derivation", "browser encryption tutorial"]
+readingTime: "8 min"
+---
+
+At BitAtlas, our core promise is that we never see your data. To achieve this, we rely on **zero-knowledge encryption**, where files are encrypted in the user's browser before they ever touch our servers. While many "secure" cloud providers handle encryption on the server-side (where they hold the keys), we leverage the native **Web Crypto API** to ensure that keys never leave the client.
+
+In this post, we’ll dive into the technical architecture of our client-side encryption engine, covering key derivation, authenticated encryption, and the performance considerations of handling large files in JavaScript.
+
+## Why the Web Crypto API?
+
+Historically, cryptography in JavaScript was slow and dangerous. Developers relied on third-party libraries like `crypto-js` or `sjcl`, which were implemented in pure JS and suffered from timing attacks and poor performance.
+
+The Web Crypto API changed the game. It is a built-in browser interface that provides a set of low-level cryptographic primitives. Because it is implemented by the browser vendor (in C++ or Rust), it is:
+
+1.  **Fast**: It uses hardware acceleration (like AES-NI) whenever possible.
+2.  **Secure**: Operations are performed in a way that minimizes exposure to the main JavaScript thread's memory.
+3.  **Standardized**: It works across all modern browsers, ensuring consistent behavior.
+
+## The Encryption Flow
+
+Our zero-knowledge architecture follows a standard "envelope encryption" pattern. Here is the step-by-step breakdown of how a file is secured in BitAtlas:
+
+### 1. Key Derivation with PBKDF2
+
+We don't use the user's password directly as an encryption key. Instead, we use **PBKDF2** (Password-Based Key Derivation Function 2) to derive a strong master key from the password.
+
+```javascript
+async function deriveMasterKey(password, salt) {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits", "deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: salt,
+      iterations: 600000,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt", "wrapKey", "unwrapKey"]
+  );
+}
+```
+
+We use **600,000 iterations** of HMAC-SHA-256. This high iteration count makes brute-force attacks significantly more expensive for an attacker who might gain access to the salt and the encrypted blobs.
+
+### 2. Generating Per-File Keys
+
+We never encrypt multiple files with the same key. For every file uploaded to BitAtlas, the client generates a unique, random **Data Encryption Key (DEK)** using `crypto.getRandomValues()`.
+
+### 3. Authenticated Encryption with AES-256-GCM
+
+For the actual encryption, we use **AES-GCM** (Galois/Counter Mode). Unlike older modes like CBC, GCM provides both **confidentiality** and **authenticity**. It generates an "authentication tag" that ensures the data hasn't been tampered with while stored on the server.
+
+```javascript
+async function encryptFile(fileBuffer, dek) {
+  const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV
+  const encryptedContent = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: iv,
+    },
+    dek,
+    fileBuffer
+  );
+
+  return { encryptedContent, iv };
+}
+```
+
+The output includes the ciphertext and a 12-byte initialization vector (IV). We store the IV alongside the encrypted file metadata.
+
+### 4. Key Wrapping (The "Envelope")
+
+Since we don't want to store the master key on the server, we need a way to store the per-file DEKs securely. We use the derived master key to "wrap" (encrypt) the DEK.
+
+```javascript
+async function wrapDek(masterKey, dek) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedKey = await crypto.subtle.wrapKey(
+    "raw",
+    dek,
+    masterKey,
+    { name: "AES-GCM", iv }
+  );
+  return { wrappedKey, iv };
+}
+```
+
+The server receives:
+1. The **encrypted file content**.
+2. The **wrapped DEK** (which the server cannot decrypt).
+3. The **IVs** for both the file and the wrapped key.
+
+## Large File Performance: The Streaming Challenge
+
+The `crypto.subtle.encrypt` method requires the entire data buffer to be in memory. This works fine for small documents, but it will crash the browser tab if you try to encrypt a 4GB video file.
+
+To handle large files, BitAtlas implements a **chunked streaming** strategy:
+
+1.  The file is split into 5MB chunks.
+2.  Each chunk is encrypted independently with its own IV (incremented from a base IV).
+3.  The encrypted chunks are streamed to the server using a `ReadableStream`.
+
+This allows us to maintain a constant memory footprint, regardless of file size, while still providing full AES-GCM protection.
+
+## Security Considerations
+
+Implementing crypto in the browser comes with unique risks. Here’s how we mitigate them:
+
+-   **Secure Contexts**: The Web Crypto API is only available in "Secure Contexts" (HTTPS or localhost). This prevents man-in-the-middle attacks from stripping the crypto logic.
+-   **No Key Persistence**: We never store the master key or the password in `localStorage` or `IndexedDB`. The key exists only in the volatile memory of the browser tab and is cleared when the session ends.
+-   **Open Source Verification**: Because all encryption happens in the client, you don't have to trust our word. Our encryption logic is open-source, allowing anyone to verify that we aren't leaking keys or implementing backdoors.
+
+## Conclusion
+
+The Web Crypto API has enabled a new generation of "local-first" and zero-knowledge applications. By moving the cryptographic heavy lifting to the client, BitAtlas ensures that privacy isn't just a policy—it's a technical reality.
+
+In our next technical post, we'll explore how we handle **key sharing** between users using asymmetric RSA-OAEP encryption without ever involving the server in the decryption process.
+
+Stay secure,
+The BitAtlas Team
