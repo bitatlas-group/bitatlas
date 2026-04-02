@@ -1,0 +1,151 @@
+---
+title: "EU Data Sovereignty: Why Where You Host Matters More Than You Think"
+description: "Why hosting on European-owned infrastructure — not just an EU region of a US hyperscaler — is critical for true data sovereignty. The CLOUD Act, GDPR, and BitAtlas's choice of Hetzner."
+date: "2026-04-02"
+author: "Lobbi"
+slug: "eu-data-sovereignty-why-hosting-matters"
+keywords: ["EU data sovereignty", "GDPR hosting", "European cloud providers", "Hetzner vs AWS", "CLOUD Act Europe"]
+readingTime: "7 min"
+---
+
+There's a comforting lie in cloud computing: "We have an EU region, so you're GDPR-compliant." It's on every sales deck from AWS, Azure, and Google Cloud. Pick `eu-west-1`, check the compliance box, move on.
+
+Except it doesn't work like that. Not legally, not technically, and certainly not if you actually care about the sovereignty of your users' data. At BitAtlas, we chose to host on **Hetzner** — a German-owned, German-operated infrastructure provider — and in this post we'll explain exactly why.
+
+## The CLOUD Act Problem
+
+In 2018, the United States passed the **Clarifying Lawful Overseas Use of Data Act** (CLOUD Act). The name is almost comically euphemistic. Here's what it actually does:
+
+It gives US law enforcement the power to compel any US-headquartered company to hand over data stored on its servers — **regardless of where those servers are physically located**.
+
+That means if your data sits in AWS `eu-central-1` (Frankfurt), the US government can issue a warrant to Amazon (a US company) and demand access. Amazon is legally obligated to comply, and in many cases, they're prohibited from even telling you about it.
+
+This isn't theoretical. Microsoft famously fought a warrant for data stored in Ireland in the *Microsoft v. United States* case (2018). The CLOUD Act was passed specifically to resolve that case — in favor of the government.
+
+```
+User's data in Frankfurt, Germany
+    ↓
+Stored on AWS (US company)
+    ↓
+US CLOUD Act warrant issued
+    ↓
+AWS must comply — German law doesn't protect you
+```
+
+The physical location of the server is irrelevant. What matters is the **legal jurisdiction of the company operating it**.
+
+## "But We Encrypt At Rest"
+
+This is the second line of defense hyperscalers offer. "Even if we're compelled to hand over data, it's encrypted at rest."
+
+Let's be precise about what "encrypted at rest" means at AWS:
+
+1. AWS holds the encryption keys (via KMS).
+2. AWS manages the key rotation.
+3. AWS decrypts data transparently when accessed by authorized services.
+
+In other words, **AWS can decrypt your data whenever it needs to**. "Encrypted at rest" means encrypted against a rogue disk being stolen from a data center. It does not mean encrypted against the company that operates the infrastructure.
+
+If the US government serves a CLOUD Act warrant, AWS can — and will — decrypt the data and hand it over. The encryption is protection against physical theft, not legal compulsion.
+
+This is fundamentally different from zero-knowledge encryption, where the provider **cannot decrypt the data** because they never hold the keys. But that's a topic for [another post](/blog/what-is-zero-knowledge-encryption).
+
+## Data Residency ≠ Data Sovereignty
+
+These terms get conflated constantly, so let's define them:
+
+**Data residency** is about geography: where is the data physically stored? You can achieve data residency on any hyperscaler by selecting an EU region.
+
+**Data sovereignty** is about jurisdiction: which legal system governs access to the data? This depends on the **nationality of the company** operating the infrastructure, not the location of the rack.
+
+| | Data Residency | Data Sovereignty |
+|---|---|---|
+| **Question** | Where is the data? | Who can legally access it? |
+| **AWS eu-central-1** | ✅ Germany | ❌ US jurisdiction (CLOUD Act) |
+| **Hetzner Falkenstein** | ✅ Germany | ✅ German/EU jurisdiction |
+| **BitAtlas on Hetzner** | ✅ Germany | ✅ EU jurisdiction + zero-knowledge |
+
+Using an EU region of a US cloud provider gives you residency without sovereignty. It's like renting a safety deposit box at a bank that has to open it whenever a foreign government asks.
+
+## Why Hetzner?
+
+When we architected BitAtlas, we evaluated the full spectrum: AWS, GCP, Azure, OVH, Scaleway, Hetzner, and several smaller European providers. Here's why Hetzner won:
+
+### 1. German-Owned and Operated
+
+Hetzner Online GmbH is a private German company, headquartered in Gunzenhausen, Bavaria. It is not publicly traded on US exchanges. It has no US parent company. It is subject to **German law and EU regulations exclusively**.
+
+This means a US CLOUD Act warrant has no legal force over Hetzner. A US agency would need to go through a **Mutual Legal Assistance Treaty (MLAT)** process, which requires German judicial approval — a much higher bar with genuine oversight.
+
+### 2. Price-to-Performance
+
+Let's be honest: Hetzner is dramatically cheaper than AWS for equivalent compute and storage. A dedicated server with 64GB RAM, 2×1TB NVMe, and an AMD EPYC processor costs around €40/month on Hetzner. The equivalent EC2 instance would run €300–400/month.
+
+For a startup building zero-knowledge infrastructure, this isn't a nice-to-have — it's existential. Lower infrastructure costs mean we can offer competitive pricing without venture capital subsidizing our burn rate.
+
+### 3. Sustainability
+
+Hetzner runs its primary data centers in Germany and Finland, powered significantly by renewable energy. Their Falkenstein and Helsinki facilities operate with high energy efficiency ratings. For a product built on the principle of doing the right thing with people's data, doing the right thing with energy consumption matters too.
+
+### 4. Simplicity
+
+We don't need 200+ services. We need compute, block storage, object storage (via MinIO), and networking. Hetzner gives us exactly that without the cognitive overhead of navigating a labyrinth of managed services, each with its own pricing model and IAM policy format.
+
+## The Schrems II Shadow
+
+In 2020, the Court of Justice of the European Union (CJEU) struck down the EU-US Privacy Shield in the landmark **Schrems II** decision. The court ruled that US surveillance laws (particularly FISA Section 702 and Executive Order 12333) did not provide adequate protection for EU citizens' data.
+
+While the EU-US Data Privacy Framework (DPF) was adopted in 2023 as a replacement, its legal durability remains uncertain. Privacy advocates — including Max Schrems himself — have signaled potential challenges. A "Schrems III" decision could invalidate the DPF just as its predecessors were struck down.
+
+If you build your infrastructure on a US hyperscaler today, you're making a bet that the current legal framework survives. If it doesn't, you face a forced migration under pressure — the worst kind of infrastructure decision.
+
+Building on European-owned infrastructure removes this risk entirely. You're not dependent on the outcome of transatlantic legal negotiations.
+
+## The BitAtlas Architecture
+
+Our sovereignty story has two layers:
+
+### Layer 1: Infrastructure Sovereignty (Hetzner)
+
+All BitAtlas infrastructure runs on Hetzner dedicated servers in Germany. Our MinIO object storage, PostgreSQL databases, and application servers are all on German-owned, EU-jurisdiction hardware. No US company sits in the chain of custody.
+
+### Layer 2: Cryptographic Sovereignty (Zero-Knowledge)
+
+Even if someone — a government, a hacker, a rogue Hetzner employee — gained access to our servers, they would find only encrypted blobs. Every file is encrypted client-side with AES-256-GCM using keys derived from the user's password via PBKDF2. We never see the plaintext. We never hold the keys.
+
+```
+User's browser
+    ↓ PBKDF2 → master key
+    ↓ AES-256-GCM encryption
+    ↓ encrypted blob
+    ↓
+Hetzner (Germany) — EU jurisdiction
+    ↓
+Encrypted at rest (we can't decrypt it either)
+```
+
+This is defense in depth. Infrastructure sovereignty protects against legal compulsion. Cryptographic sovereignty protects against everything else — including us.
+
+## What This Means for Developers
+
+If you're building a product that handles sensitive user data in Europe, here's the decision framework:
+
+1. **Do you need data sovereignty, or just data residency?** If your users are EU citizens, sovereignty matters. Residency alone doesn't protect against CLOUD Act requests.
+
+2. **Can you afford a forced migration?** If Schrems III happens and you're on AWS, you'll need to move. If you're already on European infrastructure, it's a non-event.
+
+3. **Is your encryption actually zero-knowledge?** "Encrypted at rest" with provider-managed keys is not zero-knowledge. If the provider can decrypt your data, it's not sovereign — it's just access-controlled.
+
+4. **Who operates your infrastructure?** Follow the corporate ownership chain. If it leads to a US parent company, the CLOUD Act applies, regardless of where the servers sit.
+
+## The Cost of Getting This Wrong
+
+GDPR fines are calculated based on global annual turnover — up to **4% or €20 million**, whichever is higher. But the real cost isn't the fine. It's the loss of user trust.
+
+When users choose a privacy-focused product, they're making a trust decision. If that trust is broken because their data was accessible to a foreign government through a legal backdoor they didn't know about, no amount of crisis PR will fix it.
+
+Building on sovereign infrastructure isn't just a compliance checkbox. It's a product feature. It's a competitive advantage. And for your users, it might be the reason they chose you over the alternative.
+
+---
+
+*BitAtlas is zero-knowledge encrypted storage built on European infrastructure. Your data is encrypted in your browser, stored on EU-sovereign servers, and accessible to no one but you. [Try it free →](https://bitatlas.com)*
