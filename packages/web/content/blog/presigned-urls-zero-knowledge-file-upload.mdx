@@ -1,0 +1,217 @@
+---
+title: "Presigned URLs and Zero-Knowledge File Uploads"
+description: "How BitAtlas uploads files without the server ever touching plaintext data. A deep dive into the presigned URL pattern with client-side encryption, MinIO/S3, and the architecture that keeps your files invisible to us."
+date: "2026-04-04"
+author: "Lobbi"
+slug: "presigned-urls-zero-knowledge-file-upload"
+keywords: ["presigned URL S3", "MinIO presigned upload", "zero knowledge file upload", "direct S3 upload encryption", "secure file upload architecture", "client-side encryption upload", "S3 presigned URL security"]
+readingTime: "8 min"
+---
+
+Most cloud storage services work like a post office. You hand your package to the clerk, they inspect it, label it, and put it on a shelf. You trust them not to open it — but nothing stops them.
+
+BitAtlas works differently. You seal the package at home, get a one-time delivery slip, and drop it directly into a locked mailbox. The clerk never touches the package. In fact, the clerk doesn't even have a key to the mailbox.
+
+This is the presigned URL pattern combined with client-side encryption, and it's the backbone of how BitAtlas handles file uploads. Let's break down exactly how it works.
+
+## The Problem with Traditional Uploads
+
+In a typical cloud storage architecture, file uploads flow through the application server:
+
+```
+Client → App Server → Object Storage (S3/MinIO)
+```
+
+The app server receives the raw file, processes it (maybe scans for viruses, generates thumbnails, extracts metadata), and then forwards it to object storage. This design gives the server full access to your plaintext data.
+
+Even services that advertise "encryption at rest" follow this pattern. They encrypt after receiving your file — meaning the file existed in plaintext on their servers, if only for milliseconds. That's milliseconds during which it could be logged, cached, intercepted, or subpoenaed.
+
+For a zero-knowledge architecture, this is unacceptable. The server must never see plaintext data. Period.
+
+## The Presigned URL Pattern
+
+A presigned URL is a time-limited, pre-authorized URL that allows a client to upload (or download) an object directly to/from S3-compatible storage without needing credentials for the storage layer itself.
+
+Here's the key insight: **the upload bypasses the application server entirely.**
+
+```
+Client → (encrypted blob) → S3/MinIO (via presigned URL)
+Client → (encrypted metadata) → App Server
+```
+
+The application server generates the presigned URL and stores metadata, but it never handles the file contents. Let's walk through the full flow.
+
+## The Upload Flow, Step by Step
+
+### Step 1: Client-Side Key Generation
+
+Before any network request happens, the client generates a random 256-bit AES key for this specific file:
+
+```typescript
+const fileKey = await crypto.subtle.generateKey(
+  { name: 'AES-GCM', length: 256 },
+  true,  // extractable — we need to export and wrap it
+  ['encrypt', 'decrypt']
+);
+```
+
+Every file gets its own unique key. This is critical — if one file's key is somehow compromised, no other file is affected.
+
+### Step 2: Encrypt the File
+
+The client encrypts the entire file with AES-256-GCM using the generated key:
+
+```typescript
+const iv = crypto.getRandomValues(new Uint8Array(12));
+const encryptedData = await crypto.subtle.encrypt(
+  { name: 'AES-GCM', iv },
+  fileKey,
+  fileBuffer
+);
+```
+
+AES-GCM provides both confidentiality and integrity — the ciphertext includes an authentication tag that detects any tampering. If someone modifies even a single bit of the encrypted blob in storage, decryption will fail rather than produce corrupted output.
+
+### Step 3: Wrap the File Key
+
+The per-file key needs to be stored so the user can decrypt the file later. But we can't store it in plaintext — that would defeat the purpose. Instead, we wrap (encrypt) the file key using the user's master key:
+
+```typescript
+const exportedKey = await crypto.subtle.exportKey('raw', fileKey);
+const wrappedKey = await crypto.subtle.encrypt(
+  { name: 'AES-GCM', iv: keyWrapIv },
+  masterKey,
+  exportedKey
+);
+```
+
+The wrapped key is safe to store on the server. Without the master key (derived from the user's password via PBKDF2), it's just random bytes.
+
+### Step 4: Request a Presigned URL
+
+Now the client asks the BitAtlas API for a presigned upload URL:
+
+```typescript
+const response = await fetch('/api/vault/upload', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${apiKey}` },
+  body: JSON.stringify({
+    filename: encryptedFilename,
+    size: encryptedData.byteLength,
+    contentType: 'application/octet-stream'
+  })
+});
+const { uploadUrl, fileId } = await response.json();
+```
+
+The server generates a presigned PUT URL for MinIO/S3 with a short TTL (typically 5–15 minutes). It also creates a metadata record with the file ID, but at this point, the server has received zero file content.
+
+### Step 5: Direct Upload to Object Storage
+
+The client uploads the encrypted blob directly to MinIO using the presigned URL:
+
+```typescript
+await fetch(uploadUrl, {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/octet-stream' },
+  body: encryptedData
+});
+```
+
+This is the critical moment: the encrypted data travels directly from the client's browser to MinIO. The application server is not in the data path. MinIO stores what it receives — an opaque, encrypted blob.
+
+### Step 6: Confirm and Store Metadata
+
+Finally, the client confirms the upload and sends the encrypted metadata:
+
+```typescript
+await fetch(`/api/vault/files/${fileId}/confirm`, {
+  method: 'POST',
+  body: JSON.stringify({
+    wrappedKey: base64Encode(wrappedKey),
+    iv: base64Encode(iv),
+    keyWrapIv: base64Encode(keyWrapIv),
+    originalSize: file.size,
+    encryptedSize: encryptedData.byteLength
+  })
+});
+```
+
+The server stores the wrapped key and IVs alongside the file metadata. Note what the server has: an encrypted blob in MinIO it cannot read, and a wrapped key it cannot unwrap. Zero knowledge achieved.
+
+## Why Not Just Encrypt on the Server?
+
+A common question: "Why go through all this complexity? Just encrypt on the server before storing."
+
+Three reasons:
+
+**1. Trust boundary.** Server-side encryption requires trusting the server operator. Even with the best intentions, servers get breached, employees go rogue, and governments issue subpoenas. With client-side encryption, none of these attack vectors expose your plaintext data.
+
+**2. No key escrow.** When the server encrypts, the server holds the key (or can derive it). This means the server operator can always decrypt. With presigned URLs and client-side encryption, the key derivation happens exclusively in the client.
+
+**3. Bandwidth efficiency.** Presigned URLs let the client upload directly to object storage, avoiding the double-hop through the application server. For large files, this reduces latency and server costs significantly.
+
+## The Download Mirror
+
+Downloads follow the same pattern in reverse:
+
+1. Client requests a presigned download URL from the API
+2. Client downloads the encrypted blob directly from MinIO
+3. Client retrieves the wrapped key and IVs from the metadata API
+4. Client unwraps the file key using the master key
+5. Client decrypts the blob with AES-256-GCM
+
+Again, the application server never touches the file contents. It only brokers the presigned URL and serves metadata.
+
+## Presigned URL Security Considerations
+
+Presigned URLs are powerful but require careful handling:
+
+**Short TTLs.** We set expiration to 10 minutes. A leaked URL is useless after expiration, and the content is encrypted regardless.
+
+**Single-use semantics.** While S3 presigned URLs aren't inherently single-use, we track upload confirmation on the server side. An upload URL that's already been confirmed won't be processed again.
+
+**HTTPS only.** Presigned URLs must only be generated for HTTPS endpoints. The encrypted blob is safe from content inspection, but an HTTP URL could be intercepted and replayed.
+
+**CORS configuration.** MinIO/S3 must be configured with proper CORS headers to allow browser-based uploads. This is a common stumbling point — without correct CORS, the presigned URL will work from `curl` but fail from a browser.
+
+## The Host Header Trap
+
+One subtle but critical detail when proxying MinIO behind Nginx: the `Host` header in the proxy configuration must match the hostname MinIO used to sign the URL. If MinIO signs a URL for `minio:9000` but Nginx forwards the request with `Host: s3.yourdomain.com`, MinIO will reject the signature with a `403 Forbidden`.
+
+This is because S3 signature calculation includes the `Host` header. A mismatch means the signature the client presents doesn't match what the server computes. It's a security feature — but it's also a configuration headache that has tripped up more than a few production deployments.
+
+## How This Enables AI Agents
+
+The presigned URL pattern is particularly valuable for AI agent workflows via our MCP server. When an agent writes a file through the BitAtlas MCP server:
+
+1. The MCP server (running locally) encrypts the file client-side
+2. It requests a presigned URL from the BitAtlas API
+3. It uploads the encrypted blob directly to MinIO
+4. It stores the wrapped key metadata
+
+The agent never needs direct S3 credentials. The MCP server never sends plaintext over the network. And the BitAtlas API never sees the file contents. It's zero-knowledge end-to-end, even when an autonomous agent is doing the writing.
+
+## What the Server Actually Knows
+
+Let's be explicit about what the BitAtlas server can and cannot see:
+
+| Server can see | Server cannot see |
+|---|---|
+| File size (encrypted) | File contents |
+| Upload timestamp | Filenames (encrypted) |
+| Wrapped key (unusable) | File key (plaintext) |
+| User's API key | User's master key |
+| Number of files | What's in them |
+
+The server is a blind custodian. It holds encrypted blobs and encrypted keys, with no ability to connect them to meaningful content.
+
+## Conclusion
+
+The presigned URL pattern isn't new — AWS has supported it since 2006. What's newer is combining it with client-side zero-knowledge encryption to create a storage architecture where the server is genuinely, provably unable to access your data.
+
+For developers evaluating encrypted storage solutions, this is the question to ask: **does the file ever exist in plaintext on the server, even briefly?** If the answer is yes — or "it's complicated" — that's not zero-knowledge.
+
+At BitAtlas, the answer is no. The presigned URL pattern ensures the encrypted blob goes directly from your browser (or your AI agent's MCP server) to object storage. The application server orchestrates, but never touches.
+
+That's the architecture. That's the promise. And with open-source client code, you don't have to take our word for it — you can verify it yourself.
