@@ -25,9 +25,36 @@ Agent → GET /vault/files + PAYMENT-SIGNATURE header (signed USDC tx)
 | `POST /vault/files` | Register file | $0.01 |
 | `GET /vault/files` | List files | $0.001 |
 | `GET /vault/files/:id/download-url` | Get download URL | $0.005 |
+| `POST /vault/files/:id/renew` | Renew storage (+30 days) | $0.005 |
 | `DELETE /vault/files/:id` | Delete file | Free |
 
 Prices are flat per request. No hidden fees, no minimum spend.
+
+## Storage Lifecycle
+
+Anonymous x402 uploads include **30 days of storage**. After 30 days, files are eligible for cleanup.
+
+Every file response includes an `expiresAt` timestamp:
+
+```json
+{
+  "id": "550e8400-...",
+  "name": "secret-document.enc",
+  "expiresAt": "2026-05-06T12:00:00.000Z"
+}
+```
+
+### Renewing Storage
+
+To extend storage by another 30 days, call the renewal endpoint (costs $0.005 USDC):
+
+```typescript
+await x402Fetch(`https://api.bitatlas.com/vault/files/${fileId}/renew`, {
+  method: "POST",
+});
+```
+
+Renewals stack on the existing expiry — renewing before expiry is cumulative. Authenticated users' files (API key access) do not expire.
 
 ## Quick Start (TypeScript)
 

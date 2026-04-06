@@ -1,0 +1,201 @@
+---
+title: "Anonymous Agent Storage: How AI Agents Pay for Encrypted Storage with USDC"
+description: "AI agents can now store encrypted files on BitAtlas without an account, API key, or identity — just a USDC payment on Base. Here's how zero-identity storage works with the x402 payment standard."
+publishedAt: "2026-04-06"
+tags: ["agent storage", "x402 payments", "anonymous cloud storage", "AI agent USDC", "zero knowledge", "MCP"]
+---
+
+AI agents are proliferating fast. They run jobs, process documents, coordinate workflows — and they need a place to persist data. But here's the friction: every storage service asks for an account. An email. A credit card. A verified identity. That's fine for human users, but it's entirely the wrong model for autonomous software.
+
+BitAtlas now supports **anonymous agent storage via x402 payments**. An agent can store an encrypted file, retrieve it by ID, and leave — without ever creating an account, providing an email address, or storing credentials. The only requirement is a crypto wallet with a few cents of USDC on Base.
+
+## The Problem: Storage Needs Identity
+
+Every cloud storage service — S3, GCS, Dropbox, everything — ties files to an account. That account requires some form of registration: email, credit card, API key tied to a human. For AI agents, this creates problems:
+
+- **Bootstrapping friction**: Where does the API key come from? Who manages it? What happens when it rotates?
+- **Identity coupling**: The agent's storage is tied to a specific human account, creating brittle dependencies.
+- **Privacy surface**: Signup processes collect more data than necessary — most storage services don't need to know who you are to store your bits.
+
+The right model for agent storage is **pay-to-use**: send a payment, get a storage slot. No account required.
+
+## The x402 Standard
+
+[x402](https://x402.org) is an open HTTP payment standard built on top of the classic `402 Payment Required` status code. The flow is simple:
+
+```
+Agent → GET /vault/files (no auth header)
+      ← 402 Payment Required + payment instructions
+Agent → GET /vault/files + signed USDC payment
+      ← 200 OK + response data
+```
+
+The payment instructions are encoded in a `PAYMENT-REQUIRED` header. The agent signs a USDC transaction on Base (Coinbase's L2), includes the signature in a `PAYMENT-SIGNATURE` header, and retries. A third-party facilitator verifies and settles the payment on-chain. The whole round trip adds one extra HTTP request.
+
+Libraries like `@x402/fetch` make this transparent:
+
+```typescript
+import { wrapFetch } from "@x402/fetch";
+import { ExactEvmScheme } from "@x402/evm/exact/client";
+
+const evmScheme = new ExactEvmScheme(process.env.AGENT_WALLET_PRIVATE_KEY);
+const x402Fetch = wrapFetch(fetch, [evmScheme]);
+
+// This automatically handles 402 responses, signs payments, and retries
+const res = await x402Fetch("https://api.bitatlas.com/vault/files");
+```
+
+## Zero Identity, Zero Knowledge
+
+BitAtlas is a zero-knowledge storage system. Files are encrypted client-side with AES-256-GCM before upload. The server receives only ciphertext — it never sees plaintext data, file keys, or user encryption keys.
+
+Anonymous x402 users get the same encryption guarantee:
+
+1. The agent generates a random file key
+2. Encrypts the file with AES-256-GCM
+3. Wraps the file key with the agent's master key
+4. Uploads the ciphertext to BitAtlas
+5. Stores the encryption metadata alongside the file
+
+The server stores encrypted blobs and key ciphertext. Even if the storage backend were compromised, the data is unreadable without the agent's master key — which never leaves the agent.
+
+**What BitAtlas sees from an anonymous x402 request:**
+
+- The wallet address that paid (pseudonymous — not linked to an identity)
+- An encrypted blob
+- Base64-encoded encryption metadata (also encrypted)
+- File size and MIME type
+
+That's it. No name, no email, no account.
+
+## How It Works: Storage Namespace
+
+Anonymous x402 files are stored in a dedicated namespace: `x402-anon/<uuid>`. This separates them from authenticated user files (`user/<userId>/<uuid>`) in the object store.
+
+When an anonymous agent uploads a file:
+
+```typescript
+// Step 1: Get a presigned upload URL ($0.01 USDC)
+const { uploadUrl, storageKey } = await x402Fetch("https://api.bitatlas.com/vault/files/upload-url", {
+  method: "POST",
+  body: JSON.stringify({ fileName: "agent-output.enc" }),
+});
+// storageKey = "x402-anon/550e8400-e29b-41d4-a716-446655440000"
+
+// Step 2: Upload the encrypted file directly to the presigned URL (free)
+await fetch(uploadUrl, {
+  method: "PUT",
+  body: encryptedFileBuffer,
+});
+
+// Step 3: Register the file metadata ($0.01 USDC)
+const { id, expiresAt } = await x402Fetch("https://api.bitatlas.com/vault/files", {
+  method: "POST",
+  body: JSON.stringify({
+    name: "agent-output.enc",
+    storageKey,
+    sizeBytes: encryptedFileBuffer.byteLength,
+    ownerEncryptedKey: "...",
+    ownerIv: "...",
+    fileIv: "...",
+    authTag: "...",
+  }),
+});
+// Returns file ID + expiry date (30 days from now)
+```
+
+The agent gets back a file ID and expiry timestamp. That file ID is the only thing needed to retrieve the file later.
+
+## Storage Lifecycle: 30-Day Expiry and Renewal
+
+Anonymous files are ephemeral by default. Every x402 upload includes **30 days of storage**. After that, the file is eligible for cleanup.
+
+The expiry is included in every file response:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "agent-output.enc",
+  "expiresAt": "2026-05-06T12:00:00.000Z"
+}
+```
+
+To extend storage for another 30 days, agents call the renewal endpoint (costs $0.005 USDC):
+
+```typescript
+await x402Fetch(`https://api.bitatlas.com/vault/files/${fileId}/renew`, {
+  method: "POST",
+});
+```
+
+The renewal stacks on the existing expiry — so renewing before expiry is always cumulative, not wasteful.
+
+This model aligns cost with usage: agents pay for what they use, for as long as they use it. No idle fees, no minimum subscriptions, no surprise bills.
+
+## Stable Identity Across Requests
+
+One concern with anonymous storage is continuity. If each request is anonymous, how does an agent access files it uploaded previously?
+
+The answer is: **the wallet is the identity**. The same wallet key that signs payments can encrypt all of an agent's files with a deterministic master key (derived from the wallet key using PBKDF2 or similar). As long as the agent uses the same wallet, it has the same encryption key and can retrieve any file it previously uploaded.
+
+This is the same model hardware wallets use: your mnemonic is your identity, your keys follow from it. No account server needed.
+
+## MCP Server x402 Mode
+
+BitAtlas ships an MCP server for AI agents using the Model Context Protocol. As of today, it supports x402 wallet-based payments as an alternative to API keys.
+
+Configure it with just a wallet private key:
+
+```json
+{
+  "mcpServers": {
+    "bitatlas": {
+      "command": "npx",
+      "args": ["-y", "@bitatlas/mcp-server"],
+      "env": {
+        "BITATLAS_WALLET_PRIVATE_KEY": "0xabc...",
+        "BITATLAS_MASTER_KEY": "your-64-hex-char-master-key"
+      }
+    }
+  }
+}
+```
+
+The MCP server automatically handles x402 payments — no API key, no account, no dashboard. The agent pays per request in USDC and gets full vault access.
+
+**Priority rules:**
+- If `BITATLAS_API_KEY` is set → use API key (free within quota)
+- If only `BITATLAS_WALLET_PRIVATE_KEY` is set → pay per request via x402
+- If neither → vault tools will warn but the server still starts (status checks work)
+
+## Pricing
+
+All prices are in USDC on Base (Coinbase L2). Gas fees are roughly $0.001 per transaction.
+
+| Operation | Price |
+|-----------|-------|
+| Get upload URL | $0.01 |
+| Register file (30-day storage included) | $0.01 |
+| List files | $0.001 |
+| Get download URL | $0.005 |
+| Renew storage (+30 days) | $0.005 |
+
+A typical agent workflow (upload → retrieve → delete over 30 days) costs about **$0.025 total** — less than a fraction of a cent per day.
+
+## The Bigger Picture
+
+What we're describing is a new primitive: **pay-as-you-go, zero-identity, zero-knowledge storage for autonomous software**.
+
+Agents don't need accounts. They need storage. By combining:
+
+- **x402** for frictionless per-request payments
+- **AES-256-GCM** for client-side zero-knowledge encryption
+- **Wallet-derived identity** for continuity without registration
+
+...we get a storage system that is genuinely native to how agents work. No human in the loop. No credential management. No privacy trade-offs.
+
+This is storage the way the internet should have built it from the start.
+
+---
+
+**Get started**: Install `@x402/fetch` and `@x402/evm`, fund a wallet with a few dollars of USDC on Base, and point it at `https://api.bitatlas.com`. The [x402 documentation](/docs/x402-payments) has a full quickstart.

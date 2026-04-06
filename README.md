@@ -14,7 +14,7 @@ BitAtlas aims to be the secure "atlas" for your digital life, providing a founda
 - **🤖 Agent-Native (MCP Server)**: Built from the ground up to support AI agents via the Model Context Protocol (MCP). Let your agents safely search, read, and manage your vault.
 - **🔐 Personal Vault**: A dedicated space for your most critical documents—identity papers, property deeds, medical records, and digital assets.
 - **🇪🇺 European Data Sovereignty**: All infrastructure is hosted on European soil, subject to the world's strongest privacy regulations (GDPR).
-- **💸 Pay-per-Request (x402)**: Anonymous access via the [x402 payment standard](https://x402.org). Agents pay with USDC stablecoins on Base — no account, no API key, no KYC. [Learn more →](docs/x402-payments.md)
+- **💸 Pay-per-Request (x402)**: Anonymous access via the [x402 payment standard](https://x402.org). Agents pay with USDC stablecoins on Base — no account, no API key, no KYC. Files include 30 days of storage with pay-to-renew. [Learn more →](docs/x402-payments.md)
 
 ## 🏗️ Project Structure
 
