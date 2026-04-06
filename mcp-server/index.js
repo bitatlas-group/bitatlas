@@ -17,10 +17,13 @@ require('dotenv').config();
 const API_URL = process.env.BITATLAS_API_URL || 'https://api.bitatlas.com';
 const API_KEY = process.env.BITATLAS_API_KEY;
 const MASTER_KEY_HEX = process.env.BITATLAS_MASTER_KEY;
+const X402_WALLET_KEY = process.env.BITATLAS_WALLET_PRIVATE_KEY;
 
-if (!API_KEY) {
-  console.error('Error: BITATLAS_API_KEY is required. Generate one at https://bitatlas.com/dashboard/settings');
-  process.exit(1);
+if (!API_KEY && !X402_WALLET_KEY) {
+  console.error('Warning: No BITATLAS_API_KEY or BITATLAS_WALLET_PRIVATE_KEY configured.');
+  console.error('Vault tools will fail. Set one of:');
+  console.error('  BITATLAS_API_KEY  — get one at https://bitatlas.com/dashboard/settings');
+  console.error('  BITATLAS_WALLET_PRIVATE_KEY — EVM wallet key to pay per-request via x402');
 }
 
 /** Returns the master key as a 32-byte Buffer. Throws if not configured or invalid. */
@@ -44,13 +47,85 @@ function getMasterKey() {
 // API Client
 // ---------------------------------------------------------------------------
 
-const api = axios.create({
+// Existing axios client — used when BITATLAS_API_KEY is set
+const axiosApi = axios.create({
   baseURL: API_URL,
   headers: {
     Authorization: `Bearer ${API_KEY}`,
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Build an x402 payment client wrapping the native fetch.
+ * Returns an axios-compatible interface: { get, post, delete }.
+ * Used when BITATLAS_WALLET_PRIVATE_KEY is set and no API key is configured.
+ */
+function createX402Client(x402Fetch, baseUrl) {
+  async function request(method, urlPath, opts = {}) {
+    const url = new URL(baseUrl + urlPath);
+    if (opts.params) {
+      for (const [k, v] of Object.entries(opts.params)) {
+        if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+      }
+    }
+
+    const fetchOpts = { method: method.toUpperCase() };
+    if (opts.body !== undefined) {
+      fetchOpts.headers = { 'Content-Type': 'application/json' };
+      fetchOpts.body = JSON.stringify(opts.body);
+    }
+
+    const res = await x402Fetch(url.toString(), fetchOpts);
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      const err = new Error(
+        errorData.error || errorData.message || `HTTP ${res.status}`
+      );
+      err.response = { data: errorData, status: res.status };
+      throw err;
+    }
+
+    const data = await res.json();
+    return { data };
+  }
+
+  return {
+    get: (urlPath, opts) => request('GET', urlPath, opts),
+    post: (urlPath, body, opts) => request('POST', urlPath, { ...opts, body }),
+    delete: (urlPath, opts) => request('DELETE', urlPath, opts),
+  };
+}
+
+/**
+ * Resolve the active API client at startup.
+ * Priority: API key > wallet key > unauthenticated (status only).
+ */
+function buildApiClient() {
+  if (API_KEY) {
+    return axiosApi;
+  }
+
+  if (X402_WALLET_KEY) {
+    try {
+      const { wrapFetch } = require('@x402/fetch');
+      const { ExactEvmScheme } = require('@x402/evm/exact/client');
+      const evmScheme = new ExactEvmScheme(X402_WALLET_KEY);
+      const x402Fetch = wrapFetch(fetch, [evmScheme]);
+      console.error('[x402] Using wallet-based x402 payments for vault access');
+      return createX402Client(x402Fetch, API_URL);
+    } catch (err) {
+      console.error('[x402] Failed to initialize x402 client:', err.message);
+      console.error('[x402] Ensure @x402/fetch and @x402/evm are installed (npm install in mcp-server/)');
+    }
+  }
+
+  // No auth — unauthenticated client (only /status will work)
+  return axios.create({ baseURL: API_URL });
+}
+
+const api = buildApiClient();
 
 // ---------------------------------------------------------------------------
 // Node.js Crypto — ported from sdk/encryption/fileEncryption.ts
@@ -210,6 +285,7 @@ function formatFileMeta(f) {
     sizeBytes: f.originalSizeBytes || f.sizeBytes,
     category: f.category || null,
     folderId: f.folderId || null,
+    expiresAt: f.expiresAt || null,
     createdAt: f.createdAt,
   };
 }
@@ -334,21 +410,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // bitatlas_vault_status
     // -----------------------------------------------------------------------
     if (name === 'bitatlas_vault_status') {
-      const [statusRes, filesRes] = await Promise.all([
-        api.get('/status'),
-        api.get('/vault/files'),
-      ]);
-      const files = filesRes.data.files || [];
-      const totalBytes = files.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0);
+      const statusRes = await axios.get(`${API_URL}/status`);
+      let vaultInfo = null;
+      try {
+        const filesRes = await api.get('/vault/files');
+        const files = filesRes.data.files || [];
+        const totalBytes = files.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0);
+        vaultInfo = {
+          fileCount: files.length,
+          storageUsedBytes: totalBytes,
+          storageUsedMB: (totalBytes / 1048576).toFixed(2),
+        };
+      } catch {
+        vaultInfo = { note: 'Vault access unavailable (check auth config)' };
+      }
 
       return ok(JSON.stringify({
         status: statusRes.data.status,
         checks: statusRes.data.checks,
-        vault: {
-          fileCount: files.length,
-          storageUsedBytes: totalBytes,
-          storageUsedMB: (totalBytes / 1048576).toFixed(2),
-        },
+        vault: vaultInfo,
       }, null, 2));
     }
 
@@ -432,6 +512,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         sizeBytes: decrypted.length,
         category: meta.category || null,
         folderId: meta.folderId || null,
+        expiresAt: meta.expiresAt || null,
         createdAt: meta.createdAt,
         encoding: asText ? 'utf8' : 'base64',
         content: asText ? decrypted.toString('utf8') : decrypted.toString('base64'),
@@ -506,6 +587,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         encryptedSizeBytes: encrypted.encryptedBlob.length,
         category: args.category || null,
         folderId: args.folder_id || null,
+        expiresAt: created.expiresAt || null,
         message: `"${fileName}" encrypted and uploaded successfully.`,
       }, null, 2));
     }
@@ -559,6 +641,13 @@ async function main() {
   await server.connect(transport);
   console.error('BitAtlas MCP Server running on stdio');
   console.error(`API: ${API_URL}`);
+  if (API_KEY) {
+    console.error('Auth: API key');
+  } else if (X402_WALLET_KEY) {
+    console.error('Auth: x402 wallet payments');
+  } else {
+    console.error('Auth: none (vault tools unavailable)');
+  }
   console.error(`Master key: ${MASTER_KEY_HEX ? 'configured' : 'NOT SET (encrypt/decrypt unavailable)'}`);
 }
 
