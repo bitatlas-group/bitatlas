@@ -1,0 +1,206 @@
+---
+title: "API Key Management for AI Agents: Scoped Access Without Exposing Your Password"
+description: "How to securely authenticate AI agents to your encrypted vault using scoped API keys and pre-derived master keys — without ever sharing your password with an LLM."
+date: "2026-04-06"
+author: "Lobbi"
+slug: "ai-agent-api-keys-scoped-access"
+keywords: ["API key management", "agent authentication", "scoped API access", "MCP authentication", "AI agent permissions", "zero-knowledge API keys", "agent security"]
+readingTime: "7 min"
+---
+
+You've built an AI agent that can read and write files to your encrypted vault. It's powerful, productive, and — if you're not careful — a massive security risk. The question every developer eventually hits: **how do you give an agent access without giving it your password?**
+
+This is the authentication problem at the heart of agentic infrastructure. And it's more nuanced than most teams realize.
+
+## The Password Problem
+
+In a traditional zero-knowledge architecture, everything flows from your password. You type it in, the client derives a master key using PBKDF2 (or Argon2, or scrypt), and that master key encrypts and decrypts per-file keys. The server never sees the password or the derived key.
+
+This works beautifully for humans. You remember your password, you type it in, and the cryptographic cascade handles the rest.
+
+But AI agents aren't humans.
+
+An agent running in a CI/CD pipeline, a background worker, or an MCP server can't type a password into a browser. And even if it could, you'd be passing your master password through an LLM's context window — a context window that might be logged, cached, or inspected by the model provider.
+
+**Rule zero: never pass your raw password to an AI agent.** Full stop.
+
+## Pre-Derived Master Keys
+
+The solution is to separate authentication from key derivation. Here's how BitAtlas handles it:
+
+1. **You** derive the master key in a trusted environment (your browser, a CLI tool you control).
+2. You generate a **scoped API key** that includes an encrypted copy of the master key.
+3. The agent receives the API key, which contains everything it needs to encrypt and decrypt files — without ever knowing your password.
+
+```typescript
+// Human-side: deriving the master key
+const masterKey = await crypto.subtle.deriveKey(
+  {
+    name: 'PBKDF2',
+    salt: userSalt,
+    iterations: 600_000,
+    hash: 'SHA-256',
+  },
+  passwordKey,
+  { name: 'AES-GCM', length: 256 },
+  true, // extractable — only during API key generation
+  ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
+);
+
+// Export and encrypt the master key for the API key payload
+const rawMasterKey = await crypto.subtle.exportKey('raw', masterKey);
+const apiKeySecret = crypto.getRandomValues(new Uint8Array(32));
+const wrappedMasterKey = await wrapWithApiKeySecret(rawMasterKey, apiKeySecret);
+```
+
+The API key token encodes the `apiKeySecret`. When the agent authenticates, the server returns the `wrappedMasterKey`, and the agent unwraps it locally. The server never sees the raw master key.
+
+## Scoping: Not All Access Is Equal
+
+Handing an agent a full-access API key is like giving your intern the root password on day one. It might be fine. It'll probably be fine. Until it isn't.
+
+Scoped API keys let you define exactly what an agent can do:
+
+```json
+{
+  "keyId": "ak_prod_7f3a9c...",
+  "label": "ci-backup-agent",
+  "permissions": {
+    "read": true,
+    "write": true,
+    "delete": false,
+    "listVaults": false,
+    "createVault": false
+  },
+  "vaultScope": ["vault_backup_2026"],
+  "rateLimit": {
+    "maxRequests": 100,
+    "windowSeconds": 3600
+  },
+  "expiresAt": "2026-07-01T00:00:00Z"
+}
+```
+
+This key can read and write to a single vault, can't delete anything, can't create new vaults, and expires in three months. If the agent is compromised, the blast radius is contained.
+
+### The Permission Matrix
+
+When designing scoped access for agents, think in terms of four dimensions:
+
+| Dimension | Question | Example |
+|-----------|----------|---------|
+| **Actions** | What can it do? | Read, write, delete, list |
+| **Resources** | Where can it operate? | Specific vaults, folders, file patterns |
+| **Rate** | How fast? | 100 requests/hour, 1GB/day |
+| **Time** | For how long? | 24 hours, until revoked |
+
+Most security incidents with AI agents come from over-permissioning. An agent that only needs to read files from a single vault shouldn't have write access to everything. This isn't paranoia — it's engineering discipline.
+
+## MCP Authentication Flow
+
+When an AI agent connects to the BitAtlas MCP server, the authentication flow looks like this:
+
+```
+Agent                      MCP Server                    BitAtlas API
+  |                            |                              |
+  |-- connect(apiKey) -------->|                              |
+  |                            |-- validateKey(apiKey) ------>|
+  |                            |<-- { wrappedMasterKey,       |
+  |                            |      permissions,            |
+  |                            |      vaultScope } ----------|
+  |                            |                              |
+  |                            |-- unwrapMasterKey(local) --->|
+  |                            |   (client-side only)         |
+  |<-- ready(tools) ----------|                              |
+  |                            |                              |
+  |-- tool:uploadFile -------->|                              |
+  |                            |-- encrypt(masterKey, file) --|
+  |                            |-- getPresignedUrl() -------->|
+  |                            |<-- presignedUrl -------------|
+  |                            |-- PUT encrypted blob ------->|
+  |<-- { fileId, status } ----|                              |
+```
+
+The critical detail: the MCP server runs on the agent's side (or in a trusted sidecar). The master key is unwrapped and used **locally** — it never travels to the BitAtlas API. The API only sees encrypted blobs and metadata.
+
+## Key Rotation Without Downtime
+
+API keys should be rotated regularly. But in a zero-knowledge system, rotation is more complex than just issuing a new token — the wrapped master key must be re-encrypted with the new API key secret.
+
+BitAtlas handles this with overlapping validity windows:
+
+```typescript
+async function rotateApiKey(oldKeyId: string): Promise<ApiKey> {
+  // 1. Generate new API key secret
+  const newSecret = crypto.getRandomValues(new Uint8Array(32));
+  
+  // 2. Unwrap master key using old secret
+  const masterKey = await unwrapMasterKey(oldApiKeySecret);
+  
+  // 3. Re-wrap master key with new secret
+  const newWrappedMasterKey = await wrapWithApiKeySecret(
+    await crypto.subtle.exportKey('raw', masterKey),
+    newSecret
+  );
+  
+  // 4. Register new key, keep old key valid for 24h
+  const newKey = await api.createKey({
+    wrappedMasterKey: newWrappedMasterKey,
+    permissions: existingPermissions,
+  });
+  
+  await api.scheduleKeyExpiry(oldKeyId, { graceHours: 24 });
+  
+  return newKey;
+}
+```
+
+The 24-hour grace period means agents using the old key don't suddenly break. You deploy the new key, wait for all agents to pick it up, and the old key quietly expires.
+
+## Audit Trails: What Did the Agent Do?
+
+Every API key action is logged with the key ID, not just the user ID. This means you can answer questions like:
+
+- "Which agent deleted that file at 3 AM?"
+- "Is the backup agent actually running, or has it been idle for a week?"
+- "How much storage is the CI agent consuming?"
+
+```json
+{
+  "event": "file.upload",
+  "keyId": "ak_prod_7f3a9c...",
+  "keyLabel": "ci-backup-agent",
+  "vaultId": "vault_backup_2026",
+  "fileId": "f_8b2c1d...",
+  "encryptedSize": 4218792,
+  "timestamp": "2026-04-06T04:12:33Z"
+}
+```
+
+When an agent misbehaves, you revoke the specific API key — not your entire account. The agent loses access instantly while all other keys (and your own browser session) continue working.
+
+## Common Anti-Patterns
+
+After watching developers integrate AI agents with encrypted storage, we've cataloged the mistakes that keep recurring:
+
+**1. Embedding passwords in environment variables.** Even if the env var is "encrypted at rest" on your CI platform, it passes through the LLM's context. Use pre-derived keys instead.
+
+**2. Using a single API key for all agents.** When something goes wrong (and it will), you can't isolate the problem. One key per agent, scoped to exactly what it needs.
+
+**3. No expiration.** API keys without expiration dates are ticking time bombs. Set a TTL, even if it's generous. Rotation should be a scheduled task, not an incident response.
+
+**4. Trusting the agent to scope itself.** "The agent only reads files, so it doesn't matter if the key has write access." Until someone jailbreaks the agent and it starts overwriting files. Enforce permissions server-side.
+
+**5. Logging decrypted content.** Your observability stack should never see plaintext file contents. Log metadata (file IDs, sizes, timestamps), never payloads.
+
+## The Bigger Picture
+
+Scoped API keys aren't just about security — they're about building **trustworthy agentic systems**. As AI agents become more autonomous, the infrastructure they interact with needs to enforce boundaries that the agents themselves can't override.
+
+Zero-knowledge encryption ensures the server can't access your data. Scoped API keys ensure the agent can only access what you've explicitly permitted. Together, they create a system where trust is cryptographically enforced, not assumed.
+
+The era of "just give it admin access and hope for the best" is over. Your agents deserve better infrastructure. Your data demands it.
+
+---
+
+*BitAtlas is an open-source, zero-knowledge encrypted storage platform with first-class AI agent support via MCP. Explore the [documentation](https://bitatlas.com/docs) or try the [MCP server](https://github.com/bitatlas-group/bitatlas) to give your agents secure, scoped file access today.*
