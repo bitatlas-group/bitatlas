@@ -31,8 +31,13 @@ export const x402Config = {
  * Pricing is flat per-request for MVP. Dynamic per-MB pricing can be
  * added later via settlement overrides.
  */
+/**
+ * Route paths are relative to where the middleware is mounted.
+ * Since authOrPay is mounted at /vault in app.ts, paths here
+ * should NOT include the /vault prefix.
+ */
 export const x402Routes: RoutesConfig = {
-  'POST /vault/files/upload-url': {
+  'POST /files/upload-url': {
     accepts: {
       scheme: 'exact',
       price: PRICE_UPLOAD,
@@ -42,7 +47,7 @@ export const x402Routes: RoutesConfig = {
     },
     description: 'Generate a presigned upload URL for encrypted file storage',
   },
-  'POST /vault/files': {
+  'POST /files': {
     accepts: {
       scheme: 'exact',
       price: PRICE_UPLOAD,
@@ -52,7 +57,7 @@ export const x402Routes: RoutesConfig = {
     },
     description: 'Register an uploaded file in the BitAtlas vault',
   },
-  'GET /vault/files': {
+  'GET /files': {
     accepts: {
       scheme: 'exact',
       price: PRICE_LIST,
@@ -62,7 +67,7 @@ export const x402Routes: RoutesConfig = {
     },
     description: 'List files in the BitAtlas vault',
   },
-  'GET /vault/files/*/download-url': {
+  'GET /files/*/download-url': {
     accepts: {
       scheme: 'exact',
       price: PRICE_DOWNLOAD,

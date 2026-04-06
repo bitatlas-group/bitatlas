@@ -20,6 +20,10 @@ const X402_ANON_USER_ID = 'x402-anonymous';
 /**
  * If no user is set after auth-or-pay, this means the request
  * was paid via x402. Assign an anonymous context.
+ * 
+ * The x402 middleware calls next() after successful payment verification.
+ * At that point, no auth header exists but payment was validated.
+ * We detect this by checking: no user set + no auth header = x402 paid.
  */
 export function x402AnonymousContext(req: Request, res: Response, next: NextFunction): void {
   // If user already set (JWT or API key auth), skip
@@ -28,16 +32,18 @@ export function x402AnonymousContext(req: Request, res: Response, next: NextFunc
     return;
   }
 
-  // Check if this request was paid via x402 (payment headers present)
-  const paymentResponse = req.headers['x-payment-response'] || req.headers['payment-response'];
-  if (!paymentResponse) {
-    // No auth, no payment — should have been caught earlier
-    // but just in case:
-    res.status(401).json({ error: 'Authentication or payment required' });
+  // If we reach here with no user and no auth header,
+  // the x402 middleware must have validated payment and called next().
+  // (If x402 was disabled or route didn't match, authOrPay would have
+  // returned 401 before reaching this middleware.)
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    // Has auth header but no user = auth failed upstream, don't mask it
+    next();
     return;
   }
 
-  // Assign anonymous user context
+  // Assign anonymous user context for x402-paid request
   const requestId = uuidv4();
   req.user = {
     id: `${X402_ANON_USER_ID}-${requestId}`,
