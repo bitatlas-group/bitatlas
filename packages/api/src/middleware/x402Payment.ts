@@ -2,10 +2,48 @@ import { Request, Response, NextFunction } from 'express';
 import { paymentMiddleware, x402ResourceServer } from '@x402/express';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { HTTPFacilitatorClient } from '@x402/core/server';
+import type { FacilitatorConfig } from '@x402/core/server';
 import { x402Config, x402Routes } from '../config/x402';
 import { logger } from '../services/logger';
 
 let x402Middleware: ((req: Request, res: Response, next: NextFunction) => Promise<void>) | null = null;
+
+/**
+ * Build CDP JWT auth headers for the facilitator.
+ * Uses @coinbase/cdp-sdk to sign requests with Ed25519 keys.
+ */
+function buildCdpAuthHeaders(apiKeyId: string, apiKeySecret: string, facilitatorUrl: string): FacilitatorConfig['createAuthHeaders'] {
+  let generateJwt: any;
+  try {
+    generateJwt = require('@coinbase/cdp-sdk/auth').generateJwt;
+  } catch {
+    logger.error('[x402] @coinbase/cdp-sdk not installed — cannot use CDP facilitator');
+    return undefined;
+  }
+
+  const url = new URL(facilitatorUrl);
+  const requestHost = url.host;
+
+  return async () => {
+    const makeHeaders = async (method: string, path: string) => {
+      const token = await generateJwt({
+        apiKeyId,
+        apiKeySecret,
+        requestMethod: method,
+        requestHost,
+        requestPath: url.pathname + '/' + path,
+        expiresIn: 120,
+      });
+      return { Authorization: `Bearer ${token}` };
+    };
+
+    return {
+      verify: await makeHeaders('POST', 'verify'),
+      settle: await makeHeaders('POST', 'settle'),
+      supported: await makeHeaders('GET', 'supported'),
+    };
+  };
+}
 
 /**
  * Initialize the x402 payment middleware.
@@ -23,9 +61,21 @@ export async function initX402Middleware(): Promise<void> {
     return;
   }
 
-  const facilitatorClient = new HTTPFacilitatorClient({
+  // Build facilitator client config — with CDP auth if keys are provided
+  const facilitatorConfig: FacilitatorConfig = {
     url: x402Config.facilitatorUrl,
-  });
+  };
+
+  if (x402Config.cdpApiKeyId && x402Config.cdpApiKeySecret) {
+    facilitatorConfig.createAuthHeaders = buildCdpAuthHeaders(
+      x402Config.cdpApiKeyId,
+      x402Config.cdpApiKeySecret,
+      x402Config.facilitatorUrl,
+    );
+    logger.info('[x402] Using CDP facilitator with JWT auth');
+  }
+
+  const facilitatorClient = new HTTPFacilitatorClient(facilitatorConfig);
 
   const resourceServer = new x402ResourceServer(facilitatorClient)
     .register(x402Config.network as any, new ExactEvmScheme());

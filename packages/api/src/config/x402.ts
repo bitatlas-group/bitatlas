@@ -20,6 +20,8 @@ export const x402Config = {
   network: NETWORK,
   payTo: PAY_TO,
   facilitatorUrl: FACILITATOR_URL,
+  cdpApiKeyId: process.env.CDP_API_KEY_ID || '',
+  cdpApiKeySecret: process.env.CDP_API_KEY_SECRET || '',
 };
 
 /**
