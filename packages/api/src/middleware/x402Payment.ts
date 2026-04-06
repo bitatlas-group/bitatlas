@@ -9,9 +9,10 @@ let x402Middleware: ((req: Request, res: Response, next: NextFunction) => Promis
 
 /**
  * Initialize the x402 payment middleware.
- * Call once during server startup.
+ * Call once during server startup. Facilitator sync happens async
+ * and retries in the background if it fails on first attempt.
  */
-export function initX402Middleware(): void {
+export async function initX402Middleware(): Promise<void> {
   if (!x402Config.enabled) {
     logger.info('[x402] Disabled (X402_ENABLED != true)');
     return;
@@ -29,6 +30,7 @@ export function initX402Middleware(): void {
   const resourceServer = new x402ResourceServer(facilitatorClient)
     .register(x402Config.network as any, new ExactEvmScheme());
 
+  // Create middleware without auto-sync (avoids crash if facilitator unreachable)
   x402Middleware = paymentMiddleware(
     x402Routes,
     resourceServer,
@@ -37,7 +39,7 @@ export function initX402Middleware(): void {
       testnet: x402Config.network === 'eip155:84532',
     },
     undefined, // paywall provider
-    false,     // syncFacilitatorOnStart — disable to avoid crash if facilitator unreachable at boot
+    false,     // syncFacilitatorOnStart — we do it manually below
   );
 
   logger.info({
@@ -46,6 +48,34 @@ export function initX402Middleware(): void {
     facilitator: x402Config.facilitatorUrl,
     routes: Object.keys(x402Routes).length,
   }, '[x402] Payment middleware initialized');
+
+  // Sync with facilitator async — retry up to 5 times
+  syncFacilitator(resourceServer, 5, 5000).catch((err) => {
+    logger.error({ err: (err as Error).message }, '[x402] Failed to sync with facilitator after retries — payments will not work until facilitator is reachable');
+  });
+}
+
+async function syncFacilitator(
+  resourceServer: x402ResourceServer,
+  maxRetries: number,
+  delayMs: number,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await resourceServer.initialize();
+      logger.info('[x402] Facilitator sync complete — payments active');
+      return;
+    } catch (err) {
+      logger.warn(
+        { attempt, maxRetries, err: (err as Error).message },
+        '[x402] Facilitator sync attempt failed',
+      );
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, delayMs * attempt));
+      }
+    }
+  }
+  throw new Error('Facilitator sync failed after all retries');
 }
 
 /**

@@ -5,7 +5,7 @@ import type { RoutesConfig } from '@x402/core/server';
 // Base Sepolia (testnet): eip155:84532
 const NETWORK = process.env.X402_NETWORK === 'base-sepolia' ? 'eip155:84532' : 'eip155:8453';
 const PAY_TO = process.env.X402_WALLET_ADDRESS || '';
-const FACILITATOR_URL = process.env.X402_FACILITATOR_URL || 'https://facilitator.x402.org';
+const FACILITATOR_URL = process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator';
 
 // Pricing (USDC)
 const PRICE_UPLOAD = process.env.X402_PRICE_UPLOAD || '$0.01';        // per upload request (flat)
