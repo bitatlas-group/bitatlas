@@ -36,6 +36,8 @@ export function initX402Middleware(): void {
       appName: 'BitAtlas',
       testnet: x402Config.network === 'eip155:84532',
     },
+    undefined, // paywall provider
+    false,     // syncFacilitatorOnStart — disable to avoid crash if facilitator unreachable at boot
   );
 
   logger.info({
