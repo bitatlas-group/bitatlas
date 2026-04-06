@@ -409,52 +409,44 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-6">
             <div className="text-center mb-16 space-y-4">
               <h2 className="font-headline font-extrabold text-4xl text-primary tracking-tight">
-                Simple, Transparent Pricing
+                Pay-per-Request Pricing
               </h2>
               <p className="text-on-surface-variant max-w-2xl mx-auto">
-                Two ways to access: create a free account, or pay per request with USDC. No subscriptions, no hidden fees.
+                One price model. No subscriptions, no accounts, no hidden fees. Just USDC on Base.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-              {/* Free Tier */}
-              <div className="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border border-outline-variant/10">
-                <div className="space-y-2">
-                  <h3 className="font-headline font-bold text-2xl text-primary">Free Account</h3>
-                  <p className="text-on-surface-variant">For humans and their agents</p>
+            <div className="max-w-lg mx-auto">
+              {/* Single USDC pricing card */}
+              <div className="bg-surface-container-lowest p-10 rounded-[2rem] flex flex-col gap-6 shadow-lg border-2 border-tertiary/30 relative">
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-tertiary text-on-tertiary text-xs font-bold uppercase tracking-widest px-4 py-1 rounded-full">
+                  No Account Required
                 </div>
-                <div className="text-4xl font-headline font-extrabold text-primary">$0<span className="text-lg font-normal text-on-surface-variant">/month</span></div>
-                <ul className="space-y-3 text-on-surface-variant">
-                  {["1 GB encrypted storage", "100 files", "API key access", "MCP server integration", "Vault dashboard UI"].map((item) => (
-                    <li key={item} className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-tertiary text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/register" className="mt-auto bg-gradient-to-br from-primary to-primary-container text-on-primary px-6 py-3 rounded-xl font-headline font-bold text-center hover:brightness-110 transition-all">
-                  Get Started Free
-                </Link>
-              </div>
+                <div className="space-y-2 text-center">
+                  <h3 className="font-headline font-bold text-3xl text-primary">Pay with USDC</h3>
+                  <p className="text-on-surface-variant">Your agent pays per request. No signup, no API key, no KYC.</p>
+                </div>
 
-              {/* x402 Pay-per-Request */}
-              <div className="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border-2 border-tertiary/30 relative">
-                <div className="absolute -top-3 right-8 bg-tertiary text-on-tertiary text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">
-                  No Account Needed
-                </div>
-                <div className="space-y-2">
-                  <h3 className="font-headline font-bold text-2xl text-primary">Pay with USDC</h3>
-                  <p className="text-on-surface-variant">For anonymous agents via x402</p>
-                </div>
-                <div className="text-4xl font-headline font-extrabold text-primary">$0.01<span className="text-lg font-normal text-on-surface-variant">/upload</span></div>
-                <ul className="space-y-3 text-on-surface-variant">
+                <div className="grid grid-cols-2 gap-4 mt-2">
                   {[
-                    "Upload: $0.01 per file",
-                    "Download: $0.005 per file",
-                    "List files: $0.001",
-                    "30 days storage included",
-                    "Renew: $0.005 per 30 days",
-                    "No signup, no API key, no KYC",
+                    { op: "Upload", price: "$0.01" },
+                    { op: "Download", price: "$0.005" },
+                    { op: "List files", price: "$0.001" },
+                    { op: "Renew 30d", price: "$0.005" },
+                  ].map((item) => (
+                    <div key={item.op} className="bg-surface-container rounded-xl p-4 text-center">
+                      <div className="text-2xl font-headline font-extrabold text-primary">{item.price}</div>
+                      <div className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mt-1">{item.op}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <ul className="space-y-3 text-on-surface-variant mt-2">
+                  {[
+                    "30 days storage included per upload",
+                    "E2E encrypted — we never see your data",
+                    "USDC on Base (Coinbase L2)",
+                    "Works with any x402-compatible agent",
                   ].map((item) => (
                     <li key={item} className="flex items-center gap-2">
                       <span className="material-symbols-outlined text-tertiary text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
@@ -462,8 +454,9 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <a href="/blog/anonymous-agent-storage-x402-payments" className="mt-auto bg-tertiary text-on-tertiary px-6 py-3 rounded-xl font-headline font-bold text-center hover:brightness-110 transition-all">
-                  Learn How It Works →
+
+                <a href="/blog/anonymous-agent-storage-x402-payments" className="mt-auto bg-tertiary text-on-tertiary px-6 py-4 rounded-xl font-headline font-bold text-center text-lg hover:brightness-110 transition-all">
+                  See How It Works →
                 </a>
               </div>
             </div>
@@ -492,16 +485,16 @@ export default function Home() {
               Your agents deserve a vault,<br />not a folder.
             </h2>
             <p className="relative z-10 text-on-primary-container text-xl max-w-2xl mx-auto">
-              Start encrypting in under 5 minutes. Free tier included — no credit card required.
+              Pay with USDC. Store encrypted. No account needed.
             </p>
 
             <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
-              <Link
-                href="/register"
+              <a
+                href="#pricing"
                 className="bg-on-primary text-primary px-10 py-5 rounded-2xl font-headline font-bold text-xl hover:bg-primary-fixed transition-all"
               >
-                Get Started Free
-              </Link>
+                View Pricing
+              </a>
               <a
                 href="https://github.com/bitatlas-group/bitatlas"
                 target="_blank"
