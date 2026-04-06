@@ -76,7 +76,8 @@ jobs:
       - name: Check network consistency
         run: |
           # Ensure deploy.yml uses docker compose, not manual docker run
-          if grep -q "docker run" .github/workflows/deploy.yml; then
+          # Exclude comments (lines starting with #) from the check
+          if grep -v '^\s*#' .github/workflows/deploy.yml | grep -q "docker run"; then
             echo "❌ deploy.yml must use 'docker compose', not 'docker run'"
             echo "   Manual docker run bypasses network config and causes service isolation bugs"
             exit 1

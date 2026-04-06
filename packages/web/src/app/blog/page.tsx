@@ -153,7 +153,7 @@ export default function BlogIndexPage() {
             <div className="absolute top-0 right-0 w-96 h-96 bg-primary-container rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2 opacity-50" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary rounded-full blur-[120px] translate-y-1/2 -translate-x-1/2 opacity-20" />
             <h2 className="relative z-10 font-headline font-extrabold text-3xl md:text-4xl text-on-primary tracking-tight">
-              Ready to encrypt your agent's world?
+              Ready to encrypt your agent&apos;s world?
             </h2>
             <p className="relative z-10 text-on-primary-container max-w-xl mx-auto">
               Get started with BitAtlas today. Free tier included — no credit

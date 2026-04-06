@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
 import { useFolders } from '@/contexts/FolderContext';
-import { vaultApi, foldersApi, uploadToPresignedUrl, type VaultFile, type Folder } from '@/lib/api';
+import { vaultApi, uploadToPresignedUrl, type VaultFile, type Folder } from '@/lib/api';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatBytes(bytes: number): string {
