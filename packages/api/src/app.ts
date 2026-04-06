@@ -5,6 +5,8 @@ import { corsOrigins } from './config';
 import { generalRateLimit } from './middleware/rateLimit';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
+import { authOrPay } from './middleware/x402Payment';
+import { x402AnonymousContext } from './middleware/x402Auth';
 
 import authRoutes from './routes/auth';
 import vaultRoutes from './routes/vault';
@@ -34,7 +36,8 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Payment-Signature', 'Payment-Signature'],
+  exposedHeaders: ['X-Payment-Response', 'Payment-Response', 'X-Payment-Required', 'Payment-Required'],
 }));
 
 // Body parsing
@@ -43,6 +46,11 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Global rate limit
 app.use(generalRateLimit);
+
+// x402 auth-or-pay middleware on vault routes
+// If request has Bearer token → normal auth flow
+// If no auth → x402 payment required
+app.use('/vault', authOrPay, x402AnonymousContext);
 
 // Routes
 app.use('/status', statusRoutes);

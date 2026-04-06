@@ -45,6 +45,12 @@ export function signRefreshToken(userId: string, sessionId: string): string {
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  // If user already set (e.g., via x402 anonymous context), skip auth
+  if (req.user) {
+    next();
+    return;
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Missing authorization header' });
