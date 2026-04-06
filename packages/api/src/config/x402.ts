@@ -77,4 +77,14 @@ export const x402Routes: RoutesConfig = {
     },
     description: 'Get a presigned download URL for an encrypted file',
   },
+  'POST /files/*/renew': {
+    accepts: {
+      scheme: 'exact',
+      price: PRICE_DOWNLOAD,
+      network: NETWORK as any,
+      payTo: PAY_TO,
+      maxTimeoutSeconds: 60,
+    },
+    description: 'Renew the storage expiry of an x402 anonymous file by 30 days',
+  },
 };

@@ -5,10 +5,12 @@ import { prisma } from '../db/client';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { uploadRateLimit } from '../middleware/rateLimit';
 import { generateUploadUrl, generateDownloadUrl, deleteObject } from '../services/storage';
+import { isX402Paid } from '../middleware/x402Auth';
+import { STORAGE_DAYS_INCLUDED } from '../config/x402';
 
 const router = Router();
 
-// All vault routes require auth
+// All vault routes require auth (JWT, API key, or x402 anonymous context)
 router.use(requireAuth);
 
 const VALID_CATEGORIES = ['identity', 'financial', 'legal', 'medical', 'digital'] as const;
@@ -56,15 +58,23 @@ router.get('/files', requirePermission('read'), async (req: Request, res: Respon
   }
 
   const { folderId, category, search, includeDeleted, limit, offset } = parsed.data;
-  const userId = req.user!.id;
 
-  const where = {
-    userId,
-    ...(folderId !== undefined ? { folderId } : {}),
-    ...(category ? { category } : {}),
-    ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
-    deletedAt: includeDeleted === 'true' ? undefined : null,
-  };
+  // x402 anonymous: return all x402-anon files (all are E2E encrypted — no privacy concern)
+  const where = isX402Paid(req)
+    ? {
+        userId: null,
+        storageKey: { startsWith: 'x402-anon/' },
+        ...(category ? { category } : {}),
+        ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
+        deletedAt: includeDeleted === 'true' ? undefined : null,
+      }
+    : {
+        userId: req.user!.id,
+        ...(folderId !== undefined ? { folderId } : {}),
+        ...(category ? { category } : {}),
+        ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
+        deletedAt: includeDeleted === 'true' ? undefined : null,
+      };
 
   const [files, total] = await Promise.all([
     prisma.file.findMany({
@@ -82,6 +92,7 @@ router.get('/files', requirePermission('read'), async (req: Request, res: Respon
         deletedAt: true,
         createdAt: true,
         updatedAt: true,
+        expiresAt: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -104,9 +115,11 @@ router.get('/files', requirePermission('read'), async (req: Request, res: Respon
 
 // GET /vault/files/:id
 router.get('/files/:id', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
-  const file = await prisma.file.findFirst({
-    where: { id: req.params.id, userId: req.user!.id, deletedAt: null },
-  });
+  const where = isX402Paid(req)
+    ? { id: req.params.id, userId: null, deletedAt: null }
+    : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
+  const file = await prisma.file.findFirst({ where });
 
   if (!file) {
     res.status(404).json({ error: 'File not found' });
@@ -129,10 +142,11 @@ router.post('/files/upload-url', uploadRateLimit, requirePermission('write'), as
   }
 
   const { contentType } = parsed.data;
-  const userId = req.user!.id;
 
-  // Deterministic storage key: user/<userId>/<uuid>
-  const storageKey = `user/${userId}/${uuidv4()}`;
+  // x402 anonymous: use x402-anon/ prefix instead of user/<userId>/
+  const storageKey = isX402Paid(req)
+    ? `x402-anon/${uuidv4()}`
+    : `user/${req.user!.id}/${uuidv4()}`;
 
   const uploadUrl = await generateUploadUrl(storageKey, contentType);
 
@@ -141,8 +155,12 @@ router.post('/files/upload-url', uploadRateLimit, requirePermission('write'), as
 
 // GET /vault/files/:id/download-url
 router.get('/files/:id/download-url', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
+  const where = isX402Paid(req)
+    ? { id: req.params.id, userId: null, deletedAt: null }
+    : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
   const file = await prisma.file.findFirst({
-    where: { id: req.params.id, userId: req.user!.id, deletedAt: null },
+    where,
     select: {
       storageKey: true,
       ownerEncryptedKey: true,
@@ -151,6 +169,7 @@ router.get('/files/:id/download-url', requirePermission('read'), async (req: Req
       authTag: true,
       emergencyEncryptedKey: true,
       emergencyIv: true,
+      expiresAt: true,
     },
   });
 
@@ -163,6 +182,7 @@ router.get('/files/:id/download-url', requirePermission('read'), async (req: Req
 
   res.json({
     downloadUrl,
+    expiresAt: file.expiresAt,
     encryptionMetadata: {
       ownerEncryptedKey: file.ownerEncryptedKey,
       ownerIv: file.ownerIv,
@@ -182,18 +202,59 @@ router.post('/files', requirePermission('write'), async (req: Request, res: Resp
     return;
   }
 
-  const userId = req.user!.id;
   const data = parsed.data;
-
-  // Verify storage key belongs to this user
-  if (!data.storageKey.startsWith(`user/${userId}/`)) {
-    res.status(403).json({ error: 'Invalid storage key' });
-    return;
-  }
 
   // Enforce per-file size limit (100 MB)
   if (data.sizeBytes > MAX_FILE_SIZE_BYTES) {
     res.status(413).json({ error: 'File exceeds maximum allowed size of 100 MB', maxSizeBytes: MAX_FILE_SIZE_BYTES });
+    return;
+  }
+
+  // x402 anonymous path — skip ownership checks and quota, use x402-anon namespace
+  if (isX402Paid(req)) {
+    if (!data.storageKey.startsWith('x402-anon/')) {
+      res.status(403).json({ error: 'x402 uploads must use the x402-anon/ storage namespace' });
+      return;
+    }
+
+    const expiresAt = new Date(Date.now() + STORAGE_DAYS_INCLUDED * 24 * 60 * 60 * 1000);
+
+    const file = await prisma.file.create({
+      data: {
+        userId: null,
+        name: data.name,
+        mimeType: data.mimeType,
+        sizeBytes: data.sizeBytes,
+        originalSizeBytes: data.originalSizeBytes,
+        storageKey: data.storageKey,
+        ownerEncryptedKey: data.ownerEncryptedKey,
+        ownerIv: data.ownerIv,
+        fileIv: data.fileIv,
+        authTag: data.authTag,
+        emergencyEncryptedKey: data.emergencyEncryptedKey,
+        emergencyIv: data.emergencyIv,
+        category: data.category,
+        tags: data.tags ?? [],
+        expiresAt,
+        // folderId intentionally omitted: anonymous users have no folder hierarchy
+      },
+    });
+
+    res.status(201).json({
+      ...file,
+      sizeBytes: file.sizeBytes.toString(),
+      originalSizeBytes: file.originalSizeBytes?.toString() ?? null,
+      message: `File stored anonymously. Expires at ${expiresAt.toISOString()}. Renew at POST /vault/files/${file.id}/renew.`,
+    });
+    return;
+  }
+
+  // Authenticated path
+  const userId = req.user!.id;
+
+  // Verify storage key belongs to this user
+  if (!data.storageKey.startsWith(`user/${userId}/`)) {
+    res.status(403).json({ error: 'Invalid storage key' });
     return;
   }
 
@@ -258,6 +319,35 @@ router.post('/files', requirePermission('write'), async (req: Request, res: Resp
   });
 });
 
+// POST /vault/files/:id/renew — extend storage expiry by 30 days (x402 protected)
+router.post('/files/:id/renew', requirePermission('write'), async (req: Request, res: Response): Promise<void> => {
+  const where = isX402Paid(req)
+    ? { id: req.params.id, userId: null, deletedAt: null }
+    : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
+  const file = await prisma.file.findFirst({
+    where,
+    select: { id: true, expiresAt: true },
+  });
+
+  if (!file) {
+    res.status(404).json({ error: 'File not found' });
+    return;
+  }
+
+  // Extend from current expiry (or now if already expired/never set)
+  const base = file.expiresAt && file.expiresAt > new Date() ? file.expiresAt : new Date();
+  const newExpiresAt = new Date(base.getTime() + STORAGE_DAYS_INCLUDED * 24 * 60 * 60 * 1000);
+
+  const updated = await prisma.file.update({
+    where: { id: file.id },
+    data: { expiresAt: newExpiresAt },
+    select: { id: true, expiresAt: true },
+  });
+
+  res.json({ ok: true, expiresAt: updated.expiresAt });
+});
+
 // PATCH /vault/files/:id — update file (move to folder, rename)
 const updateFileSchema = z.object({
   folderId: z.string().uuid().nullable().optional(),
@@ -271,11 +361,14 @@ router.patch('/files/:id', requirePermission('write'), async (req: Request, res:
     return;
   }
 
-  const userId = req.user!.id;
   const { folderId, name } = parsed.data;
 
+  const where = isX402Paid(req)
+    ? { id: req.params.id, userId: null, deletedAt: null }
+    : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
   const file = await prisma.file.findFirst({
-    where: { id: req.params.id, userId, deletedAt: null },
+    where,
     select: { id: true },
   });
 
@@ -284,9 +377,13 @@ router.patch('/files/:id', requirePermission('write'), async (req: Request, res:
     return;
   }
 
-  // Verify target folder belongs to user (if moving)
+  // Verify target folder belongs to user (if moving) — x402 users can't use folders
   if (folderId !== undefined && folderId !== null) {
-    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    if (isX402Paid(req)) {
+      res.status(400).json({ error: 'Anonymous x402 users cannot use folders' });
+      return;
+    }
+    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId: req.user!.id } });
     if (!folder) {
       res.status(400).json({ error: 'Folder not found' });
       return;
@@ -310,10 +407,14 @@ router.patch('/files/:id', requirePermission('write'), async (req: Request, res:
 
 // DELETE /vault/files/:id — soft delete + S3 cleanup + quota update
 router.delete('/files/:id', requirePermission('delete'), async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user!.id;
+  const x402 = isX402Paid(req);
+  const where = x402
+    ? { id: req.params.id, userId: null, deletedAt: null }
+    : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
   const file = await prisma.file.findFirst({
-    where: { id: req.params.id, userId, deletedAt: null },
-    select: { id: true, sizeBytes: true, storageKey: true },
+    where,
+    select: { id: true, sizeBytes: true, storageKey: true, userId: true },
   });
 
   if (!file) {
@@ -327,11 +428,13 @@ router.delete('/files/:id', requirePermission('delete'), async (req: Request, re
     data: { deletedAt: new Date() },
   });
 
-  // Decrement storage usage
-  await prisma.user.update({
-    where: { id: userId },
-    data: { storageUsedBytes: { decrement: Number(file.sizeBytes) } },
-  });
+  // Decrement storage usage (only for authenticated users with a DB record)
+  if (file.userId) {
+    await prisma.user.update({
+      where: { id: file.userId },
+      data: { storageUsedBytes: { decrement: Number(file.sizeBytes) } },
+    });
+  }
 
   // Delete from S3 (async, don't block response)
   deleteObject(file.storageKey).catch((err) => {

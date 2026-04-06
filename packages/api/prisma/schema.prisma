@@ -31,7 +31,7 @@ model User {
 
 model File {
   id                    String    @id @default(uuid()) @db.Uuid
-  userId                String    @db.Uuid @map("user_id")
+  userId                String?   @db.Uuid @map("user_id")
   name                  String    @db.VarChar(500)
   mimeType              String?   @db.VarChar(255) @map("mime_type")
   sizeBytes             BigInt    @map("size_bytes")
@@ -54,13 +54,20 @@ model File {
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Storage lifecycle — set on x402 anonymous uploads (30 days included).
+  // NULL means the file does not expire (authenticated user files).
+  expiresAt             DateTime? @map("expires_at") @db.Timestamptz
+
+  // userId is nullable to support x402 anonymous files (no user account required).
+  // Authenticated user files always have a userId.
+  user                  User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   folder                Folder?   @relation(fields: [folderId], references: [id])
 
   @@index([userId])
   @@index([folderId])
   @@index([category])
   @@index([deletedAt])
+  @@index([expiresAt])
   @@map("files")
 }
 
