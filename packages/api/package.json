@@ -30,7 +30,7 @@
     "pino-http": "^11.0.0",
     "uuid": "^9.0.1",
     "zod": "^3.22.4",
-    "@coinbase/cdp-sdk": "^0.18.0"
+    "@coinbase/cdp-sdk": "^1.46.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
