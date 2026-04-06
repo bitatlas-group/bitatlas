@@ -23,6 +23,7 @@ export default function Home() {
           {/* Nav links */}
           <div className="hidden md:flex gap-8 items-center">
             <a href="#features" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Product</a>
+            <a href="#pricing" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Pricing</a>
             <a href="#why" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Why BitAtlas</a>
             <Link href="/blog" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Blog</Link>
           </div>
@@ -101,7 +102,7 @@ export default function Home() {
                   Built with
                 </span>
                 <div className="flex flex-wrap gap-3">
-                  {["EU-Hosted", "AES-256-GCM", "Zero-Knowledge", "Open Source"].map((badge) => (
+                  {["EU-Hosted", "AES-256-GCM", "Zero-Knowledge", "USDC Payments", "Open Source"].map((badge) => (
                     <span
                       key={badge}
                       className="px-3 py-1 bg-surface-container-high rounded text-xs font-bold text-on-surface-variant uppercase tracking-wide border border-outline-variant/20"
@@ -219,7 +220,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {[
                 {
                   icon: "shield_lock",
@@ -234,6 +235,13 @@ export default function Home() {
                   iconColor: "text-on-secondary",
                   title: "Agent-First Storage",
                   desc: "MCP server with 7 tools for upload, download, search, and file management. Your AI agents get encrypted persistent storage via a single npm package.",
+                },
+                {
+                  icon: "payments",
+                  iconBg: "bg-tertiary-container",
+                  iconColor: "text-on-tertiary-container",
+                  title: "Pay-per-Request with USDC",
+                  desc: "No account needed. Agents pay with USDC stablecoins on Base via the x402 standard. Upload for $0.01, download for $0.005. No signup, no API key, no KYC.",
                 },
                 {
                   icon: "cloud_sync",
@@ -391,6 +399,84 @@ export default function Home() {
 
                 {/* Rotated glow behind card */}
                 <div className="absolute -z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[110%] h-[90%] bg-gradient-to-br from-secondary/5 to-primary/5 rounded-[4rem] rotate-2" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Pricing Section ── */}
+        <section id="pricing" className="py-24 bg-surface-container-low">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-16 space-y-4">
+              <h2 className="font-headline font-extrabold text-4xl text-primary tracking-tight">
+                Simple, Transparent Pricing
+              </h2>
+              <p className="text-on-surface-variant max-w-2xl mx-auto">
+                Two ways to access: create a free account, or pay per request with USDC. No subscriptions, no hidden fees.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+              {/* Free Tier */}
+              <div className="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border border-outline-variant/10">
+                <div className="space-y-2">
+                  <h3 className="font-headline font-bold text-2xl text-primary">Free Account</h3>
+                  <p className="text-on-surface-variant">For humans and their agents</p>
+                </div>
+                <div className="text-4xl font-headline font-extrabold text-primary">$0<span className="text-lg font-normal text-on-surface-variant">/month</span></div>
+                <ul className="space-y-3 text-on-surface-variant">
+                  {["1 GB encrypted storage", "100 files", "API key access", "MCP server integration", "Vault dashboard UI"].map((item) => (
+                    <li key={item} className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-tertiary text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/register" className="mt-auto bg-gradient-to-br from-primary to-primary-container text-on-primary px-6 py-3 rounded-xl font-headline font-bold text-center hover:brightness-110 transition-all">
+                  Get Started Free
+                </Link>
+              </div>
+
+              {/* x402 Pay-per-Request */}
+              <div className="bg-surface-container-lowest p-8 rounded-[2rem] flex flex-col gap-6 shadow-sm border-2 border-tertiary/30 relative">
+                <div className="absolute -top-3 right-8 bg-tertiary text-on-tertiary text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+                  No Account Needed
+                </div>
+                <div className="space-y-2">
+                  <h3 className="font-headline font-bold text-2xl text-primary">Pay with USDC</h3>
+                  <p className="text-on-surface-variant">For anonymous agents via x402</p>
+                </div>
+                <div className="text-4xl font-headline font-extrabold text-primary">$0.01<span className="text-lg font-normal text-on-surface-variant">/upload</span></div>
+                <ul className="space-y-3 text-on-surface-variant">
+                  {[
+                    "Upload: $0.01 per file",
+                    "Download: $0.005 per file",
+                    "List files: $0.001",
+                    "30 days storage included",
+                    "Renew: $0.005 per 30 days",
+                    "No signup, no API key, no KYC",
+                  ].map((item) => (
+                    <li key={item} className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-tertiary text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <a href="/blog/anonymous-agent-storage-x402-payments" className="mt-auto bg-tertiary text-on-tertiary px-6 py-3 rounded-xl font-headline font-bold text-center hover:brightness-110 transition-all">
+                  Learn How It Works →
+                </a>
+              </div>
+            </div>
+
+            {/* Payment badges */}
+            <div className="flex justify-center items-center gap-6 mt-12">
+              <span className="text-xs font-bold uppercase tracking-widest text-outline">Powered by</span>
+              <div className="flex gap-3">
+                {["x402 Protocol", "USDC on Base", "Coinbase L2"].map((badge) => (
+                  <span key={badge} className="px-3 py-1 bg-surface-container-high rounded text-xs font-bold text-on-surface-variant uppercase tracking-wide border border-outline-variant/20">
+                    {badge}
+                  </span>
+                ))}
               </div>
             </div>
           </div>
