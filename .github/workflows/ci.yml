@@ -22,7 +22,7 @@ jobs:
 
       - run: npm ci
       - name: Lint
-        run: npx next lint
+        run: npx eslint .
       - name: Type Check
         run: npx tsc --noEmit
       - name: Build
@@ -56,6 +56,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Create stub env for validation
+        run: |
+          cat > .env.prod <<EOF
+          POSTGRES_PASSWORD=ci-stub
+          REDIS_PASSWORD=ci-stub
+          MINIO_ACCESS_KEY=ci-stub
+          MINIO_SECRET_KEY=ci-stub
+          DATABASE_URL=postgresql://x:x@localhost:5432/x
+          REDIS_URL=redis://localhost:6379
+          JWT_SECRET=ci-stub-secret-that-is-at-least-32-chars-long
+          MINIO_ENDPOINT=minio
+          MINIO_ACCESS_KEY=ci-stub
+          MINIO_SECRET_KEY=ci-stub
+          EOF
       - name: Validate compose file
         run: docker compose -f docker-compose.prod.yml config --quiet
 
