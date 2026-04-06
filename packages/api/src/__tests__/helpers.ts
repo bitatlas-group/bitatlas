@@ -62,6 +62,7 @@ export const mockFile = {
   category: null as string | null,
   tags: [] as string[],
   deletedAt: null as Date | null,
+  expiresAt: null as Date | null,
   createdAt: new Date('2025-01-01T00:00:00.000Z'),
   updatedAt: new Date('2025-01-01T00:00:00.000Z'),
 };
