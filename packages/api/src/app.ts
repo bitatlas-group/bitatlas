@@ -36,7 +36,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Payment-Signature', 'Payment-Signature'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Payment-Signature', 'Payment-Signature', 'X-Access-Token', 'X-Cleanup-Secret'],
   exposedHeaders: ['X-Payment-Response', 'Payment-Response', 'X-Payment-Required', 'Payment-Required'],
 }));
 

@@ -58,6 +58,10 @@ model File {
   // NULL means the file does not expire (authenticated user files).
   expiresAt             DateTime? @map("expires_at") @db.Timestamptz
 
+  // Access token for x402 anonymous files. Returned on upload, required for download/renew.
+  // NULL for authenticated user files (they use userId-based access control).
+  accessToken           String?   @map("access_token") @db.VarChar(64)
+
   // userId is nullable to support x402 anonymous files (no user account required).
   // Authenticated user files always have a userId.
   user                  User?     @relation(fields: [userId], references: [id], onDelete: Cascade)

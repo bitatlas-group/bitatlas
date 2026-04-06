@@ -6,6 +6,7 @@ import { redis } from './services/redis';
 import { ensureBucketExists } from './services/storage';
 import { prisma } from './db/client';
 import { initX402Middleware } from './middleware/x402Payment';
+import { startExpiryScheduler } from './services/expiry';
 
 async function retryConnect(
   name: string,
@@ -47,6 +48,9 @@ async function start() {
 
     // Initialize x402 payment middleware
     initX402Middleware();
+
+    // Start expired file cleanup scheduler (every 6 hours)
+    startExpiryScheduler();
 
     app.listen(config.PORT, () => {
       logger.info({ port: config.PORT, env: config.NODE_ENV }, `[API] BitAtlas API running`);

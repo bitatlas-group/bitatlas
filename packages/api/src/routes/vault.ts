@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../db/client';
 import { requireAuth, requirePermission } from '../middleware/auth';
@@ -7,6 +8,16 @@ import { uploadRateLimit } from '../middleware/rateLimit';
 import { generateUploadUrl, generateDownloadUrl, deleteObject } from '../services/storage';
 import { isX402Paid } from '../middleware/x402Auth';
 import { STORAGE_DAYS_INCLUDED } from '../config/x402';
+
+/** Generate a random 32-byte hex access token for x402 anonymous files */
+function generateAccessToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/** Extract x-access-token header from request */
+function getAccessToken(req: Request): string | undefined {
+  return req.headers['x-access-token'] as string | undefined;
+}
 
 const router = Router();
 
@@ -115,9 +126,15 @@ router.get('/files', requirePermission('read'), async (req: Request, res: Respon
 
 // GET /vault/files/:id
 router.get('/files/:id', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
-  const where = isX402Paid(req)
-    ? { id: req.params.id, userId: null, deletedAt: null }
+  const x402 = isX402Paid(req);
+  const where = x402
+    ? { id: req.params.id, userId: null, accessToken: getAccessToken(req) || '__invalid__', deletedAt: null }
     : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
+  if (x402 && !getAccessToken(req)) {
+    res.status(403).json({ error: 'X-Access-Token header required for anonymous file access' });
+    return;
+  }
 
   const file = await prisma.file.findFirst({ where });
 
@@ -155,9 +172,15 @@ router.post('/files/upload-url', uploadRateLimit, requirePermission('write'), as
 
 // GET /vault/files/:id/download-url
 router.get('/files/:id/download-url', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
-  const where = isX402Paid(req)
-    ? { id: req.params.id, userId: null, deletedAt: null }
+  const x402 = isX402Paid(req);
+  const where = x402
+    ? { id: req.params.id, userId: null, accessToken: getAccessToken(req) || '__invalid__', deletedAt: null }
     : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
+  if (x402 && !getAccessToken(req)) {
+    res.status(403).json({ error: 'X-Access-Token header required for anonymous file access' });
+    return;
+  }
 
   const file = await prisma.file.findFirst({
     where,
@@ -218,6 +241,7 @@ router.post('/files', requirePermission('write'), async (req: Request, res: Resp
     }
 
     const expiresAt = new Date(Date.now() + STORAGE_DAYS_INCLUDED * 24 * 60 * 60 * 1000);
+    const accessToken = generateAccessToken();
 
     const file = await prisma.file.create({
       data: {
@@ -236,6 +260,7 @@ router.post('/files', requirePermission('write'), async (req: Request, res: Resp
         category: data.category,
         tags: data.tags ?? [],
         expiresAt,
+        accessToken,
         // folderId intentionally omitted: anonymous users have no folder hierarchy
       },
     });
@@ -244,7 +269,8 @@ router.post('/files', requirePermission('write'), async (req: Request, res: Resp
       ...file,
       sizeBytes: file.sizeBytes.toString(),
       originalSizeBytes: file.originalSizeBytes?.toString() ?? null,
-      message: `File stored anonymously. Expires at ${expiresAt.toISOString()}. Renew at POST /vault/files/${file.id}/renew.`,
+      accessToken, // Returned ONCE — client must store this to access the file later
+      message: `File stored anonymously. Expires at ${expiresAt.toISOString()}. Use the accessToken in X-Access-Token header for download/renew.`,
     });
     return;
   }
@@ -321,9 +347,15 @@ router.post('/files', requirePermission('write'), async (req: Request, res: Resp
 
 // POST /vault/files/:id/renew — extend storage expiry by 30 days (x402 protected)
 router.post('/files/:id/renew', requirePermission('write'), async (req: Request, res: Response): Promise<void> => {
-  const where = isX402Paid(req)
-    ? { id: req.params.id, userId: null, deletedAt: null }
+  const x402 = isX402Paid(req);
+  const where = x402
+    ? { id: req.params.id, userId: null, accessToken: getAccessToken(req) || '__invalid__', deletedAt: null }
     : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
+  if (x402 && !getAccessToken(req)) {
+    res.status(403).json({ error: 'X-Access-Token header required for anonymous file access' });
+    return;
+  }
 
   const file = await prisma.file.findFirst({
     where,
@@ -409,8 +441,13 @@ router.patch('/files/:id', requirePermission('write'), async (req: Request, res:
 router.delete('/files/:id', requirePermission('delete'), async (req: Request, res: Response): Promise<void> => {
   const x402 = isX402Paid(req);
   const where = x402
-    ? { id: req.params.id, userId: null, deletedAt: null }
+    ? { id: req.params.id, userId: null, accessToken: getAccessToken(req) || '__invalid__', deletedAt: null }
     : { id: req.params.id, userId: req.user!.id, deletedAt: null };
+
+  if (x402 && !getAccessToken(req)) {
+    res.status(403).json({ error: 'X-Access-Token header required for anonymous file access' });
+    return;
+  }
 
   const file = await prisma.file.findFirst({
     where,

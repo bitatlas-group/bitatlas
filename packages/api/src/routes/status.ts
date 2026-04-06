@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../db/client';
 import { redis } from '../services/redis';
 import { checkMinioHealth } from '../services/storage';
+import { cleanupExpiredFiles } from '../services/expiry';
 import { x402Config, x402Routes } from '../config/x402';
 
 const router = Router();
@@ -31,6 +32,19 @@ router.get('/', async (_req: Request, res: Response): Promise<void> => {
     },
     timestamp: new Date().toISOString(),
   });
+});
+
+// POST /status/cleanup — manually trigger expired file cleanup
+// Protected by a simple shared secret to prevent abuse
+router.post('/cleanup', async (req: Request, res: Response): Promise<void> => {
+  const secret = req.headers['x-cleanup-secret'];
+  if (!secret || secret !== process.env.CLEANUP_SECRET) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+
+  const result = await cleanupExpiredFiles();
+  res.json({ ok: true, ...result });
 });
 
 export default router;
