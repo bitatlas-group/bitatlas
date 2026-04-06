@@ -159,7 +159,7 @@ export const vaultApi = {
   },
 
   getDownloadUrl: async (id: string) => {
-    const res = await request<{ downloadUrl: string; encryptionMetadata: any }>(`/vault/files/${id}/download-url`);
+    const res = await request<{ downloadUrl: string; encryptionMetadata: { ownerEncryptedKey: string; ownerIv: string; fileIv: string; authTag: string; emergencyEncryptedKey?: string | null; emergencyIv?: string | null } }>(`/vault/files/${id}/download-url`);
     return { url: res.downloadUrl, encryptionMetadata: res.encryptionMetadata };
   },
 };

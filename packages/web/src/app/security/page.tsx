@@ -204,7 +204,7 @@ export default function SecurityWhitepaper() {
 
         <H3>Per-File Key Architecture</H3>
         <P>
-          Each file gets its own randomly generated 256-bit AES-GCM key. This per-file key is then encrypted ("wrapped") with the owner&apos;s master key. The wrapped key is stored server-side alongside the encrypted blob. This design means:
+          Each file gets its own randomly generated 256-bit AES-GCM key. This per-file key is then encrypted (&ldquo;wrapped&rdquo;) with the owner&apos;s master key. The wrapped key is stored server-side alongside the encrypted blob. This design means:
         </P>
         <ul className="list-disc pl-6 space-y-2 text-on-surface-variant mb-4">
           <li>Compromising one file key does not compromise any other file.</li>
@@ -257,7 +257,7 @@ export default function SecurityWhitepaper() {
 
         <H3>The Agent Trust Boundary</H3>
         <P>
-          The master key must be provided to the agent&apos;s runtime for decryption. This is the fundamental trust boundary: you trust the agent&apos;s execution environment (its sandbox, its memory) the same way you trust your own browser. BitAtlas does not attempt to solve the "malicious agent" problem — that&apos;s the agent framework&apos;s responsibility. What we guarantee is that <strong>the storage layer itself is zero-knowledge</strong>, and that key material never leaves the client-side boundary.
+          The master key must be provided to the agent&apos;s runtime for decryption. This is the fundamental trust boundary: you trust the agent&apos;s execution environment (its sandbox, its memory) the same way you trust your own browser. BitAtlas does not attempt to solve the &ldquo;malicious agent&rdquo; problem — that&apos;s the agent framework&apos;s responsibility. What we guarantee is that <strong>the storage layer itself is zero-knowledge</strong>, and that key material never leaves the client-side boundary.
         </P>
 
         <div className="bg-primary-container/10 border border-primary/10 rounded-2xl p-6 mt-6">

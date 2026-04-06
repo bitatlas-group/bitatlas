@@ -28,10 +28,13 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close sidebar on navigation
+  // Close sidebar on navigation — intentional setState in effect
+  // responding to route changes (external system)
+  const closeSidebar = pathname + (selectedFolderId ?? '');
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to route param change
     setSidebarOpen(false);
-  }, [pathname, selectedFolderId]);
+  }, [closeSidebar]);
 
   async function handleCreateFolder() {
     if (!newFolderName.trim()) return;

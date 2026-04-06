@@ -5,6 +5,7 @@ import { logger } from './services/logger';
 import { redis } from './services/redis';
 import { ensureBucketExists } from './services/storage';
 import { prisma } from './db/client';
+import { initX402Middleware } from './middleware/x402Payment';
 
 async function retryConnect(
   name: string,
@@ -43,6 +44,9 @@ async function start() {
       await prisma.$connect();
       logger.info('[DB] Connected');
     });
+
+    // Initialize x402 payment middleware
+    initX402Middleware();
 
     app.listen(config.PORT, () => {
       logger.info({ port: config.PORT, env: config.NODE_ENV }, `[API] BitAtlas API running`);

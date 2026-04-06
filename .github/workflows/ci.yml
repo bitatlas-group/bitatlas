@@ -22,7 +22,7 @@ jobs:
 
       - run: npm ci
       - name: Lint
-        run: npx next lint
+        run: npx eslint .
       - name: Type Check
         run: npx tsc --noEmit
       - name: Build
@@ -56,13 +56,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Create stub env for validation
+        run: |
+          cat > .env.prod <<EOF
+          POSTGRES_PASSWORD=ci-stub
+          REDIS_PASSWORD=ci-stub
+          MINIO_ACCESS_KEY=ci-stub
+          MINIO_SECRET_KEY=ci-stub
+          DATABASE_URL=postgresql://x:x@localhost:5432/x
+          REDIS_URL=redis://localhost:6379
+          JWT_SECRET=ci-stub-secret-that-is-at-least-32-chars-long
+          MINIO_ENDPOINT=minio
+          MINIO_ACCESS_KEY=ci-stub
+          MINIO_SECRET_KEY=ci-stub
+          EOF
       - name: Validate compose file
         run: docker compose -f docker-compose.prod.yml config --quiet
 
       - name: Check network consistency
         run: |
           # Ensure deploy.yml uses docker compose, not manual docker run
-          if grep -q "docker run" .github/workflows/deploy.yml; then
+          # Exclude comments (lines starting with #) from the check
+          if grep -v '^\s*#' .github/workflows/deploy.yml | grep -q "docker run"; then
             echo "❌ deploy.yml must use 'docker compose', not 'docker run'"
             echo "   Manual docker run bypasses network config and causes service isolation bugs"
             exit 1
