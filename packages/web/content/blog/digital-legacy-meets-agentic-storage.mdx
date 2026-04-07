@@ -1,0 +1,99 @@
+---
+title: "Digital Legacy Meets Agentic Storage: Why Estate Planning Needs Zero-Knowledge Vaults"
+description: "How LegacyShield uses BitAtlas as its encrypted storage layer, and why the future of digital inheritance is zero-knowledge plus agent-accessible by design."
+date: "2026-04-07"
+author: "Lobbi"
+slug: "digital-legacy-meets-agentic-storage"
+keywords: ["digital legacy AI", "estate planning technology", "AI agent estate access", "encrypted vault legacy", "digital inheritance automation", "zero knowledge estate planning", "agentic storage"]
+readingTime: "8 min"
+---
+
+Two things happened in the last two years that nobody in the estate planning industry was ready for. First, AI agents went from research demos to production tools that actually read, write, and act on files. Second, the median person's "important documents" stopped being a folder of PDFs and started being a sprawl of cloud accounts, password managers, crypto wallets, encrypted notes, and API keys scattered across a dozen SaaS tools.
+
+The intersection of those two trends is where digital legacy planning has to live now. And the substrate it has to live on is zero-knowledge storage.
+
+This is the story of how [LegacyShield](https://legacyshield.eu) ended up using BitAtlas as its storage layer, and why we think the future of digital inheritance is necessarily zero-knowledge *and* agent-accessible.
+
+## The Old Model Is Broken
+
+Traditional digital legacy services work like this: you upload your important documents to their server. They encrypt them "at rest" (meaning *they* hold the keys). When you die, a verified executor gets access via a password reset flow.
+
+There are three problems with this, and any one of them is disqualifying:
+
+1. **The provider can read everything.** Encryption at rest where the provider holds the keys is a polite fiction. A subpoena, a rogue employee, or a breach gives an attacker your entire estate.
+2. **The recovery path is the attack surface.** If the executor can prove identity to reset a password, so can a sufficiently motivated impersonator. The whole system is only as strong as the weakest customer support agent.
+3. **It assumes humans do the work.** The executor logs in, downloads files, figures out what's there, and acts. In 2026 that's an absurd amount of manual labor — and most executors aren't technical enough to handle a modern digital estate.
+
+We needed a model where the storage provider literally cannot read the data, recovery is cryptographic rather than procedural, and the heavy lifting can be handed off to an agent that the heir trusts.
+
+## Zero-Knowledge as the Foundation
+
+BitAtlas was designed around one constraint: the server never sees plaintext, never sees the master key, and never sees anything that would let it decrypt your files. Files are encrypted in the browser with AES-256-GCM. Per-file keys are wrapped with a master key derived from your password via PBKDF2. The server stores ciphertext and metadata. That's it.
+
+For digital legacy, this is the only acceptable starting point. You're storing the documents that define a person's financial, legal, and emotional life. Anything less than zero-knowledge means you're trusting a vendor with material that has zero margin for error.
+
+But zero-knowledge alone isn't enough. The brutal tradeoff of password-derived keys is that **if you lose the password, the data is gone**. We've [written about why we refuse to add a backdoor](https://bitatlas.com/blog/password-derived-keys-and-the-no-reset-tradeoff) — but for an estate planning use case, "gone forever when you die" is obviously not acceptable.
+
+That's where the architecture gets interesting.
+
+## Splitting the Key Without Splitting the Trust
+
+LegacyShield uses BitAtlas with a layer on top: the master key for each user's vault is split using a threshold scheme (think Shamir's Secret Sharing with a 2-of-3 or 3-of-5 configuration). The user holds one share. Designated heirs hold others. A neutral escrow — which only ever sees an encrypted share, never the key itself — holds the rest.
+
+No single party can reconstruct the key on their own. Not the user (they need the threshold met). Not the escrow (their share is useless alone). Not LegacyShield. Not BitAtlas.
+
+When a verified death event triggers the release flow, the heir's share plus the escrow's share are combined client-side in the heir's browser. The reconstructed key decrypts the BitAtlas master key, which decrypts the per-file keys, which decrypts the actual documents. At no point does any server see plaintext.
+
+The cryptographic guarantees here are the same ones BitAtlas offers any developer building on top of its API — we're just composing them in an unusual way. Which brings us to the agent layer.
+
+## Why Agents Belong in the Estate
+
+Here's the part that surprises people: the most useful thing an heir can do with a modern digital estate is **not** open every file and read it.
+
+A typical estate now contains hundreds of documents across dozens of accounts. There are recurring subscriptions to cancel, two-factor recovery codes to rotate before they expire, cloud storage to migrate, business contracts to honor, and tax documents that need to reach an accountant. A grieving heir going through this manually is a recipe for missed deadlines, lost assets, and burnout.
+
+An AI agent with scoped access to the decrypted vault — running locally in the heir's browser, never sending plaintext to a model provider — can triage all of this in minutes. Group documents by type. Surface the urgent ones. Generate a checklist. Draft cancellation emails for review. Identify accounts that need to be transferred versus closed.
+
+This is exactly the workload BitAtlas's [MCP server](https://bitatlas.com/blog/building-mcp-server-encrypted-vault) was built for. The agent connects via the Model Context Protocol, authenticates with a [scoped API key](https://bitatlas.com/blog/ai-agent-api-keys-scoped-access) (not the master password), and gets only the permissions the heir grants — read-only triage, or read-write if the heir wants the agent to file things on their behalf.
+
+Crucially, the encryption boundary stays intact. The agent operates on decrypted files in the heir's local context. The vault server never sees them. The model provider never sees them unless the heir explicitly chooses a flow that sends specific snippets out (and even then, with full disclosure).
+
+## What This Looks Like in Code
+
+The integration on the LegacyShield side is small enough to fit in a developer's head. Roughly:
+
+```ts
+// 1. After verified release event, reconstruct the master key client-side
+const masterKey = await reconstructKey({
+  heirShare: await getHeirShare(),
+  escrowShare: await fetchEscrowShare(releaseToken),
+  threshold: 2,
+});
+
+// 2. Unlock the BitAtlas vault using the reconstructed key
+const vault = await BitAtlas.unlock({
+  vaultId,
+  masterKey,
+});
+
+// 3. Mint a scoped, time-limited API key for the heir's agent
+const agentKey = await vault.createApiKey({
+  scopes: ['files.read', 'metadata.read'],
+  expiresIn: '30d',
+});
+
+// 4. Hand it to the MCP client the heir is using
+await mcp.connect({ server: 'bitatlas', apiKey: agentKey });
+```
+
+Four steps. No plaintext leaves the heir's browser. No backdoor. No single party that can be coerced into handing over the estate.
+
+## The Bigger Picture
+
+Estate planning is usually treated as a legal product with a thin technology layer. We think it's actually a cryptography product with a thin legal layer — and the technology has to be the part you trust, not the lawyers, not the vendor, not the customer support process.
+
+Zero-knowledge storage is what makes that flip possible. Agentic access is what makes it usable for an heir who isn't a security engineer. The combination is what makes digital inheritance feel less like an archeological dig and more like a controlled handoff.
+
+If you're building in this space — or just thinking about your own estate — the [BitAtlas API](https://bitatlas.com/docs) and MCP server are open for exactly this kind of composition. We'd rather see ten LegacyShields built on top of a vault that genuinely can't read your data than one monolithic service that asks you to trust it forever.
+
+The dead can't update their threat model. The living have to get this right the first time.
