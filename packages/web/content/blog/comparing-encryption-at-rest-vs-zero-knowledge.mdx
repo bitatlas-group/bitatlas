@@ -1,0 +1,163 @@
+---
+title: "Encryption at Rest vs. Zero-Knowledge: Why Your Cloud Provider's Encryption Doesn't Protect You"
+description: "Most cloud providers encrypt your data 'at rest' — but they hold the keys. We break down the critical differences between server-side encryption, encryption in transit, and true zero-knowledge encryption."
+date: "2026-04-09"
+author: "Lobbi"
+slug: "comparing-encryption-at-rest-vs-zero-knowledge"
+keywords: ["encryption at rest vs zero knowledge", "server-side encryption limitations", "Google Drive encryption", "true zero knowledge", "encryption comparison", "client-side encryption", "AES-256-GCM"]
+readingTime: "8 min"
+---
+
+Every major cloud provider will tell you your data is encrypted. AWS, Google Cloud, Azure, Dropbox — they all advertise "encryption at rest" and "encryption in transit" as security features. And technically, they're not lying. Your data *is* encrypted. The problem is **who holds the keys**.
+
+Understanding the difference between encryption at rest and zero-knowledge encryption isn't academic — it's the difference between a locked door where you hold the only key and a locked door where the landlord keeps a copy.
+
+## The Three Layers of Cloud Encryption
+
+Before we compare anything, let's establish what each layer actually does.
+
+### Encryption in Transit (TLS)
+
+This is the baseline. When your browser connects to Google Drive over HTTPS, TLS encrypts the data between your machine and the server. An attacker sniffing your Wi-Fi sees gibberish.
+
+**What it protects against:** Network eavesdropping, man-in-the-middle attacks.
+
+**What it doesn't protect against:** The server itself. Once your data arrives, TLS terminates, and the server processes your plaintext.
+
+Every serious service uses TLS. It's necessary but nowhere near sufficient.
+
+### Encryption at Rest (Server-Side)
+
+This is what most cloud providers mean when they say your data is "encrypted." After your file arrives at the server, the provider encrypts it before writing to disk. Google uses AES-256. AWS offers SSE-S3, SSE-KMS, and SSE-C. Azure uses BitLocker for managed disks.
+
+Here's the critical detail: **the provider generates and manages the encryption keys.** Your file is encrypted on disk, but the provider's infrastructure can decrypt it at any time to serve it back to you — or to comply with a government subpoena, or because an insider went rogue.
+
+```
+You → [TLS] → Server (sees plaintext) → [AES-256] → Disk
+                ↑
+        Provider holds the key
+```
+
+**What it protects against:** Physical theft of hard drives, certain storage-layer breaches.
+
+**What it doesn't protect against:** The provider, law enforcement with a warrant, compromised admin accounts, insider threats, supply chain attacks on the provider's KMS.
+
+Think of it this way: a hotel safe that the front desk can open with a master key isn't really *your* safe. It's the hotel's safe that they're letting you use.
+
+### Zero-Knowledge Encryption (Client-Side)
+
+In a zero-knowledge architecture, encryption happens **before** data leaves your device. You derive an encryption key from your password (or a key pair), encrypt the file locally, and upload only ciphertext. The server stores encrypted blobs it literally cannot decrypt.
+
+```
+You → [AES-256-GCM encrypt locally] → [TLS] → Server → Disk
+↑
+Only you hold the key
+```
+
+**What it protects against:** Everything above, *plus* the service provider itself, compromised servers, insider threats, government compulsion (the provider has nothing meaningful to hand over), and storage-layer breaches.
+
+**What it doesn't protect against:** A compromised client device, a weak password (mitigated by strong key derivation), or you losing your password entirely.
+
+## The Technical Differences That Matter
+
+### Key Derivation and Ownership
+
+With server-side encryption, key management is the provider's problem. AWS KMS, Google's Tink, Azure Key Vault — these are sophisticated systems, but they're all under the provider's control. Even "customer-managed keys" (CMK) in AWS KMS still route through AWS's infrastructure.
+
+In a zero-knowledge system, key derivation happens on the client. At BitAtlas, we use PBKDF2 with 600,000 iterations to derive a 256-bit master key from your password. That master key never leaves your browser. Each file gets its own random AES-256-GCM key, and that per-file key is wrapped (encrypted) with your master key before being stored server-side.
+
+```typescript
+// Client-side key derivation — server never sees this
+const keyMaterial = await crypto.subtle.importKey(
+  'raw',
+  new TextEncoder().encode(password),
+  'PBKDF2',
+  false,
+  ['deriveKey']
+);
+
+const masterKey = await crypto.subtle.deriveKey(
+  {
+    name: 'PBKDF2',
+    salt: userSalt,
+    iterations: 600_000,
+    hash: 'SHA-256',
+  },
+  keyMaterial,
+  { name: 'AES-GCM', length: 256 },
+  false,
+  ['wrapKey', 'unwrapKey']
+);
+```
+
+The server stores the salt and the wrapped per-file keys. Without the password, those wrapped keys are random noise.
+
+### Threat Model Comparison
+
+| Threat | Encryption at Rest | Zero-Knowledge |
+|---|---|---|
+| Network eavesdropping | ✅ Protected (TLS) | ✅ Protected (TLS + already encrypted) |
+| Physical disk theft | ✅ Protected | ✅ Protected |
+| Compromised server | ❌ Keys accessible | ✅ Server has no keys |
+| Insider threat at provider | ❌ Admin can decrypt | ✅ Nothing to decrypt with |
+| Government subpoena | ❌ Provider can comply | ✅ Provider has only ciphertext |
+| Compromised client device | ❌ Plaintext in memory | ❌ Plaintext in memory |
+| Lost password/key | ✅ Provider can reset | ❌ Data is permanently lost |
+
+That last row is the tradeoff. Zero-knowledge systems can't offer password reset. If you lose your password, the key derivation can't be reversed, and your data is gone. This is by design — it's what makes the system trustworthy. Any "reset" mechanism would be a backdoor.
+
+### The Metadata Problem
+
+Even with zero-knowledge encryption of file contents, metadata can leak information. File names, sizes, timestamps, access patterns, directory structures — all of this is potentially visible to the server in a naive implementation.
+
+A well-designed zero-knowledge system encrypts file names and directory structures client-side. At BitAtlas, file metadata is encrypted with the same per-file key, and the server stores files under opaque UUIDs. The server knows *that* you have files, but not *what* they are.
+
+Server-side encryption doesn't even attempt to solve this. Google Drive needs to read your file names to show you a file list. Dropbox needs to know your directory structure to sync it. The metadata is always plaintext.
+
+## Why "Encryption at Rest" Is Marketing, Not Security
+
+Here's the uncomfortable truth: encryption at rest primarily protects the **provider**, not you.
+
+If someone steals a hard drive from a Google data center, your data is safe. Google avoids a PR disaster. But the set of threats where "someone physically steals a server" is the attack vector is vanishingly small compared to "someone compromises the provider's infrastructure remotely" or "a government demands access."
+
+Encryption at rest is a checkbox on a compliance audit. It satisfies SOC 2, ISO 27001, and GDPR's requirement for "appropriate technical measures." But it doesn't change the fundamental power dynamic: the provider can read your data whenever they want.
+
+This is especially relevant under the US CLOUD Act, which compels US-headquartered companies to hand over data stored anywhere in the world. If you're using Google Drive, it doesn't matter that your data is "encrypted at rest" in a Belgian data center — Google holds the keys, Google is a US company, and a US court can compel disclosure.
+
+## When Server-Side Encryption Is Fine
+
+Not every use case requires zero-knowledge. If you're storing a public website's assets on S3, encryption at rest is perfectly adequate. If you're using a database and need the application server to query data, server-side encryption is the practical choice — you can't run SQL queries on ciphertext (outside of homomorphic encryption, which isn't practical yet).
+
+Server-side encryption protects against a specific, real threat: unauthorized access to the storage medium. That matters for compliance, for defense-in-depth, and for reducing blast radius.
+
+The point isn't that encryption at rest is useless. The point is that it's **insufficient** for data you actually want to keep private.
+
+## What to Look for in a Zero-Knowledge System
+
+If you're evaluating zero-knowledge storage — whether BitAtlas, Tresorit, or something you build yourself — here's the engineering checklist:
+
+1. **Key derivation happens client-side.** The server should never see your password or derived key. Look for PBKDF2, Argon2id, or scrypt with high iteration counts.
+
+2. **Per-file keys.** A single master key encrypting everything directly is brittle. Each file should get a random symmetric key, wrapped by the master key.
+
+3. **Authenticated encryption.** AES-256-GCM or XChaCha20-Poly1305. The authentication tag prevents tampering, not just eavesdropping.
+
+4. **Metadata encryption.** File names, sizes, and directory structures should be encrypted or obscured. If the server can see your file tree, it's not fully zero-knowledge.
+
+5. **Open-source client.** You can't verify zero-knowledge claims if the client code is proprietary. The server can be closed-source (it never sees plaintext anyway), but the client must be auditable.
+
+6. **No password reset.** If the service offers password reset, someone other than you can derive the key. That's a backdoor, regardless of what they call it.
+
+## The Bottom Line
+
+"Encryption at rest" and "zero-knowledge encryption" are not points on the same spectrum — they're fundamentally different architectures with different trust models.
+
+Encryption at rest says: *"We'll protect your data from everyone except ourselves."*
+
+Zero-knowledge says: *"We can't access your data even if we wanted to."*
+
+For developers building on top of cloud storage, this distinction determines your entire security posture. If your threat model includes the infrastructure provider (and post-CLOUD Act, it should), server-side encryption alone is not enough.
+
+The good news: client-side encryption in the browser is mature. The Web Crypto API gives you hardware-accelerated AES-GCM. Key derivation functions are battle-tested. The hard part isn't the cryptography — it's the UX of managing keys without a safety net.
+
+That's the tradeoff. And it's one worth making.
