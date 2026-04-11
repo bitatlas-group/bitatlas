@@ -1,6 +1,6 @@
 {
   "name": "@bitatlas/mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "mcpName": "io.github.bitatlas-group/bitatlas",
   "description": "BitAtlas MCP Server \u2014 Zero-Knowledge Cloud Drive for Humans and Agents",
   "main": "index.js",
@@ -28,8 +28,8 @@
   "type": "commonjs",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@x402/evm": "^0.2.0",
-    "@x402/fetch": "^0.2.0",
+    "@x402/evm": "^2.0.0",
+    "@x402/fetch": "^2.0.0",
     "axios": "^1.13.6",
     "dotenv": "^16.4.0"
   },

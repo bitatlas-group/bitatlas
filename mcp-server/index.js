@@ -109,10 +109,10 @@ function buildApiClient() {
 
   if (X402_WALLET_KEY) {
     try {
-      const { wrapFetch } = require('@x402/fetch');
+      const { wrapFetchWithPayment } = require('@x402/fetch');
       const { ExactEvmScheme } = require('@x402/evm/exact/client');
       const evmScheme = new ExactEvmScheme(X402_WALLET_KEY);
-      const x402Fetch = wrapFetch(fetch, [evmScheme]);
+      const x402Fetch = wrapFetchWithPayment(fetch, [evmScheme]);
       console.error('[x402] Using wallet-based x402 payments for vault access');
       return createX402Client(x402Fetch, API_URL);
     } catch (err) {
