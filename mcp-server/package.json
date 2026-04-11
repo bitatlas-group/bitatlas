@@ -1,8 +1,8 @@
 {
   "name": "@bitatlas/mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "mcpName": "io.github.bitatlas-group/bitatlas",
-  "description": "BitAtlas MCP Server — Zero-Knowledge Cloud Drive for Humans and Agents",
+  "description": "BitAtlas MCP Server \u2014 Zero-Knowledge Cloud Drive for Humans and Agents",
   "main": "index.js",
   "bin": {
     "bitatlas-mcp": "./index.js"
