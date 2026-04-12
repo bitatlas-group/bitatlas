@@ -1,0 +1,284 @@
+---
+title: "Self-Hosting Encrypted Storage with MinIO: Build Your Own Zero-Knowledge Vault"
+description: "A practical guide for privacy-focused developers to self-host a zero-knowledge encrypted storage layer using MinIO, Node.js, and the Web Crypto API."
+date: "2026-04-12"
+author: "Lobbi"
+slug: "self-hosting-encrypted-storage-with-minio"
+keywords: ["self-hosted encrypted storage", "MinIO encrypted vault", "self-hosted S3 alternative", "privacy-first cloud storage", "home server encryption"]
+readingTime: "9 min"
+---
+
+Not everyone wants to trust a third party with their data — even when it's encrypted. If you're the kind of developer who runs a home lab, deploys Kubernetes on spare hardware, or simply refuses to hand AWS another dollar, this post is for you. We're going to build a self-hosted, zero-knowledge encrypted storage vault using MinIO, Node.js, and the Web Crypto API.
+
+This is the same architecture that powers BitAtlas, distilled into something you can run on a Raspberry Pi, a VPS, or that old ThinkPad collecting dust in your closet.
+
+## The Architecture at a Glance
+
+Before we touch any code, let's establish what "zero-knowledge" means in a self-hosted context:
+
+1. **The client** (browser or CLI) derives an encryption key from a passphrase using PBKDF2.
+2. **Each file** gets a unique AES-256-GCM key, which is itself wrapped (encrypted) with the master key.
+3. **The encrypted blob** and the wrapped file key are uploaded to MinIO via presigned URLs.
+4. **The server** stores encrypted blobs and wrapped keys. It never sees the master key, the file keys, or the plaintext data.
+
+Even if someone gains root access to your server, they get a pile of ciphertext. Without the passphrase, it's noise.
+
+```
+┌─────────────┐    presigned URL     ┌──────────────┐
+│   Browser    │ ──────────────────►  │    MinIO      │
+│  (encrypt)   │                      │  (S3-compat)  │
+└──────┬──────┘                      └──────────────┘
+       │ metadata + wrapped key
+       ▼
+┌─────────────┐
+│   Node.js   │
+│   API       │
+└─────────────┘
+```
+
+The API server is a metadata layer. It generates presigned URLs, stores file metadata (name, size, wrapped key, IV), and manages authentication. It never touches the file content.
+
+## Step 1: Setting Up MinIO
+
+MinIO is an S3-compatible object store that runs anywhere. A single binary, no JVM, no dependencies.
+
+```bash
+# Docker Compose — the simplest path
+version: "3.8"
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minio-admin
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+
+volumes:
+  minio-data:
+```
+
+After starting, create a bucket for your vault:
+
+```bash
+mc alias set local http://localhost:9000 minio-admin $MINIO_ROOT_PASSWORD
+mc mb local/vault
+```
+
+**Important:** If you put MinIO behind a reverse proxy (Nginx, Caddy), the `Host` header in the proxy config must match the hostname MinIO uses to sign presigned URLs. If your API generates presigned URLs against `minio:9000` (the Docker service name), then `proxy_set_header Host minio:9000;` — not `localhost`, not `$host`. Get this wrong and every presigned URL returns `403 SignatureDoesNotMatch`. We learned this the hard way.
+
+## Step 2: The Encryption Layer
+
+This is the core of the zero-knowledge design. Everything here runs in the client — the server never participates in key management.
+
+### Key Derivation
+
+We derive a 256-bit master key from the user's passphrase using PBKDF2 with 600,000 iterations of SHA-256:
+
+```typescript
+async function deriveMasterKey(
+  passphrase: string,
+  salt: Uint8Array
+): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 600_000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["wrapKey", "unwrapKey"]
+  );
+}
+```
+
+The salt is generated once per user account and stored on the server. It's not secret — its purpose is to prevent rainbow-table attacks across users.
+
+**Why 600,000 iterations?** OWASP's 2023 guidance recommends a minimum of 600,000 for PBKDF2-SHA256. More iterations = slower brute force. On modern hardware, this takes roughly 200–400ms — imperceptible to the user, brutal for an attacker.
+
+### Per-File Encryption
+
+Each file gets its own random AES-256-GCM key. This key is then "wrapped" (encrypted) with the master key:
+
+```typescript
+async function encryptFile(
+  plaintext: ArrayBuffer,
+  masterKey: CryptoKey
+): Promise<{ ciphertext: ArrayBuffer; wrappedKey: ArrayBuffer; iv: Uint8Array; keyIv: Uint8Array }> {
+  // Generate a random key for this file
+  const fileKey = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true, // extractable — we need to wrap it
+    ["encrypt"]
+  );
+
+  // Encrypt the file
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    fileKey,
+    plaintext
+  );
+
+  // Wrap the file key with the master key
+  const keyIv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedKey = await crypto.subtle.wrapKey(
+    "raw",
+    fileKey,
+    masterKey,
+    { name: "AES-GCM", iv: keyIv }
+  );
+
+  return { ciphertext, wrappedKey, iv, keyIv };
+}
+```
+
+Why per-file keys? Two reasons:
+
+1. **Key rotation without re-encryption.** If you change your passphrase, you only need to re-wrap the file keys with the new master key. The actual file ciphertext stays untouched.
+2. **Granular sharing.** You can share a single file by encrypting its file key with someone else's public key, without exposing your master key.
+
+## Step 3: The Presigned URL Flow
+
+The server's only job during upload is to generate a presigned PUT URL. The client uploads the encrypted blob directly to MinIO — the API server never touches the bytes.
+
+```typescript
+// Server-side: generate presigned URL
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+const s3 = new S3Client({
+  endpoint: process.env.MINIO_ENDPOINT, // e.g., http://minio:9000
+  region: "us-east-1",
+  credentials: {
+    accessKeyId: process.env.MINIO_ACCESS_KEY!,
+    secretAccessKey: process.env.MINIO_SECRET_KEY!,
+  },
+  forcePathStyle: true,
+});
+
+async function getUploadUrl(objectKey: string): Promise<string> {
+  const command = new PutObjectCommand({
+    Bucket: "vault",
+    Key: objectKey,
+  });
+  return getSignedUrl(s3, command, { expiresIn: 300 }); // 5 minutes
+}
+```
+
+The client flow is then:
+
+```typescript
+// Client-side: encrypt and upload
+const { ciphertext, wrappedKey, iv, keyIv } = await encryptFile(fileBuffer, masterKey);
+
+// 1. Ask the API for an upload URL
+const { uploadUrl, objectKey } = await fetch("/api/upload-url", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}` },
+  body: JSON.stringify({ filename: file.name, size: ciphertext.byteLength }),
+}).then(r => r.json());
+
+// 2. Upload encrypted blob directly to MinIO
+await fetch(uploadUrl, {
+  method: "PUT",
+  body: ciphertext,
+});
+
+// 3. Store metadata (wrapped key, IVs) via the API
+await fetch("/api/files", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  body: JSON.stringify({
+    objectKey,
+    originalName: file.name,
+    size: file.size,
+    wrappedKey: bufferToBase64(wrappedKey),
+    iv: bufferToBase64(iv),
+    keyIv: bufferToBase64(keyIv),
+  }),
+});
+```
+
+The API stores metadata in PostgreSQL (or SQLite for a minimal setup). The encrypted blob lives in MinIO. Neither store has enough information to reconstruct the plaintext.
+
+## Step 4: Hardening Your Deployment
+
+A self-hosted vault is only as secure as its host. Some essentials:
+
+### Network Isolation
+
+Run MinIO on an internal network. It should **never** be exposed to the public internet directly. The API server is the only gateway — and it only issues presigned URLs.
+
+```yaml
+# Docker network isolation
+services:
+  api:
+    networks:
+      - internal
+      - external
+  minio:
+    networks:
+      - internal  # No external access
+
+networks:
+  internal:
+    internal: true
+  external:
+```
+
+### TLS Everywhere
+
+Even on a local network, use TLS. Let's Encrypt with Caddy makes this trivial for external access. For internal services, use `mkcert` or a self-signed CA.
+
+### Backup Strategy
+
+Encrypted data is still data. Use MinIO's built-in replication to mirror to a second node, or `mc mirror` to sync to a remote MinIO instance. Since the data is already encrypted, you can safely back up to any S3-compatible endpoint — even a public cloud — without compromising privacy.
+
+```bash
+# Mirror to a remote backup
+mc mirror --watch local/vault remote/vault-backup
+```
+
+### Rate Limiting and Authentication
+
+Your API should enforce rate limits on authentication endpoints (login, key derivation salt retrieval) and use short-lived JWTs for session management. Consider adding fail2ban or equivalent on the host level.
+
+## What You're Trading Off
+
+Self-hosting gives you maximum control, but it comes with costs:
+
+- **Uptime is your problem.** No SLA. If your server goes down at 3 AM, your files are unreachable until you fix it.
+- **Updates are manual.** You need to track MinIO releases, patch your API, and monitor for CVEs.
+- **No password recovery.** This is true for any zero-knowledge system, but it hits harder when there's no support team. Lose your passphrase, lose your data. Document your key backup strategy.
+- **Performance at scale.** MinIO scales horizontally, but tuning it for high throughput on consumer hardware takes work.
+
+If these tradeoffs don't work for you, that's exactly why BitAtlas exists — the same zero-knowledge architecture, but managed. We handle uptime, updates, and infrastructure so you can focus on building.
+
+## Wrapping Up
+
+The core insight is this: zero-knowledge encryption is not a product feature — it's an architecture pattern. The client encrypts. The server stores. The two never share keys. Whether you run this on Hetzner, a Raspberry Pi, or BitAtlas's managed infrastructure, the cryptographic guarantees are identical.
+
+The difference is who operates the server. If you want full sovereignty, build it yourself. If you want the same guarantees without the ops burden, we've already built it for you.
+
+Either way, your data stays yours. That's the point.
+
+---
+
+*Want to skip the infrastructure work? [BitAtlas](https://bitatlas.com) gives you the same zero-knowledge architecture as a managed service — with an MCP server for AI agent integration baked in.*
