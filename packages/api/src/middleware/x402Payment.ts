@@ -80,7 +80,14 @@ export async function initX402Middleware(): Promise<void> {
   const resourceServer = new x402ResourceServer(facilitatorClient)
     .register(x402Config.network as any, new ExactEvmScheme());
 
-  // Create middleware without auto-sync (avoids crash if facilitator unreachable)
+  // Sync with facilitator before creating middleware — hard failure if unreachable
+  try {
+    await syncFacilitator(resourceServer, 5, 5000);
+  } catch (err) {
+    logger.fatal({ err: (err as Error).message }, '[x402] Facilitator sync failed after all retries — refusing to enable x402 payments');
+    throw err;
+  }
+
   x402Middleware = paymentMiddleware(
     x402Routes,
     resourceServer,
@@ -88,8 +95,6 @@ export async function initX402Middleware(): Promise<void> {
       appName: 'BitAtlas',
       testnet: x402Config.network === 'eip155:84532',
     },
-    undefined, // paywall provider
-    false,     // syncFacilitatorOnStart — we do it manually below
   );
 
   logger.info({
@@ -98,11 +103,6 @@ export async function initX402Middleware(): Promise<void> {
     facilitator: x402Config.facilitatorUrl,
     routes: Object.keys(x402Routes).length,
   }, '[x402] Payment middleware initialized');
-
-  // Sync with facilitator async — retry up to 5 times
-  syncFacilitator(resourceServer, 5, 5000).catch((err) => {
-    logger.error({ err: (err as Error).message }, '[x402] Failed to sync with facilitator after retries — payments will not work until facilitator is reachable');
-  });
 }
 
 async function syncFacilitator(

@@ -93,15 +93,11 @@ export async function uploadToPresignedUrl(
 
 // ── Auth endpoints ────────────────────────────────────────────────────────────
 export const authApi = {
-  register: async (email: string, password: string) => {
-    // Generate a random encryption salt client-side
-    const saltArray = crypto.getRandomValues(new Uint8Array(32));
-    const encryptionSalt = Array.from(saltArray).map(b => b.toString(16).padStart(2, '0')).join('');
-    return request<AuthResponse>('/auth/register', {
+  register: async (email: string, password: string) =>
+    request<AuthResponse>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, encryptionSalt }),
-    });
-  },
+      body: JSON.stringify({ email, password }),
+    }),
 
   login: (email: string, password: string) =>
     request<AuthResponse>('/auth/login', {
