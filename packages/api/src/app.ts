@@ -13,6 +13,7 @@ import vaultRoutes from './routes/vault';
 import folderRoutes from './routes/folders';
 import keyRoutes from './routes/keys';
 import statusRoutes from './routes/status';
+import adminStatsRoutes from './routes/adminStats';
 
 export const app = express();
 
@@ -58,6 +59,7 @@ app.use('/auth', authRoutes);
 app.use('/vault', vaultRoutes);
 app.use('/folders', folderRoutes);
 app.use('/keys', keyRoutes);
+app.use('/admin/stats', adminStatsRoutes);
 
 // 404 handler
 app.use((_req, res) => {
