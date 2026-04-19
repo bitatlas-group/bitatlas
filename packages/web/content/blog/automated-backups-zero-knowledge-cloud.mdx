@@ -1,254 +1,237 @@
 ---
-title: "Automated Backups to Zero-Knowledge Cloud Without Exposing Your Master Key"
-description: "How to securely automate encrypted backups to BitAtlas and similar zero-knowledge vaults. CLI tools, agent workflows, and strategies that handle encryption locally before syncing."
-date: 2026-04-19
+title: "Automated Backups to Zero-Knowledge Cloud: A Developer's Guide"
+description: "How to automate encrypted backups to a zero-knowledge cloud without exposing your master key. Explore CLI tools and agent-based workflows that encrypt locally before syncing to BitAtlas."
+date: "2026-04-19"
 author: "BitAtlas Team"
 slug: "automated-backups-zero-knowledge-cloud"
 keywords: ["automated encrypted backups", "zero knowledge backup", "serverless encryption backup", "client-side backup tool", "secure automated backup"]
 readingTime: 9
 ---
 
-Backups are a solved problem — until they're not. Most backup services encrypt your data *in transit* and *at rest*, but they control the encryption keys. If a nation-state subpoenas their database, your years of work becomes readable plaintext.
+Most backup solutions force you to choose: convenience or privacy. Upload to the cloud unencrypted and your provider owns your data. Encrypt locally and now you're responsible for key management across multiple devices. With zero-knowledge cloud storage, there's a third way—fully automated, fully encrypted, with no server-side access.
 
-Zero-knowledge encryption flips this: *you* hold the key, the server holds encrypted blobs it literally cannot read. But this creates a friction point: how do you automate daily backups without repeatedly typing your master password or exposing it to a CLI tool?
+## The Backup Problem We're Solving
 
-This post explores practical patterns for automating backups to BitAtlas and similar zero-knowledge vaults — without ever letting your master key leave your machine in plaintext.
+Traditional backup workflows are brittle at the encryption boundary:
 
-## The Problem: Master Key Exposure
+1. You have a directory you want backed up: `~/important-data`
+2. You encrypt it locally (maybe with `7z -p` or `gpg`)
+3. You upload the archive manually (scp, rsync, or a cloud UI)
+4. Tomorrow, you do it again. And it works. Until it doesn't.
 
-In traditional backup automation, the pattern is straightforward:
+The pain points:
+- **Manual process**: Prone to human error. Backups don't happen consistently.
+- **Key management nightmare**: Your encryption key lives on N devices. One compromise leaks the master key.
+- **No versioning**: You back up once per week. If ransomware hits on day 6, you lose 6 days of work.
+- **Restore friction**: When you need to restore, you're decrypting and managing files manually.
 
-1. Store credentials in `~/.aws/credentials` or environment variables
-2. Run a cron job that uses those credentials
-3. Data syncs automatically
+Zero-knowledge cloud storage solves this—but only if you can automate the encryption step and keep your master key safe.
 
-But with zero-knowledge encryption, your credentials *are* your encryption key. If you store your master password in an environment variable or config file, you've already lost the zero-knowledge guarantee. A compromised dev machine, a leaked GitHub Actions secret, or a jailbroken smartphone gives an attacker the ability to decrypt *everything*.
+## How BitAtlas Enables Automated Backups
 
-The solution: **never store your master key unencrypted anywhere but your head (or your secure enclave)**.
+BitAtlas's architecture is built for this workflow:
 
-## Pattern 1: CLI Tools with Explicit Unlock
+1. **Client-side encryption before upload**: Your master key never leaves your device. Files are AES-256-GCM encrypted in the browser or CLI before touching the network.
+2. **Presigned URLs**: The server generates a time-limited, signed URL that lets your client upload directly to object storage (S3 or MinIO) without passing data through the application server.
+3. **Metadata-only server**: The server stores encrypted keys and file metadata, but not file contents. Even if the server is compromised, the blobs remain locked.
+4. **Scoped API keys for agents**: You can give a CLI tool or autonomous agent an API key that's restricted to specific vaults and operations, without exposing your account password.
 
-The simplest approach: require manual authentication for each backup run.
+This design means you can safely automate backups: your secrets stay on your local machine, and the remote service learns nothing about the data being backed up.
+
+## Automated Backup Patterns
+
+### Pattern 1: CLI Tool with Cron
+
+The simplest approach: a shell script that runs on a schedule.
 
 ```bash
 #!/bin/bash
-# backup.sh
+# backup.sh - runs daily via cron
 
-# Read password securely from terminal (not stored)
-read -sp "Enter master password: " MASTER_PASSWORD
+VAULT_ID="default"
+BACKUP_DIR="$HOME/important-data"
+BITATLAS_API_KEY="bk_..."  # Agent key with limited scope
 
-# Use BitAtlas CLI to authenticate and backup
-bitatlas-cli backup \
-  --vault ~/sensitive-data \
-  --master-password "$MASTER_PASSWORD" \
-  --destination bitatlas://my-vault/backups/$(date +%Y-%m-%d)
+# Tar and compress
+tar czf /tmp/backup-$(date +%Y%m%d).tar.gz "$BACKUP_DIR"
 
-# Clear password from memory
-unset MASTER_PASSWORD
+# Upload to BitAtlas using the CLI
+bitatlas upload /tmp/backup-$(date +%Y%m%d).tar.gz \
+  --vault "$VAULT_ID" \
+  --api-key "$BITATLAS_API_KEY"
+
+# Clean up local temp
+rm /tmp/backup-$(date +%Y%m%d).tar.gz
 ```
 
-Run this weekly with `crontab -e`:
+**Advantages**: Simple, no server required, runs on any cron-enabled system (Linux, macOS, even Windows with WSL).
 
+**Key points**:
+- Use an **agent API key**, not your account password. This limits the attack surface—the key can only access a specific vault.
+- The API key is stored locally in `~/.bitatlas/config` with restricted file permissions (`0600`).
+- The CLI handles encryption internally; cron sees no secrets passing through shell pipes.
+
+### Pattern 2: Systemd Timer with Backup Verification
+
+For Linux servers, systemd timers are more reliable than cron:
+
+```ini
+# /etc/systemd/system/bitatlas-backup.service
+[Unit]
+Description=BitAtlas Backup Service
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=backup
+ExecStart=/usr/local/bin/backup-script.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
 ```
-0 2 * * 0 bash /usr/local/bin/backup.sh
+
+```ini
+# /etc/systemd/system/bitatlas-backup.timer
+[Unit]
+Description=BitAtlas Backup Timer
+Requires=bitatlas-backup.service
+
+[Timer]
+OnCalendar=daily
+OnBootSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 ```
 
-**Pros:**
-- Zero key storage. Password is read from stdin, never persisted.
-- Works on any machine with a terminal.
+Timers offer:
+- Persistent execution: if your machine was off during the scheduled time, it runs when it boots.
+- Automatic retry on failure.
+- Native logging via journalctl.
+- No dependency on a cron daemon.
 
-**Cons:**
-- Requires interactive input. Can't be fully automated.
-- Doesn't work with headless servers.
+### Pattern 3: Agent-Based Backups (Autonomous Workflows)
 
-## Pattern 2: Hardware-Backed Key Derivation
-
-For servers without human interaction, use a hardware-backed key derivation device (Yubikey, TPM 2.0, etc.).
+This is where it gets powerful. Instead of cron, let an AI agent manage your backups:
 
 ```javascript
-// backup-agent.js - runs on a server with a Yubikey attached
+// agent-backup.js - runs as an MCP server
+import Anthropic from '@anthropic-ai/sdk';
 
-import { deriveKeyFromHardware } from '@bitatlas/core';
-import { backupVault } from '@bitatlas/backup';
-
-async function runBackup() {
-  // Key derivation happens inside the Yubikey's secure enclave
-  // The master key never leaves the device
-  const encryptionKey = await deriveKeyFromHardware({
-    devicePath: '/dev/hidraw0', // Yubikey
-    username: 'backup-agent',
-    challenge: Buffer.from(process.env.BACKUP_CHALLENGE)
-  });
-
-  await backupVault({
-    sourcePath: '/mnt/data',
-    destinationVault: 'bitatlas://my-vault',
-    encryptionKey,
-    timestamp: new Date()
-  });
-
-  // Key is automatically cleared from memory when scope exits
-}
-
-// Cron triggers: /usr/local/bin/backup-agent.js
-// No passwords or keys in environment variables
-runBackup().catch(console.error);
-```
-
-**Pros:**
-- Fully automated on headless hardware.
-- Master key never leaves the TPM/Yubikey.
-- Resistant to OS-level compromise.
-
-**Cons:**
-- Requires hardware support (not all cloud providers allow this).
-- Setup complexity.
-
-## Pattern 3: Agent-Based Backups with Scoped API Keys
-
-This is the pragmatic middle ground: use a scoped API key that grants backup-only permissions, not full vault access.
-
-```typescript
-// backup-daemon.ts
-
-import { BitAtlasClient } from '@bitatlas/client';
-import cron from 'node-cron';
-import * as fs from 'fs/promises';
-import crypto from 'crypto';
-
-const client = new BitAtlasClient({
-  // API key is only for BACKUP operations
-  // Cannot read, decrypt, or modify existing files
-  apiKey: process.env.BITATLAS_BACKUP_KEY,
-  vaultUrl: 'https://my-instance.bitatlas.run'
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Master key is derived once at startup from a local secret
-// stored in a systemd secret or TPM
-const masterKey = await deriveMasterKeyFromSystemSecret(
-  fs.readFileSync('/run/secrets/backup-master-key')
-);
-
-async function performBackup() {
-  const sourceDir = '/data/documents';
-  const files = await fs.readdir(sourceDir, { recursive: true });
-
-  for (const file of files) {
-    const fullPath = `${sourceDir}/${file}`;
-    const stat = await fs.stat(fullPath);
-
-    if (stat.isFile()) {
-      // Encrypt locally
-      const plaintext = await fs.readFile(fullPath);
-      const iv = crypto.randomBytes(12);
-      const encryptedData = await encryptFile(plaintext, masterKey, iv);
-
-      // Upload encrypted blob to BitAtlas
-      // The API key can only WRITE, not READ or DECRYPT
-      await client.uploadFile({
-        path: `/backups/$(date +%Y-%m-%d)/${file}`,
-        content: encryptedData,
-        iv,
-        metadata: {
-          originalSize: stat.size,
-          mimeType: 'application/octet-stream'
-        }
-      });
-    }
-  }
-}
-
-// Run daily at 2 AM
-cron.schedule('0 2 * * *', performBackup);
-```
-
-The BitAtlas API key configuration:
-
-```json
-{
-  "name": "Daily Backup Key",
-  "permissions": {
-    "vaults": ["my-vault"],
-    "actions": ["upload_file", "list_backup_metadata"],
-    "restrictions": {
-      "path_prefix": "/backups/",
-      "no_download": true,
-      "no_decrypt": true,
-      "no_delete": true
-    }
+const tools = [
+  {
+    name: 'list_backup_directories',
+    description: 'List directories that need backup',
+    input_schema: { /* ... */ },
   },
-  "expiresAt": "2027-04-19"
+  {
+    name: 'compress_and_encrypt',
+    description: 'Compress a directory and encrypt it locally',
+    input_schema: { /* ... */ },
+  },
+  {
+    name: 'upload_to_bitatlas',
+    description: 'Upload encrypted archive to BitAtlas vault',
+    input_schema: { /* ... */ },
+  },
+  {
+    name: 'verify_backup',
+    description: 'Verify that the backup succeeded by listing vault contents',
+    input_schema: { /* ... */ },
+  },
+];
+
+async function runBackupAgent() {
+  const response = await client.messages.create({
+    model: 'claude-opus-4-7',
+    max_tokens: 1024,
+    system: `You are a backup agent. Your job is to:
+1. List all directories that need backup
+2. Compress and encrypt each one locally
+3. Upload the encrypted archives to BitAtlas
+4. Verify each backup succeeded
+5. Clean up local temp files`,
+    tools: tools,
+    messages: [
+      {
+        role: 'user',
+        content: 'Run daily backup now.',
+      },
+    ],
+  });
+
+  // Process tool calls, handle uploads, verify...
 }
+
+runBackupAgent();
 ```
 
-**Pros:**
-- Fully automated on any server.
-- API key cannot decrypt or read existing data — only append backups.
-- Key rotation is simple (regenerate the API key).
-- Works with containerized environments.
+**Why agents for backups?**
+- The agent decides *what* to back up based on change detection.
+- It can verify success (list vault, check file count, validate checksums).
+- It can adapt: "disk is full, delete yesterday's backup and retry."
+- It runs with minimal human supervision.
 
-**Cons:**
-- Requires careful API key scoping. Misconfiguration is dangerous.
-- The master key must still be stored securely (systemd secret, K8s secret, vault, etc.).
+## Security Considerations
 
-## Pattern 4: Distributed Backup with Multi-Signature
+### API Key Scoping
 
-For truly paranoid organizations: require multiple devices to authorize a backup.
+Never give a backup tool your master password or account key. Create an **agent API key** with limited permissions:
 
-```javascript
-// multi-sig-backup.js
+- **Vault**: restrict to one backup vault (not your entire data directory).
+- **Operations**: allow `upload`, `list`, `delete` but not `share` or `invite_user`.
+- **Expiration**: set a rotation policy (e.g., 90 days).
 
-import { MultiSigBackup } from '@bitatlas/multisig';
+### Key Storage
 
-const backup = new MultiSigBackup({
-  vaultUrl: 'bitatlas://my-vault',
-  threshold: 2, // Require 2 out of 3 signers
-  signers: [
-    { name: 'server-1', devicePath: '/dev/hidraw0' },
-    { name: 'server-2', devicePath: '/dev/hidraw1' },
-    { name: 'human-yubikey', devicePath: '/dev/hidraw2' }
-  ]
-});
+Store the API key in:
+- **Linux/macOS**: `~/.bitatlas/config` with `chmod 600`.
+- **CI/CD**: environment variable in a secrets manager (GitHub Secrets, GitLab CI Variables).
+- **Not in**: version control, Docker images, or shell history.
 
-// This blocks until 2 out of 3 Yubikeys are plugged in and touched
-await backup.execute({
-  sourceVault: '/mnt/secure-data',
-  timestamp: new Date()
-});
-```
+### Encryption Verification
 
-**Pros:**
-- Single point of compromise doesn't leak data.
-- Enforces human oversight for critical backups.
-
-**Cons:**
-- Requires coordination between multiple devices.
-- Not practical for frequent automated backups.
-
-## Monitoring and Verification
-
-Regardless of your backup strategy, always verify:
+Always verify the encryption happened client-side:
 
 ```bash
-#!/bin/bash
-# verify-backups.sh
-
-# List backup metadata (does NOT decrypt)
-bitatlas-cli list-backups --vault bitatlas://my-vault --since 7d
-
-# Verify backup integrity with checksums
-# Decryption only happens on trusted devices
-bitatlas-cli verify-backup \
-  --vault bitatlas://my-vault \
-  --backup-id 2026-04-19 \
-  --verify-checksums \
-  --output backup-verification-report.json
+# Check that the file in BitAtlas is a valid encrypted blob, not raw data
+bitatlas info backup-archive.tar.gz.bitatlas | grep "encrypted: true"
 ```
 
-This validates that backups are being created and stored correctly *without* decrypting the actual data.
+The server cannot decrypt it; only your local key can.
+
+## Disaster Recovery: Restoring Backups
+
+Automated backups are worthless if you can't restore. Test your restore workflow:
+
+```bash
+# List backups in vault
+bitatlas list --vault backup-vault
+
+# Download and decrypt
+bitatlas download backup-archive-20260419.tar.gz.bitatlas \
+  --output backup.tar.gz
+
+# Extract
+tar xzf backup.tar.gz
+```
+
+**Pro tip**: Run a monthly restore test. It catches problems early and proves your backups work.
 
 ## Conclusion
 
-Automating backups to a zero-knowledge cloud requires discipline: never store unencrypted master keys, always use scoped credentials, and verify backups regularly. Whether you choose hardware-backed key derivation, scoped API keys, or multi-signature approaches, the principle is the same: **your infrastructure should never have access to your unencrypted data**.
+Zero-knowledge cloud storage removes the false choice between convenience and privacy. With automated backups, you get:
 
-BitAtlas makes this possible by separating encryption (your responsibility, local device) from storage (our responsibility, EU data centers). Use that separation to build backup systems that remain zero-knowledge, even when fully automated.
+- **Encryption at source**: Data is locked before it leaves your device.
+- **Simple operations**: Cron, systemd timers, or agents handle the rest.
+- **No key management overhead**: One master key, unlimited versioned backups.
+- **True disaster recovery**: The server cannot read your backups, and neither can attackers who compromise it.
+
+BitAtlas's MCP server and CLI tools make this workflow frictionless. Set up once, forget about it, and sleep soundly knowing your data is both backed up and private.
