@@ -455,9 +455,9 @@ export default function Home() {
                   ))}
                 </ul>
 
-                <a href="/blog/anonymous-agent-storage-x402-payments" className="mt-auto bg-tertiary text-on-tertiary px-6 py-4 rounded-xl font-headline font-bold text-center text-lg hover:brightness-110 transition-all">
+                <Link href="/blog/anonymous-agent-storage-x402-payments" className="mt-auto bg-tertiary text-on-tertiary px-6 py-4 rounded-xl font-headline font-bold text-center text-lg hover:brightness-110 transition-all">
                   See How It Works →
-                </a>
+                </Link>
               </div>
             </div>
 
