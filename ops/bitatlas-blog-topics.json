@@ -1,5 +1,5 @@
 {
-  "nextIndex": 16,
+  "nextIndex": 17,
   "product": "bitatlas",
   "language": "en",
   "repoUrl": "https://github.com/bitatlas-group/bitatlas.git",
@@ -25,7 +25,7 @@
         "AI agent security",
         "autonomous agent data"
       ],
-      "brief": "AI agents are reading and writing files on your behalf. But where do those files live? Why agents need a dedicated encrypted vault \u2014 not just a folder on your desktop. How BitAtlas's MCP server gives agents secure, scoped file access."
+      "brief": "AI agents are reading and writing files on your behalf. But where do those files live? Why agents need a dedicated encrypted vault — not just a folder on your desktop. How BitAtlas's MCP server gives agents secure, scoped file access."
     },
     {
       "slug": "germany-deutschland-stack-open-standards",
@@ -69,7 +69,7 @@
         "PBKDF2 key derivation",
         "browser encryption tutorial"
       ],
-      "brief": "A deep-dive into implementing client-side encryption using the Web Crypto API. How BitAtlas derives keys with PBKDF2, encrypts files with AES-256-GCM, and wraps per-file keys with the master key \u2014 all in the browser."
+      "brief": "A deep-dive into implementing client-side encryption using the Web Crypto API. How BitAtlas derives keys with PBKDF2, encrypts files with AES-256-GCM, and wraps per-file keys with the master key — all in the browser."
     },
     {
       "slug": "eu-data-sovereignty-why-hosting-matters",
@@ -102,7 +102,7 @@
         "direct S3 upload encryption",
         "secure file upload architecture"
       ],
-      "brief": "How BitAtlas uploads files without the server ever touching them. The presigned URL pattern: client encrypts \u2192 gets a signed URL \u2192 uploads directly to S3/MinIO. The server only stores metadata and encrypted keys."
+      "brief": "How BitAtlas uploads files without the server ever touching them. The presigned URL pattern: client encrypts → gets a signed URL → uploads directly to S3/MinIO. The server only stores metadata and encrypted keys."
     },
     {
       "slug": "ai-agent-api-keys-scoped-access",
@@ -135,7 +135,7 @@
         "true zero knowledge",
         "encryption comparison"
       ],
-      "brief": "Most cloud providers encrypt your data 'at rest' \u2014 but they hold the keys. That's like a hotel safe where the front desk has a master key. The difference between encryption at rest, in transit, and true zero-knowledge."
+      "brief": "Most cloud providers encrypt your data 'at rest' — but they hold the keys. That's like a hotel safe where the front desk has a master key. The difference between encryption at rest, in transit, and true zero-knowledge."
     },
     {
       "slug": "self-hosting-encrypted-storage-with-minio",
@@ -157,7 +157,7 @@
         "encrypted data deletion",
         "privacy by design"
       ],
-      "brief": "How zero-knowledge encryption makes GDPR compliance simpler. When you delete your account, the encrypted blobs become permanently unreadable \u2014 because the key is gone. True erasure by design."
+      "brief": "How zero-knowledge encryption makes GDPR compliance simpler. When you delete your account, the encrypted blobs become permanently unreadable — because the key is gone. True erasure by design."
     },
     {
       "slug": "mcp-ecosystem-2026-state-of-agent-tools",
@@ -169,17 +169,6 @@
         "agent infrastructure"
       ],
       "brief": "The state of the MCP ecosystem in 2026. How many servers exist, what categories dominate, and where encrypted storage fits in. A survey of Smithery, Glama, awesome-mcp-servers, and the registries."
-    },
-    {
-      "slug": "automated-backups-zero-knowledge-cloud",
-      "keywords": [
-        "automated encrypted backups",
-        "zero knowledge backup",
-        "serverless encryption backup",
-        "client-side backup tool",
-        "secure automated backup"
-      ],
-      "brief": "How to automate backups to a zero-knowledge cloud without exposing your master key. We explore CLI tools and agent-based workflows that handle encryption locally before syncing to BitAtlas."
     },
     {
       "slug": "browser-side-large-file-encryption-strategies",
@@ -311,7 +300,7 @@
         "independent infrastructure",
         "developer autonomy"
       ],
-      "brief": "The trend towards developers owning their entire stack \u2014 from hardware to encryption. How tools like BitAtlas, Nix, and Tailscale are enabling a new era of infrastructure independence."
+      "brief": "The trend towards developers owning their entire stack — from hardware to encryption. How tools like BitAtlas, Nix, and Tailscale are enabling a new era of infrastructure independence."
     },
     {
       "slug": "immutable-backups-vs-ransomware",
