@@ -1,0 +1,267 @@
+---
+title: "Hybrid Encryption: RSA & AES for Secure Shared Vaults"
+description: "How to combine RSA or Ed25519 asymmetric encryption with AES-256-GCM for zero-knowledge shared vaults. A technical guide to key wrapping, recipient discovery, and multi-user encrypted storage."
+date: "2026-04-20"
+author: "BitAtlas Engineering"
+slug: "hybrid-encryption-rsa-aes-key-wrapping"
+keywords:
+  - hybrid encryption
+  - RSA AES key wrap
+  - public key infrastructure
+  - asymmetric encryption
+  - secure key exchange
+readingTime: "8 min"
+---
+
+In single-user zero-knowledge systems, encryption is straightforward: derive a key from your password, encrypt everything with AES-256-GCM, done. But what happens when you need to share an encrypted vault with someone else without ever letting them know your master password?
+
+That's where hybrid encryption comes in.
+
+## The Problem: Sharing Without Sharing Passwords
+
+Imagine you want to give a colleague access to a confidential folder in your BitAtlas vault. Your options today:
+
+1. **Share your password** — terrible idea. They now have access to *everything*, forever.
+2. **Encrypt each file again with their password** — creates per-user copies of every file. Storage overhead, syncing hell.
+3. **Share the master key directly** — same as sharing the password, but even worse from a UX perspective.
+
+What we really want is: "Encrypt the per-file key with your public key. You can decrypt it, but I never need to know your private key, and you never need to know my master password."
+
+That's hybrid encryption.
+
+## How Hybrid Encryption Works
+
+Here's the architecture:
+
+```
+┌─────────────────────────────────────────┐
+│ File Data                               │
+│ ↓ (encrypt with random AES-256-GCM)    │
+├─────────────────────────────────────────┤
+│ Encrypted Blob + IV + Auth Tag          │
+│ (Server stores; server cannot read)     │
+├─────────────────────────────────────────┤
+│ Per-File AES Key                        │
+│ ↓ (wrap with recipient's public key)    │
+├─────────────────────────────────────────┤
+│ Wrapped Key (encrypted for Bob)         │
+│ (Server stores; only Bob can decrypt)   │
+└─────────────────────────────────────────┘
+```
+
+The flow:
+
+1. **You** generate a random 32-byte AES-256 key for this file.
+2. **You** fetch Bob's public key from the registry (or Bob shares it out-of-band).
+3. **You** encrypt the AES key using Bob's public key (RSA-OAEP or ECIES).
+4. **You** send the wrapped key + encrypted blob to the server.
+5. **Bob** receives the wrapped key from the server.
+6. **Bob** decrypts it with his private key to recover the AES key.
+7. **Bob** decrypts the blob with the AES key.
+
+**Result:** Bob can read the file. You never shared your master key. Bob never authenticated with you.
+
+## Why Not Just Use RSA for Everything?
+
+Good question. You could encrypt the entire file with RSA, but:
+
+- **Performance**: RSA encryption is slow (~1-10ms per operation). Doing this for multi-GB files kills UX.
+- **Size overhead**: RSA-encrypted data is larger (ciphertext ≈ key size, typically 2048-4096 bits).
+- **No AEAD**: RSA alone doesn't provide authenticated encryption; you need to layer in HMAC.
+
+**AES-256-GCM** is the workhorse:
+- ~1,000 MB/s throughput in browser via WebCrypto.
+- Authenticated (AEAD); one operation gives you confidentiality + integrity.
+- Constant-size overhead (16-byte IV, 16-byte auth tag).
+
+So we use RSA/Ed25519 only for the small AES key (32 bytes), not the entire file.
+
+## Key Wrapping in Practice: RSA-OAEP
+
+Here's how to wrap a key using Web Crypto API:
+
+```javascript
+// 1. Generate or fetch the recipient's public key
+const publicKeyJwk = {
+  kty: "RSA",
+  n: "0vx7agoebGcQ...", // base64-url encoded modulus
+  e: "AQAB",           // public exponent
+  // ... other components
+};
+
+const publicKey = await crypto.subtle.importKey(
+  "jwk",
+  publicKeyJwk,
+  { name: "RSA-OAEP", hash: "SHA-256" },
+  false, // not extractable
+  ["wrapKey"]
+);
+
+// 2. Generate a random AES-256 key
+const aesKey = await crypto.subtle.generateKey(
+  { name: "AES-GCM", length: 256 },
+  true, // extractable (so we can wrap it)
+  ["encrypt", "decrypt"]
+);
+
+// 3. Wrap the AES key
+const wrappedKeyBuffer = await crypto.subtle.wrapKey(
+  "raw",                          // export format
+  aesKey,                         // the key to wrap
+  publicKey,                      // recipient's public key
+  { name: "RSA-OAEP", hash: "SHA-256" }, // wrapping algorithm
+);
+
+// 4. Convert to base64 and send to server
+const wrappedKeyB64 = btoa(String.fromCharCode(...new Uint8Array(wrappedKeyBuffer)));
+```
+
+On Bob's side:
+
+```javascript
+// 1. Import Bob's private key
+const privateKeyJwk = {
+  kty: "RSA",
+  n: "0vx7agoebGcQ...",
+  e: "AQAB",
+  d: "X4cTteJY...", // private exponent
+  // ... other components
+};
+
+const privateKey = await crypto.subtle.importKey(
+  "jwk",
+  privateKeyJwk,
+  { name: "RSA-OAEP", hash: "SHA-256" },
+  false,
+  ["unwrapKey"]
+);
+
+// 2. Unwrap the key
+const wrappedKeyBuffer = new Uint8Array(atob(wrappedKeyB64).split('').map(c => c.charCodeAt(0)));
+
+const aesKey = await crypto.subtle.unwrapKey(
+  "raw",
+  wrappedKeyBuffer,
+  privateKey,
+  { name: "RSA-OAEP", hash: "SHA-256" },
+  { name: "AES-GCM", length: 256 },
+  false,
+  ["encrypt", "decrypt"]
+);
+
+// 3. Decrypt the blob
+const decrypted = await crypto.subtle.decrypt(
+  { name: "AES-GCM", iv, additionalData },
+  aesKey,
+  encryptedBlob
+);
+```
+
+## Alternative: Ed25519 + ECIES
+
+RSA is proven but slow. For modern systems, **Elliptic Curve Integrated Encryption Scheme (ECIES)** with Ed25519 or Curve25519 is faster and uses smaller keys:
+
+```javascript
+// Generate Curve25519 keypair (via libsodium.js or tweetnacl)
+const keypair = nacl.box.keyPair();
+
+// Wrap AES key with recipient's public key (using libsodium)
+const ephemeralKeypair = nacl.box.keyPair();
+const wrappedKey = nacl.box(aesKeyBytes, nonce, recipientPublicKey, ephemeralKeypair.secretKey);
+
+// Send ephemeralKeypair.publicKey + wrappedKey to server
+```
+
+**Advantages:**
+- **Speed**: ~100x faster than RSA-OAEP for key wrapping.
+- **Key size**: 32-byte keys vs. 256-byte RSA.
+- **Forward secrecy**: Ephemeral keypair means no static encryption.
+
+**Disadvantage:**
+- Not yet natively supported in Web Crypto API; need a library like libsodium.js or TweetNaCl.
+
+## Putting It Together: The Shared Vault Flow
+
+```
+You create a vault.
+│
+├─ Encrypt files with random AES keys
+├─ Store encrypted blobs on server
+│
+└─ You invite Bob
+   │
+   ├─ Fetch Bob's public key
+   ├─ Wrap each file's AES key with Bob's public key
+   ├─ Store wrapped keys alongside blobs
+   │
+   └─ Bob accepts
+      │
+      ├─ Fetch wrapped key from server
+      ├─ Decrypt wrapped key with his private key → recovers AES key
+      ├─ Decrypt blob with AES key
+      └─ Bob can now read all files in the vault
+```
+
+## The Metadata Challenge
+
+One gotcha: **what about file metadata?** Names, sizes, upload dates?
+
+- If you encrypt metadata too, you lose the ability to list files without decrypting every one.
+- If you leave metadata in plaintext, the server learns what files are in the vault.
+
+Most systems compromise: encrypt filenames but store file size and timestamps in plaintext. BitAtlas approach: encryption is the user's choice. You can encrypt a filename, or publish it and accept the privacy cost.
+
+## Key Rotation and Revocation
+
+Hybrid encryption introduces new challenges:
+
+**Key Rotation**: If you want to rotate your master key, you must re-encrypt every file's wrapped key. For a 1M-file vault, this is expensive.
+
+**Revocation**: If you want to revoke Bob's access, you must:
+1. Fetch every file's AES key (decrypt with your private key).
+2. Re-wrap each AES key, excluding Bob's public key.
+3. Upload new wrapped keys.
+
+Again, expensive at scale.
+
+Solutions:
+- **Hierarchical keys**: Use a key-encryption-key (KEK) that you encrypt once per user, then wrap all file keys under the KEK.
+- **Proxy re-encryption**: Cryptographic technique that allows the server to re-wrap keys without learning the plaintext. Very advanced; not in Web Crypto API.
+
+## Security Considerations
+
+**Attack scenarios:**
+
+1. **Alice's private key is stolen**: Bob cannot access Alice's vault unless Alice also shared the master key (which she shouldn't). ✅ Safe.
+
+2. **Server is compromised**: Attacker has wrapped keys but cannot decrypt without Bob's private key. ✅ Safe.
+
+3. **Alice revokes Bob, then sends him a file-share link**: The link contains the wrapped key. Bob can decrypt it with his stored private key. ❌ Revocation is hard.
+
+4. **Alice's public key is compromised**: Attacker can encrypt data for Alice, but cannot decrypt her existing vault. ✅ Safe (asymmetry).
+
+5. **MITM during public-key exchange**: Attacker substitutes their public key for Bob's. Attacker can now decrypt files intended for Bob. ❌ Need out-of-band verification or PKI.
+
+For the last risk, use **key fingerprints**: publish a hash of each public key alongside the key itself. Users verify fingerprints over a trusted channel (phone call, Zoom, signed email).
+
+## Building This in BitAtlas
+
+BitAtlas will support hybrid encryption for shared vaults in the Q3 2026 release:
+
+- **Public key directory**: Upload your Ed25519 public key once.
+- **Key wrapping**: When you invite someone, wrap their per-file AES keys client-side.
+- **Recipient discovery**: Lookup public keys by email or handle.
+- **Key fingerprints**: Display on-screen to verify out-of-band.
+
+The MCP server will expose `ShareVault` and `GetPublicKey` tools so agents can manage shared vaults programmatically.
+
+## Further Reading
+
+- [RFC 3394: AES Key Wrap](https://datatracker.ietf.org/doc/html/rfc3394)
+- [ECIES (Elliptic Curve Integrated Encryption Scheme)](https://en.wikipedia.org/wiki/Integrated_Encryption_Scheme)
+- [Web Crypto API wrapKey / unwrapKey](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/wrapKey)
+- [libsodium.js: Box (sealed box, public key encryption)](https://github.com/jedisct1/libsodium.js)
+
+---
+
+**Questions?** Ask on GitHub Discussions or reach out to [contact@bitatlas.com](mailto:contact@bitatlas.com).
