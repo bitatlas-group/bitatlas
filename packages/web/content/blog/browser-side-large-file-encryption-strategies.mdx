@@ -1,0 +1,223 @@
+---
+title: "Browser-Side Large File Encryption: Strategies and Performance"
+description: "Encrypting multi-gigabyte files in the browser without crashing. Chunking strategies, readable streams, IndexedDB buffering, and worker threads for seamless client-side encryption."
+date: "2026-04-21"
+author: "BitAtlas Team"
+slug: "browser-side-large-file-encryption-strategies"
+keywords:
+  - "large file encryption browser"
+  - "Web Crypto stream encryption"
+  - "JavaScript file chunks"
+  - "performance browser encryption"
+  - "IndexedDB for encryption"
+readingTime: 9
+---
+
+Encrypting a 5GB file in your browser sounds like science fiction. But it's not. The challenge isn't cryptography—the Web Crypto API handles AES-256-GCM flawlessly. The challenge is **performance**: keeping the browser responsive, managing memory efficiently, and ensuring the encryption completes without the main thread blocking or running out of heap space.
+
+This is the problem we solved for BitAtlas. Users can encrypt terabyte-scale vaults entirely client-side. Here's how.
+
+## The Naive Approach Fails Fast
+
+Your first instinct might be:
+
+```javascript
+const data = await file.arrayBuffer();
+const encrypted = await crypto.subtle.encrypt('AES-GCM', key, data);
+```
+
+For a 5MB file, this works fine. For a 500MB file, your browser tab locks for 3–5 seconds. For a 5GB file, you hit an out-of-memory crash.
+
+**Why?** The Web Crypto API accepts the entire plaintext as a single buffer. On a typical laptop, the browser heap is 2–4GB. Add overhead, and you're stuck.
+
+## Solution 1: Chunking with Streaming
+
+The fix is **streaming encryption**: break the file into manageable chunks, encrypt each chunk independently, and write the encrypted output to a sink (a Blob, IndexedDB, or a presigned S3 URL).
+
+```javascript
+const chunkSize = 1024 * 1024; // 1MB chunks
+const chunks = [];
+const iv = crypto.getRandomValues(new Uint8Array(12)); // GCM IV
+
+for (let offset = 0; offset < file.size; offset += chunkSize) {
+  const chunk = file.slice(offset, offset + chunkSize);
+  const data = await chunk.arrayBuffer();
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    data
+  );
+  chunks.push(new Uint8Array(encrypted));
+}
+
+// Concatenate all chunks into final ciphertext
+const final = new Blob(chunks, { type: 'application/octet-stream' });
+```
+
+This works, but it has a fatal flaw: **all chunk encryptions use the same IV**. That's a cryptographic disaster. In GCM mode, reusing an IV with the same key exposes the plaintext.
+
+## Solution 2: Per-Chunk IVs (The Right Way)
+
+Instead, derive a unique IV for each chunk using HKDF or a counter:
+
+```javascript
+const masterIv = crypto.getRandomValues(new Uint8Array(12));
+let counter = 0;
+
+for (let offset = 0; offset < file.size; offset += chunkSize) {
+  const chunk = file.slice(offset, offset + chunkSize);
+  const data = await chunk.arrayBuffer();
+  
+  // Derive unique IV for this chunk
+  const counterBytes = new Uint8Array(4);
+  new DataView(counterBytes.buffer).setUint32(0, counter++, false);
+  const chunkIv = new Uint8Array(12);
+  chunkIv.set(masterIv.subarray(0, 8));
+  chunkIv.set(counterBytes, 8);
+  
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: chunkIv },
+    key,
+    data
+  );
+  chunks.push(new Uint8Array(encrypted));
+}
+```
+
+Now each chunk is encrypted with its own IV, and the final ciphertext is secure. But there's still a problem: **GCM authentication tags**. Each chunk gets a 16-byte authentication tag appended by the Web Crypto API. You need to track where each chunk boundary is during decryption.
+
+A cleaner approach: **store metadata** about chunk boundaries alongside the encrypted blob, or use a mode that supports incremental authentication (like AES-256-CTR with HMAC-SHA256).
+
+## Solution 3: Web Workers for Non-Blocking Encryption
+
+Chunking solves the memory problem, but the main thread still blocks during crypto operations. For a 5GB file, even chunked encryption locks the UI.
+
+Use **Web Workers**:
+
+```javascript
+// main.js
+const worker = new Worker('encryptWorker.js');
+worker.postMessage({
+  type: 'encrypt',
+  file,
+  key,
+  chunkSize: 1024 * 1024
+});
+
+worker.onmessage = (e) => {
+  if (e.data.type === 'chunk') {
+    // Handle each encrypted chunk as it arrives
+    uploadToS3(e.data.chunk);
+  }
+  if (e.data.type === 'done') {
+    console.log('Encryption complete');
+  }
+};
+```
+
+```javascript
+// encryptWorker.js
+self.onmessage = async (e) => {
+  const { file, key, chunkSize } = e.data;
+  let counter = 0;
+  
+  for (let offset = 0; offset < file.size; offset += chunkSize) {
+    const chunk = file.slice(offset, offset + chunkSize);
+    const data = await chunk.arrayBuffer();
+    
+    const chunkIv = deriveIv(counter++);
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: chunkIv },
+      key,
+      data
+    );
+    
+    self.postMessage({
+      type: 'chunk',
+      chunk: new Uint8Array(encrypted)
+    });
+  }
+  
+  self.postMessage({ type: 'done' });
+};
+```
+
+The worker runs encryption in parallel, and the main thread stays responsive. Progress updates flow back in real time.
+
+## Solution 4: IndexedDB as a Staging Buffer
+
+For uploads to S3, you might not want to stream directly—network failures are common. Use **IndexedDB** as a local staging area:
+
+```javascript
+const db = await openIndexedDB();
+const tx = db.transaction('encryptedChunks', 'readwrite');
+
+worker.onmessage = (e) => {
+  if (e.data.type === 'chunk') {
+    // Store chunk in IndexedDB
+    tx.objectStore('encryptedChunks').put({
+      id: e.data.chunkId,
+      data: e.data.chunk,
+      status: 'pending'
+    });
+  }
+};
+
+// Later: retry uploads from IndexedDB
+for (let i = 0; i < totalChunks; i++) {
+  const stored = await db.get('encryptedChunks', i);
+  if (stored.status === 'pending') {
+    await uploadToS3(stored.data);
+    await db.put('encryptedChunks', { ...stored, status: 'uploaded' });
+  }
+}
+```
+
+IndexedDB persists across page reloads, so interrupted uploads resume seamlessly.
+
+## Solution 5: Readable Streams (The Future)
+
+The **Web Streams API** is still gaining browser support, but it's the cleanest abstraction:
+
+```javascript
+const readableStream = file.stream();
+const reader = readableStream.getReader();
+const encryptionStream = new TransformStream({
+  async transform(chunk, controller) {
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: nextIv() },
+      key,
+      chunk
+    );
+    controller.enqueue(encrypted);
+  }
+});
+
+readableStream
+  .pipeThrough(encryptionStream)
+  .pipeTo(uploadStream);
+```
+
+This is more elegant and aligns with web standards, but requires polyfills for older browsers.
+
+## BitAtlas in Practice
+
+At BitAtlas, we combine these strategies:
+
+1. **Web Workers** handle crypto in the background
+2. **Chunking** (1MB per chunk) keeps memory bounded
+3. **Per-chunk IVs** ensure cryptographic safety
+4. **IndexedDB staging** enables resumable uploads
+5. **Progress events** keep the UI updated
+
+The result: users can encrypt 50GB vaults and upload them reliably, without ever freezing their browser.
+
+## Key Takeaways
+
+- **Never encrypt the entire file at once**. Chunk it.
+- **Use unique IVs for each chunk**. Counter-based derivation is simple and safe.
+- **Offload crypto to a Web Worker**. The main thread must stay responsive.
+- **Stage encrypted chunks in IndexedDB or local storage**. Network failures happen.
+- **Stream directly to S3 when possible**. Presigned URLs + multipart upload = scalable, serverless architecture.
+
+Large-file encryption in the browser is a solved problem. The API is there; the patterns are proven. Your users can have zero-knowledge, server-agnostic storage—no downloads, no desktop apps, just the browser they already have.
