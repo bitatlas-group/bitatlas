@@ -7,6 +7,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
 import { useFolders } from '@/contexts/FolderContext';
 import { vaultApi, uploadToPresignedUrl, type VaultFile, type Folder } from '@/lib/api';
+import {
+  Loader2, Search, Upload, Download, X, Home, Folder as FolderIcon,
+  FolderPlus, ChevronRight, AlertCircle, FileImage, Video, Music,
+  FileText, Sheet, AlignLeft, File, Trash2, FolderInput, Lock, Eye,
+  MoreVertical, UploadCloud, ShieldCheck,
+} from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatBytes(bytes: number): string {
@@ -20,15 +26,16 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function getFileIcon(mimeType: string): string {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('video/')) return 'video_file';
-  if (mimeType.startsWith('audio/')) return 'audio_file';
-  if (mimeType === 'application/pdf') return 'picture_as_pdf';
-  if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'table_chart';
-  if (mimeType.includes('word') || mimeType.includes('document')) return 'description';
-  if (mimeType.startsWith('text/')) return 'article';
-  return 'insert_drive_file';
+function FileTypeIcon({ mimeType, size = 24 }: { mimeType: string; size?: number }) {
+  const cls = "text-ink-400";
+  if (mimeType.startsWith('image/'))                                 return <FileImage size={size} className={cls} />;
+  if (mimeType.startsWith('video/'))                                 return <Video size={size} className={cls} />;
+  if (mimeType.startsWith('audio/'))                                 return <Music size={size} className={cls} />;
+  if (mimeType === 'application/pdf')                                return <FileText size={size} className={cls} />;
+  if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return <Sheet size={size} className={cls} />;
+  if (mimeType.includes('word') || mimeType.includes('document'))   return <FileText size={size} className={cls} />;
+  if (mimeType.startsWith('text/'))                                  return <AlignLeft size={size} className={cls} />;
+  return <File size={size} className={cls} />;
 }
 
 function canPreview(mimeType: string): boolean {
@@ -43,9 +50,7 @@ export default function VaultPage() {
     <Suspense
       fallback={
         <div className="flex items-center justify-center h-64">
-          <span className="material-symbols-outlined animate-spin" style={{ fontSize: '32px', color: '#6B7280' }}>
-            progress_activity
-          </span>
+          <Loader2 size={32} className="animate-spin text-ink-400" />
         </div>
       }
     >
@@ -71,7 +76,6 @@ function VaultContent() {
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
-  // Modal states
   const [moveTarget, setMoveTarget] = useState<VaultFile | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -109,13 +113,11 @@ function VaultContent() {
     });
   }, [files, sortField, sortDir]);
 
-  // Current folder for breadcrumb
   const currentFolder = useMemo(() => {
     if (!folderId) return null;
     return folders.find(f => f.id === folderId) ?? null;
   }, [folders, folderId]);
 
-  // Folders visible in the current view: root folders when no folderId, children when inside a folder
   const visibleFolders = useMemo(() => {
     return folders.filter(f => (folderId ? f.parentId === folderId : !f.parentId))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -154,13 +156,12 @@ function VaultContent() {
     finally { setUploading(false); setUploadStatus(''); }
   }
 
-  // ── Decrypt helper (shared by download + preview) ───────────────────────────
+  // ── Decrypt helper ──────────────────────────────────────────────────────────
   async function decryptVaultFile(file: VaultFile): Promise<ArrayBuffer> {
     const { url, encryptionMetadata } = await vaultApi.getDownloadUrl(file.id);
     const res = await fetch(url);
     if (!res.ok) throw new Error('Download failed');
     const encryptedBlob = await res.blob();
-    // Use encryption metadata from download endpoint (not file list)
     const meta = encryptionMetadata || file;
     return decryptFile(encryptedBlob, meta.ownerEncryptedKey, meta.ownerIv, meta.fileIv, meta.authTag);
   }
@@ -208,7 +209,7 @@ function VaultContent() {
     catch (err) { setError(err instanceof Error ? err.message : 'Delete failed'); }
   }
 
-  // ── Move to folder ─────────────────────────────────────────────────────────
+  // ── Move ───────────────────────────────────────────────────────────────────
   async function handleMoveToFolder(fileId: string, targetFolderId: string | null) {
     setError(null);
     try { await vaultApi.updateFile(fileId, { folderId: targetFolderId }); setMoveTarget(null); await loadFiles(); }
@@ -216,52 +217,62 @@ function VaultContent() {
   }
 
   return (
-    <div style={{ backgroundColor: '#F3F1EE', minHeight: '100vh' }} className="flex flex-col">
+    <div className="bg-ink-50 min-h-screen flex flex-col">
+
       {/* Search + upload */}
       <div className="px-4 pt-5">
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ fontSize: '20px', color: '#9CA3AF' }}>search</span>
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search files..."
-              className="w-full bg-white rounded-xl pl-11 pr-4 outline-none focus:ring-2 focus:ring-blue-100 transition-all"
-              style={{ height: '48px', fontSize: '15px', color: '#1A2332' }} />
+            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-ink-300" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search files..."
+              className="w-full h-12 bg-white rounded-xl pl-10 pr-4 text-[15px] text-ink-900 placeholder:text-ink-300 outline-none focus:ring-2 focus:ring-brand-500/20 border border-ink-100 transition-all"
+            />
           </div>
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="flex items-center justify-center transition-all hover:opacity-90 disabled:opacity-60 shrink-0"
-            style={{ width: '48px', height: '48px', backgroundColor: '#1A2332', borderRadius: '10px' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'white' }}>
-              {uploading ? 'progress_activity' : 'upload_file'}
-            </span>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center justify-center w-12 h-12 bg-ink-900 rounded-xl hover:bg-ink-800 transition-colors disabled:opacity-50 shrink-0"
+          >
+            {uploading
+              ? <Loader2 size={20} className="animate-spin text-white" />
+              : <Upload size={20} className="text-white" />
+            }
           </button>
         </div>
       </div>
 
-      {/* Breadcrumb navigation */}
-      <div className="px-4 mt-4">
-        <div className="flex items-center gap-1.5" style={{ minHeight: '28px' }}>
-          <Link href="/vault" className="flex items-center gap-1" style={{ textDecoration: 'none' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '16px', color: folderId ? '#6B7280' : '#1A2332' }}>home</span>
-            <span style={{ fontSize: '13px', fontWeight: folderId ? '500' : '700', color: folderId ? '#6B7280' : '#1A2332' }}>My Vault</span>
-          </Link>
-          {currentFolder && (
-            <>
-              <span className="material-symbols-outlined" style={{ fontSize: '14px', color: '#D1D5DB' }}>chevron_right</span>
-              <span style={{ fontSize: '13px', fontWeight: '700', color: '#1A2332' }}>{currentFolder.name}</span>
-            </>
-          )}
-        </div>
+      {/* Breadcrumb */}
+      <div className="px-4 mt-4 flex items-center gap-1.5 min-h-[28px]">
+        <Link href="/vault" className="flex items-center gap-1 text-[13px] no-underline">
+          <Home size={14} className={folderId ? 'text-ink-400' : 'text-ink-900'} />
+          <span className={folderId ? 'text-ink-400 font-medium' : 'text-ink-900 font-bold'}>My Vault</span>
+        </Link>
+        {currentFolder && (
+          <>
+            <ChevronRight size={12} className="text-ink-200" />
+            <span className="text-[13px] font-bold text-ink-900">{currentFolder.name}</span>
+          </>
+        )}
       </div>
 
       {/* Sort */}
       <div className="px-4 mt-3 flex items-center gap-2">
-        <span style={{ fontSize: '12px', fontWeight: '600', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sort</span>
+        <span className="text-[11px] font-semibold text-ink-500 uppercase tracking-[0.1em]">Sort</span>
         {(['date', 'name', 'size'] as SortField[]).map(field => {
           const active = sortField === field;
           return (
-            <button key={field} onClick={() => handleSort(field)}
-              style={active
-                ? { backgroundColor: 'white', border: '1px solid #D1D5DB', borderRadius: '999px', padding: '4px 14px', fontSize: '13px', fontWeight: '600', color: '#1A2332', cursor: 'pointer' }
-                : { background: 'none', border: 'none', padding: '4px 8px', fontSize: '13px', fontWeight: '500', color: '#6B7280', cursor: 'pointer' }}>
+            <button
+              key={field}
+              onClick={() => handleSort(field)}
+              className={active
+                ? 'bg-white border border-ink-200 rounded-full px-3.5 py-1 text-[13px] font-semibold text-ink-900 cursor-pointer'
+                : 'bg-transparent border-none px-2 py-1 text-[13px] font-medium text-ink-400 cursor-pointer hover:text-ink-700 transition-colors'
+              }
+            >
               {active ? `${field.charAt(0).toUpperCase() + field.slice(1)}${sortDir === 'desc' ? ' ↓' : ' ↑'}` : field.charAt(0).toUpperCase() + field.slice(1)}
             </button>
           );
@@ -270,45 +281,47 @@ function VaultContent() {
 
       {/* Upload progress */}
       {uploading && uploadStatus && (
-        <div className="mx-4 mt-4 flex items-center gap-3 rounded-xl px-4 py-3" style={{ backgroundColor: '#DBEAFE' }}>
-          <span className="material-symbols-outlined animate-spin shrink-0" style={{ fontSize: '18px', color: '#1E40AF' }}>progress_activity</span>
-          <span style={{ fontSize: '14px', color: '#1E40AF' }}>{uploadStatus}</span>
+        <div className="mx-4 mt-4 flex items-center gap-3 bg-brand-50 border border-brand-100 rounded-xl px-4 py-3">
+          <Loader2 size={16} className="animate-spin text-brand-500 shrink-0" />
+          <span className="text-[14px] text-brand-600">{uploadStatus}</span>
         </div>
       )}
 
       {/* Error */}
       {error && (
-        <div className="mx-4 mt-4 flex items-center gap-2 rounded-xl px-4 py-3" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>
-          <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px' }}>error</span>
-          <span style={{ fontSize: '14px', flex: 1 }}>{error}</span>
-          <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991B1B', fontSize: '20px', lineHeight: 1 }}>×</button>
+        <div className="mx-4 mt-4 flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-red-700">
+          <AlertCircle size={14} className="shrink-0" />
+          <span className="text-[14px] flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700 transition-colors">
+            <X size={18} />
+          </button>
         </div>
       )}
 
-      {/* Folder + File list */}
+      {/* File + Folder list */}
       <div className="flex-1 px-4 mt-4 pb-6 flex flex-col gap-3">
         {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="flex flex-col items-center gap-3">
-              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '32px', color: '#6B7280' }}>progress_activity</span>
-              <p style={{ fontSize: '14px', color: '#6B7280' }}>Loading your vault…</p>
-            </div>
+          <div className="flex flex-col items-center justify-center h-64 gap-3">
+            <Loader2 size={32} className="animate-spin text-ink-400" />
+            <p className="text-[14px] text-ink-400">Loading your vault…</p>
           </div>
         ) : sortedFiles.length === 0 && visibleFolders.length === 0 ? (
           <EmptyState onUpload={() => fileInputRef.current?.click()} />
         ) : (
           <>
-            {/* Folder cards */}
             {visibleFolders.map(folder => (
               <FolderCard key={folder.id} folder={folder} />
             ))}
-            {/* File cards */}
             {sortedFiles.map(file => (
-              <FileCard key={file.id} file={file} downloading={downloading === file.id}
+              <FileCard
+                key={file.id}
+                file={file}
+                downloading={downloading === file.id}
                 onTap={() => handlePreview(file)}
                 onDownload={() => handleDownload(file)}
                 onDelete={() => handleDelete(file.id)}
-                onMoveOpen={() => setMoveTarget(file)} />
+                onMoveOpen={() => setMoveTarget(file)}
+              />
             ))}
           </>
         )}
@@ -318,47 +331,51 @@ function VaultContent() {
       {moveTarget && (
         <>
           <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setMoveTarget(null)} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl max-h-[60vh] flex flex-col animate-slide-up"
-            style={{ boxShadow: '0 -8px 32px rgba(0,0,0,0.15)' }}>
-            {/* Handle */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl max-h-[60vh] flex flex-col animate-slide-up shadow-lg">
             <div className="flex justify-center pt-3 pb-1">
-              <div style={{ width: '36px', height: '4px', borderRadius: '2px', backgroundColor: '#D1D5DB' }} />
+              <div className="w-9 h-1 rounded-full bg-ink-200" />
             </div>
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pb-3" style={{ borderBottom: '1px solid #E5E7EB' }}>
+            <div className="flex items-center justify-between px-5 pb-3 border-b border-ink-100">
               <div>
-                <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1A2332' }}>Move to folder</h3>
-                <p style={{ fontSize: '13px', color: '#9CA3AF', marginTop: '2px' }} className="truncate max-w-[250px]">{moveTarget.name}</p>
+                <h3 className="text-[16px] font-semibold text-ink-900">Move to folder</h3>
+                <p className="text-[13px] text-ink-400 mt-0.5 truncate max-w-[250px]">{moveTarget.name}</p>
               </div>
-              <button onClick={() => setMoveTarget(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: '22px', color: '#6B7280' }}>close</span>
+              <button onClick={() => setMoveTarget(null)} className="text-ink-400 hover:text-ink-700 transition-colors p-1">
+                <X size={20} />
               </button>
             </div>
-            {/* Folder list */}
             <div className="flex-1 overflow-y-auto px-2 py-2">
-              <button onClick={() => handleMoveToFolder(moveTarget.id, null)} disabled={!moveTarget.folderId}
-                className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-40"
-                style={{ fontSize: '15px', color: '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: '20px', color: '#6B7280' }}>home</span>
+              <button
+                onClick={() => handleMoveToFolder(moveTarget.id, null)}
+                disabled={!moveTarget.folderId}
+                className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-ink-50 transition-colors disabled:opacity-40 text-[15px] text-ink-900"
+              >
+                <Home size={18} className="text-ink-400" />
                 All files
-                {!moveTarget.folderId && <span style={{ fontSize: '12px', color: '#9CA3AF', marginLeft: 'auto' }}>current</span>}
+                {!moveTarget.folderId && <span className="text-[12px] text-ink-400 ml-auto">current</span>}
               </button>
               {folders.map(folder => {
                 const isCurrent = moveTarget.folderId === folder.id;
                 return (
-                  <button key={folder.id} onClick={() => handleMoveToFolder(moveTarget.id, folder.id)} disabled={isCurrent}
-                    className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-40"
-                    style={{ fontSize: '15px', color: isCurrent ? '#9CA3AF' : '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: '20px', color: isCurrent ? '#9CA3AF' : '#6B7280' }}>folder</span>
+                  <button
+                    key={folder.id}
+                    onClick={() => handleMoveToFolder(moveTarget.id, folder.id)}
+                    disabled={isCurrent}
+                    className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-ink-50 transition-colors disabled:opacity-40 text-[15px]"
+                    style={{ color: isCurrent ? '#94A3B8' : '#081220' }}
+                  >
+                    <FolderIcon size={18} className={isCurrent ? 'text-ink-300' : 'text-ink-400'} />
                     {folder.name}
-                    {isCurrent && <span style={{ fontSize: '12px', color: '#9CA3AF', marginLeft: 'auto' }}>current</span>}
+                    {isCurrent && <span className="text-[12px] text-ink-400 ml-auto">current</span>}
                   </button>
                 );
               })}
-              {/* New folder inline */}
               {creatingFolder ? (
                 <div className="px-4 py-2">
-                  <input autoFocus type="text" value={newFolderName}
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newFolderName}
                     onChange={e => setNewFolderName(e.target.value)}
                     onKeyDown={async e => {
                       if (e.key === 'Enter' && newFolderName.trim()) {
@@ -369,14 +386,15 @@ function VaultContent() {
                       if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
                     }}
                     placeholder="Folder name…"
-                    className="w-full bg-gray-100 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-200"
-                    style={{ color: '#1A2332' }} />
+                    className="w-full bg-ink-50 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500/20 border border-ink-100 text-ink-900"
+                  />
                 </div>
               ) : (
-                <button onClick={() => setCreatingFolder(true)}
-                  className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors"
-                  style={{ fontSize: '15px', color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '20px', color: '#9CA3AF' }}>create_new_folder</span>
+                <button
+                  onClick={() => setCreatingFolder(true)}
+                  className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-ink-50 transition-colors text-[15px] text-ink-400"
+                >
+                  <FolderPlus size={18} className="text-ink-300" />
                   New folder
                 </button>
               )}
@@ -390,32 +408,31 @@ function VaultContent() {
         <>
           <div className="fixed inset-0 z-40 bg-black/60" onClick={closePreview} />
           <div className="fixed inset-0 z-50 flex flex-col">
-            {/* Top bar */}
             <div className="flex items-center justify-between px-4 py-3 bg-black/80 backdrop-blur-sm">
               <div className="flex-1 min-w-0 mr-3">
                 <p className="text-white font-semibold text-sm truncate">{previewFile.name}</p>
                 <p className="text-white/50 text-xs">{formatBytes(previewFile.originalSizeBytes)}</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => { closePreview(); handleDownload(previewFile); }}
-                  className="flex items-center justify-center rounded-lg"
-                  style={{ width: '40px', height: '40px', backgroundColor: 'rgba(255,255,255,0.15)' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'white' }}>download</span>
+                <button
+                  onClick={() => { closePreview(); handleDownload(previewFile); }}
+                  className="flex items-center justify-center w-10 h-10 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
+                >
+                  <Download size={18} className="text-white" />
                 </button>
-                <button onClick={closePreview}
-                  className="flex items-center justify-center rounded-lg"
-                  style={{ width: '40px', height: '40px', backgroundColor: 'rgba(255,255,255,0.15)' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'white' }}>close</span>
+                <button
+                  onClick={closePreview}
+                  className="flex items-center justify-center w-10 h-10 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
+                >
+                  <X size={18} className="text-white" />
                 </button>
               </div>
             </div>
-
-            {/* Content */}
             <div className="flex-1 flex items-center justify-center overflow-auto p-4">
               {previewLoading ? (
                 <div className="flex flex-col items-center gap-3">
-                  <span className="material-symbols-outlined animate-spin" style={{ fontSize: '32px', color: 'white' }}>progress_activity</span>
-                  <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>Decrypting preview…</p>
+                  <Loader2 size={32} className="animate-spin text-white" />
+                  <p className="text-[14px] text-white/70">Decrypting preview…</p>
                 </div>
               ) : previewUrl && previewFile.mimeType.startsWith('image/') ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
@@ -423,22 +440,20 @@ function VaultContent() {
               ) : previewUrl && previewFile.mimeType === 'application/pdf' ? (
                 <iframe src={previewUrl} title={previewFile.name} className="w-full h-full rounded-lg bg-white" />
               ) : previewText !== null ? (
-                <pre className="bg-white rounded-xl p-4 text-sm max-w-full max-h-full overflow-auto w-full"
-                  style={{ color: '#1A2332', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <pre className="bg-white rounded-xl p-4 text-sm max-w-full max-h-full overflow-auto w-full text-ink-900 font-mono" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {previewText}
                 </pre>
               ) : (
                 <div className="flex flex-col items-center gap-4">
-                  <div className="flex items-center justify-center rounded-2xl" style={{ width: '80px', height: '80px', backgroundColor: 'rgba(255,255,255,0.1)' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: '40px', color: 'rgba(255,255,255,0.5)', fontVariationSettings: "'FILL' 1" }}>
-                      {getFileIcon(previewFile.mimeType)}
-                    </span>
+                  <div className="flex items-center justify-center w-20 h-20 rounded-2xl bg-white/10">
+                    <Eye size={40} className="text-white/50" />
                   </div>
-                  <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>Preview not available for this file type</p>
-                  <button onClick={() => { closePreview(); handleDownload(previewFile); }}
-                    className="flex items-center gap-2 rounded-xl font-semibold"
-                    style={{ backgroundColor: 'white', color: '#1A2332', padding: '10px 20px', fontSize: '14px' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
+                  <p className="text-[14px] text-white/70">Preview not available for this file type</p>
+                  <button
+                    onClick={() => { closePreview(); handleDownload(previewFile); }}
+                    className="flex items-center gap-2 bg-white text-ink-900 px-5 py-2.5 rounded-xl font-semibold text-[14px] hover:bg-ink-50 transition-colors"
+                  >
+                    <Download size={16} />
                     Download instead
                   </button>
                 </div>
@@ -450,15 +465,12 @@ function VaultContent() {
 
       <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelected} />
 
-      {/* Animation for bottom sheet */}
       <style jsx global>{`
         @keyframes slide-up {
           from { transform: translateY(100%); }
-          to { transform: translateY(0); }
+          to   { transform: translateY(0); }
         }
-        .animate-slide-up {
-          animation: slide-up 0.25s ease-out;
-        }
+        .animate-slide-up { animation: slide-up 0.25s ease-out; }
       `}</style>
     </div>
   );
@@ -469,25 +481,16 @@ function FolderCard({ folder }: { folder: Folder }) {
   return (
     <Link
       href={`/vault?folderId=${folder.id}`}
-      className="rounded-2xl flex items-start gap-3 transition-all active:scale-[0.98]"
-      style={{ backgroundColor: 'white', padding: '16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textDecoration: 'none' }}
+      className="bg-white rounded-2xl flex items-start gap-3 p-4 shadow-sm border border-ink-100 hover:border-ink-200 transition-all active:scale-[0.98] no-underline"
     >
-      <div className="flex items-center justify-center rounded-lg shrink-0"
-        style={{ width: '44px', height: '44px', backgroundColor: '#FEF3C7' }}>
-        <span className="material-symbols-outlined"
-          style={{ fontSize: '24px', color: '#D97706', fontVariationSettings: "'FILL' 1" }}>
-          folder
-        </span>
+      <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-amber-50 shrink-0">
+        <FolderIcon size={22} className="text-amber-600 fill-amber-200" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-bold leading-snug" style={{ fontSize: '15px', color: '#111827' }}>
-          {folder.name}
-        </p>
-        <span style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px', display: 'block' }}>Folder</span>
+        <p className="font-semibold text-[15px] text-ink-900 leading-snug">{folder.name}</p>
+        <span className="text-[12px] text-ink-400 mt-1 block">Folder</span>
       </div>
-      <span className="material-symbols-outlined shrink-0 mt-2.5" style={{ fontSize: '18px', color: '#D1D5DB' }}>
-        chevron_right
-      </span>
+      <ChevronRight size={16} className="text-ink-200 mt-2.5 shrink-0" />
     </Link>
   );
 }
@@ -504,77 +507,71 @@ function FileCard({
   onMoveOpen: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const icon = getFileIcon(file.mimeType);
   const previewable = canPreview(file.mimeType);
 
   return (
     <div
-      className="rounded-2xl relative"
-      style={{ backgroundColor: 'white', padding: '16px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', cursor: previewable ? 'pointer' : 'default' }}
+      className="bg-white rounded-2xl relative p-4 shadow-sm border border-ink-100 hover:border-ink-200 transition-all"
+      style={{ cursor: previewable ? 'pointer' : 'default' }}
       onClick={(e) => {
-        // Don't trigger preview if clicking the menu
         if ((e.target as HTMLElement).closest('[data-menu]')) return;
         if (previewable) onTap();
       }}
     >
       <div className="flex items-start gap-3">
-        <div className="flex items-center justify-center rounded-lg shrink-0"
-          style={{ width: '44px', height: '44px', backgroundColor: '#F3F4F6' }}>
-          <span className="material-symbols-outlined"
-            style={{ fontSize: '24px', color: '#374151', fontVariationSettings: "'FILL' 1" }}>
-            {icon}
-          </span>
+        <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-ink-50 shrink-0">
+          <FileTypeIcon mimeType={file.mimeType} size={22} />
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="font-bold leading-snug line-clamp-2" style={{ fontSize: '15px', color: '#111827' }} title={file.name}>
+          <p className="font-semibold text-[15px] text-ink-900 leading-snug line-clamp-2" title={file.name}>
             {file.name}
           </p>
           <div className="flex items-center gap-3 mt-1">
-            <span style={{ fontSize: '12px', color: '#9CA3AF' }}>{formatBytes(file.originalSizeBytes)}</span>
-            <span style={{ fontSize: '12px', color: '#9CA3AF' }}>{formatDate(file.createdAt)}</span>
+            <span className="text-[12px] text-ink-400">{formatBytes(file.originalSizeBytes)}</span>
+            <span className="text-[12px] text-ink-400">{formatDate(file.createdAt)}</span>
           </div>
           <div className="flex items-center gap-2 mt-2">
-            <span className="inline-flex items-center gap-1 rounded-full"
-              style={{ backgroundColor: '#0C5C4C', padding: '2px 10px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'white', fontVariationSettings: "'FILL' 1" }}>lock</span>
-              <span style={{ fontSize: '10px', fontWeight: '700', color: 'white', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Encrypted</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-800 px-2.5 py-0.5">
+              <Lock size={9} className="text-white" />
+              <span className="text-[10px] font-bold text-white uppercase tracking-[0.06em]">Encrypted</span>
             </span>
-            {previewable && (
-              <span style={{ fontSize: '11px', color: '#6B7280' }}>Tap to preview</span>
-            )}
+            {previewable && <span className="text-[11px] text-ink-400">Tap to preview</span>}
           </div>
         </div>
 
         {/* Menu */}
         <div className="relative shrink-0" data-menu>
-          <button onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9CA3AF' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>more_vert</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }}
+            className="text-ink-300 hover:text-ink-500 transition-colors p-1"
+          >
+            <MoreVertical size={18} />
           </button>
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-8 rounded-xl z-20 overflow-hidden"
-                style={{ backgroundColor: 'white', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: '160px' }}>
-                <button onClick={() => { setMenuOpen(false); onDownload(); }} disabled={downloading}
-                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors disabled:opacity-50"
-                  style={{ fontSize: '14px', color: '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                    {downloading ? 'progress_activity' : 'download'}
-                  </span>
+              <div className="absolute right-0 top-8 bg-white rounded-xl z-20 overflow-hidden shadow-lg border border-ink-100 min-w-[160px]">
+                <button
+                  onClick={() => { setMenuOpen(false); onDownload(); }}
+                  disabled={downloading}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-ink-50 transition-colors text-[14px] text-ink-700 disabled:opacity-50"
+                >
+                  {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   Download
                 </button>
-                <button onClick={() => { setMenuOpen(false); onMoveOpen(); }}
-                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                  style={{ fontSize: '14px', color: '#1A2332', background: 'none', border: 'none', cursor: 'pointer' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>drive_file_move</span>
+                <button
+                  onClick={() => { setMenuOpen(false); onMoveOpen(); }}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-ink-50 transition-colors text-[14px] text-ink-700"
+                >
+                  <FolderInput size={14} />
                   Move to folder
                 </button>
-                <button onClick={() => { setMenuOpen(false); onDelete(); }}
-                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-red-50 transition-colors"
-                  style={{ fontSize: '14px', color: '#DC2626', background: 'none', border: 'none', cursor: 'pointer' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
+                <button
+                  onClick={() => { setMenuOpen(false); onDelete(); }}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-red-50 transition-colors text-[14px] text-red-600"
+                >
+                  <Trash2 size={14} />
                   Delete
                 </button>
               </div>
@@ -589,20 +586,20 @@ function FileCard({
 function EmptyState({ onUpload }: { onUpload: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-96 gap-6">
-      <div className="flex items-center justify-center"
-        style={{ width: '96px', height: '96px', borderRadius: '32px', backgroundColor: 'rgba(26,35,50,0.06)' }}>
-        <span className="material-symbols-outlined" style={{ fontSize: '48px', color: 'rgba(26,35,50,0.25)' }}>shield_lock</span>
+      <div className="flex items-center justify-center w-24 h-24 rounded-3xl bg-ink-100">
+        <ShieldCheck size={48} className="text-ink-300" />
       </div>
-      <div className="text-center" style={{ maxWidth: '280px' }}>
-        <h3 className="font-bold text-xl" style={{ color: '#1A2332' }}>Your vault is empty</h3>
-        <p className="mt-2" style={{ fontSize: '14px', color: '#6B7280' }}>
+      <div className="text-center max-w-[280px]">
+        <h3 className="font-semibold text-[20px] text-ink-900">Your vault is empty</h3>
+        <p className="mt-2 text-[14px] text-ink-400 leading-relaxed">
           Upload files to encrypt them client-side with AES-256-GCM before they ever reach our servers.
         </p>
       </div>
-      <button onClick={onUpload}
-        className="flex items-center gap-2 rounded-xl font-semibold transition-all hover:opacity-90"
-        style={{ backgroundColor: '#1A2332', color: 'white', padding: '12px 24px', fontSize: '14px' }}>
-        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
+      <button
+        onClick={onUpload}
+        className="flex items-center gap-2 bg-ink-900 text-white px-6 py-3 rounded-xl font-semibold text-[14px] hover:bg-ink-800 transition-colors"
+      >
+        <UploadCloud size={16} />
         Upload your first file
       </button>
     </div>

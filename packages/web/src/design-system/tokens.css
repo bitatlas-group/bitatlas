@@ -1,0 +1,48 @@
+/* Bitatlas design tokens — CSS custom properties.
+   Import once in your root layout. */
+
+:root {
+  /* Brand */
+  --bit-brand-050: #EFF4FF;
+  --bit-brand-100: #DBEAFE;
+  --bit-brand-400: #3B82F6;
+  --bit-brand-500: #2563EB;
+  --bit-brand-600: #1D4ED8;
+
+  /* Ink · neutrals (cool slate) */
+  --bit-ink-025: #F8FAFC;
+  --bit-ink-050: #F1F5F9;
+  --bit-ink-100: #E2E8F0;
+  --bit-ink-200: #CBD5E1;
+  --bit-ink-300: #94A3B8;
+  --bit-ink-400: #64748B;
+  --bit-ink-500: #475569;
+  --bit-ink-600: #334155;
+  --bit-ink-700: #1E293B;
+  --bit-ink-800: #0F1B2E;
+  --bit-ink-900: #081220;
+
+  /* Semantic */
+  --bit-success: #10B981;
+  --bit-warn:    #F59E0B;
+  --bit-danger:  #EF4444;
+  --bit-info:    #2563EB;
+
+  /* Radii */
+  --bit-radius-xs: 4px;
+  --bit-radius-sm: 6px;
+  --bit-radius-md: 10px;
+  --bit-radius-lg: 14px;
+  --bit-radius-xl: 20px;
+  --bit-radius-pill: 999px;
+
+  /* Shadows */
+  --bit-shadow-sm: 0 1px 2px rgba(8,18,32,0.06), 0 1px 1px rgba(8,18,32,0.04);
+  --bit-shadow-md: 0 4px 12px rgba(8,18,32,0.08), 0 2px 4px rgba(8,18,32,0.04);
+  --bit-shadow-lg: 0 16px 40px rgba(8,18,32,0.12), 0 4px 12px rgba(8,18,32,0.06);
+  --bit-shadow-glow: 0 0 0 4px rgba(37,99,235,0.15);
+
+  /* Typography */
+  --font-sans: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+}

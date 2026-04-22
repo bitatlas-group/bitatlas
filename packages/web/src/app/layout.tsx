@@ -1,25 +1,25 @@
 import type { Metadata } from "next";
-import { Manrope, Inter } from "next/font/google";
+import { Poppins, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import Providers from "./providers";
 
-const manrope = Manrope({
+const poppins = Poppins({
   subsets: ["latin"],
-  variable: "--font-manrope",
-  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-poppins",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
-const inter = Inter({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-jetbrains",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "BitAtlas | The Secure Intelligence Layer",
+  title: "BitAtlas — Encrypted Cloud for Humans & Agents",
   description:
-    "Zero Knowledge Cloud Drive for Humans and Agents. End-to-end zero-knowledge encryption designed for autonomous workflows and high-trust human-AI collaboration.",
+    "Zero-knowledge AES-256-GCM encrypted storage. Built for teams and AI agents that need private, sovereign file infrastructure.",
 };
 
 export default function RootLayout({
@@ -29,13 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
-        />
-      </head>
-      <body className={`${manrope.variable} ${inter.variable} font-body`}>
+      <body className={`${poppins.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

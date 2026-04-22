@@ -1,128 +1,144 @@
 @import "tailwindcss";
+@import "../design-system/tokens.css";
 
 @theme {
-  /* ── Color Tokens (Material Design 3 / BitAtlas palette) ── */
-  --color-primary: #002046;
-  --color-primary-container: #1b365d;
-  --color-on-primary: #ffffff;
-  --color-primary-fixed: #d6e3ff;
-  --color-primary-fixed-dim: #aec7f7;
-  --color-on-primary-fixed: #001b3d;
-  --color-on-primary-fixed-variant: #2e476f;
-  --color-on-primary-container: #87a0cd;
-  --color-inverse-primary: #aec7f7;
+  /* Brand */
+  --color-brand-50:  var(--bit-brand-050);
+  --color-brand-100: var(--bit-brand-100);
+  --color-brand-400: var(--bit-brand-400);
+  --color-brand-500: var(--bit-brand-500);
+  --color-brand-600: var(--bit-brand-600);
 
-  --color-secondary: #286487;
-  --color-secondary-container: #9ed5fe;
-  --color-on-secondary: #ffffff;
-  --color-on-secondary-container: #205d81;
-  --color-secondary-fixed: #c9e6ff;
-  --color-secondary-fixed-dim: #96cdf5;
-  --color-on-secondary-fixed: #001e2f;
-  --color-on-secondary-fixed-variant: #004c6e;
+  /* Ink */
+  --color-ink-25:  var(--bit-ink-025);
+  --color-ink-50:  var(--bit-ink-050);
+  --color-ink-100: var(--bit-ink-100);
+  --color-ink-200: var(--bit-ink-200);
+  --color-ink-300: var(--bit-ink-300);
+  --color-ink-400: var(--bit-ink-400);
+  --color-ink-500: var(--bit-ink-500);
+  --color-ink-600: var(--bit-ink-600);
+  --color-ink-700: var(--bit-ink-700);
+  --color-ink-800: var(--bit-ink-800);
+  --color-ink-900: var(--bit-ink-900);
 
-  --color-tertiary: #002528;
-  --color-tertiary-container: #003c40;
-  --color-on-tertiary: #ffffff;
-  --color-on-tertiary-container: #24aeb8;
-  --color-tertiary-fixed: #7df4ff;
-  --color-tertiary-fixed-dim: #5dd8e2;
-  --color-on-tertiary-fixed: #002022;
-  --color-on-tertiary-fixed-variant: #004f54;
+  /* Semantic */
+  --color-success: var(--bit-success);
+  --color-warn:    var(--bit-warn);
+  --color-danger:  var(--bit-danger);
 
-  --color-surface: #f7f9ff;
-  --color-surface-dim: #d7dae0;
-  --color-surface-bright: #f7f9ff;
-  --color-surface-variant: #dfe3e8;
-  --color-on-surface: #181c20;
-  --color-on-surface-variant: #44474e;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low: #f1f4fa;
-  --color-surface-container: #ebeef4;
-  --color-surface-container-high: #e5e8ee;
-  --color-surface-container-highest: #dfe3e8;
-  --color-inverse-surface: #2d3135;
-  --color-inverse-on-surface: #eef1f7;
+  /* Typography */
+  --font-sans: var(--font-poppins), 'Poppins', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', 'SF Mono', monospace;
 
-  --color-background: #f7f9ff;
-  --color-on-background: #181c20;
+  /* Radii */
+  --radius-xs: var(--bit-radius-xs);
+  --radius-sm: var(--bit-radius-sm);
+  --radius-md: var(--bit-radius-md);
+  --radius-lg: var(--bit-radius-lg);
+  --radius-xl: var(--bit-radius-xl);
 
-  --color-outline: #74777f;
-  --color-outline-variant: #c4c6cf;
+  /* Shadows */
+  --shadow-sm:   var(--bit-shadow-sm);
+  --shadow-md:   var(--bit-shadow-md);
+  --shadow-lg:   var(--bit-shadow-lg);
+  --shadow-glow: var(--bit-shadow-glow);
 
-  --color-error: #ba1a1a;
-  --color-error-container: #ffdad6;
-  --color-on-error: #ffffff;
-  --color-on-error-container: #93000a;
+  /* Type scale */
+  --text-display: 72px;
+  --text-h1:      40px;
+  --text-h2:      28px;
+  --text-h3:      20px;
+  --text-body:    16px;
+  --text-small:   14px;
+  --text-label:   11px;
 
-  --color-surface-tint: #465f88;
-
-  /* ── Typography ── */
-  --font-headline: var(--font-manrope), sans-serif;
-  --font-body: var(--font-inter), sans-serif;
-  --font-label: var(--font-inter), sans-serif;
-
-  /* ── Border Radius ── */
-  --radius: 0.125rem;
-  --radius-lg: 0.25rem;
-  --radius-xl: 0.5rem;
-}
-
-/* Glassmorphism utility */
-.glass-effect {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-/* Material Symbols default variation */
-.material-symbols-outlined {
-  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  /* Legacy aliases — keep vault/auth working during migration */
+  --color-primary:                   var(--bit-brand-500);
+  --color-primary-container:         var(--bit-ink-800);
+  --color-on-primary:                #ffffff;
+  --color-secondary:                 var(--bit-brand-400);
+  --color-on-secondary:              #ffffff;
+  --color-tertiary:                  var(--bit-ink-700);
+  --color-on-tertiary:               #ffffff;
+  --color-on-tertiary-container:     var(--bit-brand-400);
+  --color-surface:                   var(--bit-ink-025);
+  --color-surface-bright:            #ffffff;
+  --color-on-surface:                var(--bit-ink-900);
+  --color-on-surface-variant:        var(--bit-ink-500);
+  --color-surface-container-lowest:  #ffffff;
+  --color-surface-container-low:     var(--bit-ink-050);
+  --color-surface-container:         var(--bit-ink-100);
+  --color-surface-container-high:    var(--bit-ink-100);
+  --color-surface-container-highest: var(--bit-ink-200);
+  --color-background:                var(--bit-ink-025);
+  --color-on-background:             var(--bit-ink-900);
+  --color-outline:                   var(--bit-ink-400);
+  --color-outline-variant:           var(--bit-ink-200);
+  --color-error:                     var(--bit-danger);
+  --color-error-container:           #fde8e8;
+  --color-on-error:                  #ffffff;
+  --color-on-error-container:        #7f0000;
+  --font-headline:                   var(--font-sans);
+  --font-body:                       var(--font-sans);
+  --font-label:                      var(--font-sans);
+  --color-tertiary-container:        var(--bit-ink-800);
+  --color-tertiary-fixed:            var(--bit-brand-400);
+  --color-tertiary-fixed-dim:        var(--bit-brand-400);
+  --color-on-tertiary-fixed-variant: var(--bit-brand-500);
+  --color-on-primary-container:      var(--bit-ink-200);
+  --color-primary-fixed:             var(--bit-brand-050);
+  --color-primary-fixed-dim:         var(--bit-brand-100);
+  --color-on-primary-fixed:          var(--bit-ink-900);
+  --color-on-primary-fixed-variant:  var(--bit-ink-700);
+  --color-secondary-container:       var(--bit-brand-100);
+  --color-on-secondary-container:    var(--bit-brand-600);
 }
 
 /* Blog article prose styles */
 .blog-prose {
-  color: var(--color-on-surface);
+  color: var(--bit-ink-900);
   line-height: 1.8;
   font-size: 1.0625rem;
 }
 .blog-prose h2 {
-  font-family: var(--font-headline);
-  font-weight: 800;
+  font-family: var(--font-sans);
+  font-weight: 700;
   font-size: 1.5rem;
-  color: var(--color-primary);
+  color: var(--bit-brand-600);
   margin-top: 2.5rem;
   margin-bottom: 1rem;
   letter-spacing: -0.025em;
 }
 .blog-prose h3 {
-  font-family: var(--font-headline);
-  font-weight: 700;
+  font-family: var(--font-sans);
+  font-weight: 600;
   font-size: 1.125rem;
-  color: var(--color-primary);
+  color: var(--bit-brand-600);
   margin-top: 2rem;
   margin-bottom: 0.75rem;
 }
 .blog-prose p {
   margin-bottom: 1.25rem;
-  color: var(--color-on-surface-variant);
+  color: var(--bit-ink-500);
 }
 .blog-prose strong {
   font-weight: 700;
-  color: var(--color-on-surface);
+  color: var(--bit-ink-900);
 }
 .blog-prose a {
-  color: var(--color-secondary);
+  color: var(--bit-brand-400);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .blog-prose a:hover {
-  color: var(--color-primary);
+  color: var(--bit-brand-600);
 }
 .blog-prose ul,
 .blog-prose ol {
   margin-bottom: 1.25rem;
   padding-left: 1.5rem;
-  color: var(--color-on-surface-variant);
+  color: var(--bit-ink-500);
 }
 .blog-prose ul {
   list-style-type: disc;
@@ -135,13 +151,13 @@
 }
 .blog-prose hr {
   border: none;
-  border-top: 1px solid var(--color-outline-variant);
+  border-top: 1px solid var(--bit-ink-200);
   margin: 2rem 0;
   opacity: 0.4;
 }
 .blog-prose pre {
-  background-color: var(--color-surface-container-highest);
-  border: 1px solid var(--color-outline-variant);
+  background-color: var(--bit-ink-100);
+  border: 1px solid var(--bit-ink-200);
   border-radius: 1rem;
   padding: 1.25rem 1.5rem;
   overflow-x: auto;
@@ -150,10 +166,10 @@
   line-height: 1.7;
 }
 .blog-prose code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875em;
-  background-color: var(--color-surface-container-highest);
-  border: 1px solid var(--color-outline-variant);
+  background-color: var(--bit-ink-100);
+  border: 1px solid var(--bit-ink-200);
   border-radius: 0.25rem;
   padding: 0.15em 0.4em;
 }
@@ -170,16 +186,16 @@
   font-size: 0.9rem;
 }
 .blog-prose th {
-  background-color: var(--color-surface-container-high);
+  background-color: var(--bit-ink-100);
   font-weight: 600;
   text-align: left;
   padding: 0.6rem 1rem;
-  border: 1px solid var(--color-outline-variant);
+  border: 1px solid var(--bit-ink-200);
 }
 .blog-prose td {
   padding: 0.6rem 1rem;
-  border: 1px solid var(--color-outline-variant);
+  border: 1px solid var(--bit-ink-200);
 }
 .blog-prose tr:nth-child(even) td {
-  background-color: var(--color-surface-container-lowest);
+  background-color: #ffffff;
 }

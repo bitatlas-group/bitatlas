@@ -2,12 +2,16 @@
 
 import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
 import { useFolders } from '@/contexts/FolderContext';
 import { authApi } from '@/lib/api';
+import { BitatlasLogo } from '@/design-system/logo/BitatlasLogo';
+import {
+  LayoutGrid, Settings, FolderPlus, Home, Folder as FolderIcon,
+  LogOut, Menu, X, ShieldCheck,
+} from 'lucide-react';
 
 function VaultLayoutInner({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -28,8 +32,6 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close sidebar on navigation — intentional setState in effect
-  // responding to route changes (external system)
   const closeSidebar = pathname + (selectedFolderId ?? '');
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to route param change
@@ -61,49 +63,37 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   const navItems = [
-    { href: '/vault', icon: 'grid_view', label: 'My Vault' },
-    { href: '/vault/settings', icon: 'settings', label: 'Settings' },
+    { href: '/vault',          Icon: LayoutGrid, label: 'My Vault' },
+    { href: '/vault/settings', Icon: Settings,   label: 'Settings' },
   ];
 
   return (
-    <div className="flex h-screen bg-surface overflow-hidden">
+    <div className="flex h-screen bg-ink-50 overflow-hidden">
+
       {/* ── Mobile header ── */}
-      <div
-        className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4"
-        style={{ height: '56px', backgroundColor: '#F3F1EE', borderBottom: '1px solid #E5E7EB' }}
-      >
+      <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 h-14 bg-white border-b border-ink-100">
         <button
           onClick={() => setSidebarOpen(true)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+          className="text-ink-500 hover:text-ink-900 transition-colors p-1"
         >
-          <span className="material-symbols-outlined" style={{ fontSize: '24px', color: '#1A2332' }}>
-            menu
-          </span>
+          <Menu size={22} />
         </button>
-        <Link href="/" className="flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-primary" style={{ fontSize: '22px' }}>
-            shield_lock
-          </span>
-          <span className="font-headline font-bold text-on-surface text-base tracking-tight">
-            bitatlas
-          </span>
+        <Link href="/" className="flex items-center">
+          <BitatlasLogo size={22} color="#2563EB" wordColor="#081220" />
         </Link>
-        <div style={{ width: '32px' }} /> {/* Spacer for centering */}
+        <div className="w-8" />
       </div>
 
       {/* ── Mobile sidebar backdrop ── */}
       {sidebarOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-30 bg-black/30"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="md:hidden fixed inset-0 z-30 bg-black/30" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* ── Sidebar ── */}
       <aside
         className={`
           fixed md:relative z-40 md:z-auto
-          w-64 md:w-60 flex-shrink-0 bg-surface-container-low flex flex-col h-full
+          w-60 flex-shrink-0 bg-ink-900 flex flex-col h-full
           transition-transform duration-200 ease-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
@@ -111,45 +101,31 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
         {/* Logo + close (mobile) */}
         <div className="px-5 py-5 flex items-center justify-between">
           <Link href="/">
-            <Image
-              src="/logo-full.jpg"
-              alt="BitAtlas"
-              width={200}
-              height={55}
-              className="h-10 w-auto object-contain"
-            />
+            <BitatlasLogo size={24} color="#3B82F6" wordColor="#FFFFFF" />
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="md:hidden"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+            className="md:hidden text-ink-400 hover:text-white transition-colors p-1"
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '22px', color: '#6B7280' }}>
-              close
-            </span>
+            <X size={20} />
           </button>
         </div>
 
         {/* Nav items */}
         <nav className="px-3 flex flex-col gap-0.5">
-          {navItems.map(({ href, icon, label }) => {
+          {navItems.map(({ href, Icon, label }) => {
             const active = pathname === href;
             return (
               <Link
                 key={href}
                 href={href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm font-headline font-semibold ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-[14px] font-medium ${
                   active
-                    ? 'bg-primary text-on-primary'
-                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                    ? 'bg-brand-500 text-white'
+                    : 'text-ink-400 hover:bg-ink-800 hover:text-white'
                 }`}
               >
-                <span
-                  className="material-symbols-outlined"
-                  style={{ fontSize: '20px', fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }}
-                >
-                  {icon}
-                </span>
+                <Icon size={18} />
                 {label}
               </Link>
             );
@@ -159,15 +135,15 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
         {/* Folders section */}
         <div className="px-3 mt-6 flex-1 overflow-y-auto">
           <div className="flex items-center justify-between px-3 mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-ink-600">
               Folders
             </span>
             <button
               onClick={() => setCreatingFolder(true)}
-              className="text-on-surface-variant hover:text-primary transition-colors"
+              className="text-ink-500 hover:text-white transition-colors"
               title="New folder"
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
+              <FolderPlus size={16} />
             </button>
           </div>
 
@@ -180,29 +156,26 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
                 onChange={(e) => setNewFolderName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleCreateFolder();
-                  if (e.key === 'Escape') {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
+                  if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
                 }}
                 onBlur={() => {
                   if (!newFolderName.trim()) setCreatingFolder(false);
                 }}
                 placeholder="Folder name"
-                className="w-full bg-surface-container-highest rounded-lg px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-[13px] text-white placeholder:text-ink-500 outline-none focus:ring-2 focus:ring-brand-500/30"
               />
             </div>
           )}
 
           <Link
             href="/vault"
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all ${
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] transition-all ${
               pathname === '/vault' && !selectedFolderId
-                ? 'bg-surface-container text-on-surface font-semibold'
-                : 'text-on-surface-variant hover:bg-surface-container/60'
+                ? 'bg-ink-800 text-white font-semibold'
+                : 'text-ink-500 hover:bg-ink-800/60 hover:text-ink-200'
             }`}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>home</span>
+            <Home size={14} />
             All files
           </Link>
 
@@ -210,32 +183,33 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
             <Link
               key={folder.id}
               href={`/vault?folderId=${folder.id}`}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all ${
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] transition-all ${
                 selectedFolderId === folder.id
-                  ? 'bg-surface-container text-on-surface font-semibold'
-                  : 'text-on-surface-variant hover:bg-surface-container/60'
+                  ? 'bg-ink-800 text-white font-semibold'
+                  : 'text-ink-500 hover:bg-ink-800/60 hover:text-ink-200'
               }`}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder</span>
+              <FolderIcon size={14} />
               <span className="truncate">{folder.name}</span>
             </Link>
           ))}
         </div>
 
         {/* Bottom: user + logout */}
-        <div className="px-4 py-4 mt-auto">
-          <div className="bg-surface-container rounded-2xl px-3 py-3">
-            <p className="text-xs font-headline font-semibold text-on-surface truncate">
-              {user.email}
-            </p>
-            <button
-              onClick={handleLogout}
-              className="mt-2 flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-error transition-colors"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>logout</span>
-              Sign out
-            </button>
+        <div className="px-4 py-4 mt-auto border-t border-ink-800">
+          <div className="flex items-center gap-2 mb-2.5">
+            <div className="w-7 h-7 rounded-full bg-brand-500/20 flex items-center justify-center shrink-0">
+              <ShieldCheck size={14} className="text-brand-400" />
+            </div>
+            <p className="text-[13px] font-medium text-ink-200 truncate">{user.email}</p>
           </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-[12px] text-ink-500 hover:text-red-400 transition-colors"
+          >
+            <LogOut size={13} />
+            Sign out
+          </button>
         </div>
       </aside>
 

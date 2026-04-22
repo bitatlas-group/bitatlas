@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { keysApi, type ApiKeyRecord } from '@/lib/api';
+import { Loader2, AlertCircle, X, Key, Plus, ShieldCheck, Trash2, Copy, Check } from 'lucide-react';
+import { Button } from '@/design-system/components/Button';
+import { Input } from '@/design-system/components/Input';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -65,64 +68,42 @@ export default function SettingsPage() {
   }
 
   function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
+    return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
   return (
-    <div className="px-8 py-8 max-w-3xl">
-      <h1 className="font-headline font-extrabold text-2xl text-primary tracking-tight mb-8">
-        Settings
-      </h1>
+    <div className="px-6 py-8 max-w-3xl">
+      <h1 className="text-[28px] font-semibold text-ink-900 tracking-tight mb-8">Settings</h1>
 
       {/* Error banner */}
       {error && (
-        <div className="mb-6 bg-error-container text-on-error-container text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-          <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-            error
-          </span>
-          {error}
-          <button onClick={() => setError(null)} className="ml-auto hover:opacity-70">
-            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
+        <div className="mb-6 flex items-center gap-2 bg-red-50 border border-red-100 text-red-700 text-[13px] px-4 py-3 rounded-xl">
+          <AlertCircle size={14} className="shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 transition-colors">
+            <X size={16} />
           </button>
         </div>
       )}
 
       {/* Account section */}
       <section className="mb-10">
-        <h2 className="font-headline font-bold text-base text-on-surface-variant uppercase tracking-widest mb-4">
-          Account
-        </h2>
-        <div className="bg-surface-container-lowest rounded-2xl p-6">
+        <h2 className="text-[11px] font-semibold text-ink-400 uppercase tracking-[0.2em] mb-4">Account</h2>
+        <div className="bg-white border border-ink-100 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center flex-shrink-0">
-              <span
-                className="material-symbols-outlined text-on-primary"
-                style={{ fontSize: '22px', fontVariationSettings: "'FILL' 1" }}
-              >
-                person
-              </span>
+            <div className="w-11 h-11 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center shrink-0">
+              <ShieldCheck size={20} className="text-brand-500" />
             </div>
             <div>
-              <p className="font-headline font-semibold text-on-surface">{user?.email}</p>
-              <p className="text-xs text-on-surface-variant mt-0.5">
+              <p className="font-medium text-ink-900">{user?.email}</p>
+              <p className="text-[12px] text-ink-400 mt-0.5">
                 Member since {user?.createdAt ? formatDate(user.createdAt) : '—'}
               </p>
             </div>
           </div>
-
-          {/* Encryption status */}
-          <div className="mt-4 flex items-center gap-2 bg-tertiary-container px-3 py-2 rounded-xl">
-            <span
-              className="material-symbols-outlined text-tertiary-fixed-dim"
-              style={{ fontSize: '16px', fontVariationSettings: "'FILL' 1" }}
-            >
-              shield_lock
-            </span>
-            <span className="text-xs font-bold text-tertiary-fixed-dim">
+          <div className="mt-4 flex items-center gap-2 bg-brand-50 border border-brand-100 px-3 py-2 rounded-xl">
+            <ShieldCheck size={13} className="text-brand-500 shrink-0" />
+            <span className="text-[12px] font-semibold text-brand-600">
               Zero-knowledge encryption active — AES-256-GCM
             </span>
           </div>
@@ -131,50 +112,40 @@ export default function SettingsPage() {
 
       {/* API Keys section */}
       <section>
-        <h2 className="font-headline font-bold text-base text-on-surface-variant uppercase tracking-widest mb-4">
-          API Keys
-        </h2>
-        <p className="text-sm text-on-surface-variant mb-6">
-          Use API keys to give agents and integrations access to your vault. Keys are shown only
-          once — copy and store them securely.
+        <h2 className="text-[11px] font-semibold text-ink-400 uppercase tracking-[0.2em] mb-4">API Keys</h2>
+        <p className="text-[14px] text-ink-500 mb-6">
+          Use API keys to give agents and integrations access to your vault. Keys are shown only once — copy and store them securely.
         </p>
 
         {/* One-time display of newly created key */}
         {createdKey && (
-          <div className="mb-6 bg-tertiary-container rounded-2xl p-5">
+          <div className="mb-6 bg-brand-50 border border-brand-100 rounded-2xl p-5">
             <div className="flex items-start gap-3 mb-3">
-              <span
-                className="material-symbols-outlined text-tertiary-fixed-dim flex-shrink-0"
-                style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}
-              >
-                key
-              </span>
+              <Key size={16} className="text-brand-500 shrink-0 mt-0.5" />
               <div>
-                <p className="font-headline font-bold text-tertiary-fixed-dim text-sm">
+                <p className="font-semibold text-brand-600 text-[14px]">
                   {createdKey.name} — copy now, won&apos;t be shown again
                 </p>
-                <p className="text-xs text-on-tertiary-container mt-0.5">
-                  Store this in your agent&apos;s environment as BITATLAS_API_KEY
+                <p className="text-[12px] text-brand-500 mt-0.5">
+                  Store this in your agent&apos;s environment as <code className="font-mono">BITATLAS_API_KEY</code>
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <code className="flex-1 bg-tertiary/20 text-tertiary-fixed text-xs font-mono px-3 py-2 rounded-xl break-all">
+              <code className="flex-1 bg-white border border-brand-100 text-ink-700 text-[12px] font-mono px-3 py-2 rounded-xl break-all">
                 {createdKey.apiKey}
               </code>
               <button
                 onClick={() => copyToClipboard(createdKey.apiKey)}
-                className="flex-shrink-0 flex items-center gap-1.5 bg-on-tertiary text-tertiary px-3 py-2 rounded-xl text-xs font-headline font-bold hover:opacity-90 transition-opacity"
+                className="shrink-0 flex items-center gap-1.5 bg-brand-500 text-white px-3 py-2 rounded-xl text-[12px] font-semibold hover:bg-brand-600 transition-colors"
               >
-                <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-                  {copied ? 'check' : 'content_copy'}
-                </span>
+                {copied ? <Check size={13} /> : <Copy size={13} />}
                 {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
             <button
               onClick={() => setCreatedKey(null)}
-              className="mt-3 text-xs text-on-tertiary-container hover:text-tertiary-fixed-dim transition-colors"
+              className="mt-3 text-[12px] text-brand-500 hover:text-brand-600 transition-colors"
             >
               I&apos;ve saved it — dismiss
             </button>
@@ -182,85 +153,59 @@ export default function SettingsPage() {
         )}
 
         {/* Create new key */}
-        <div className="bg-surface-container-lowest rounded-2xl p-5 mb-4">
-          <p className="font-headline font-semibold text-sm text-on-surface mb-3">
-            Create new API key
-          </p>
+        <div className="bg-white border border-ink-100 rounded-2xl p-5 mb-4 shadow-sm">
+          <p className="font-semibold text-[14px] text-ink-900 mb-3">Create new API key</p>
           <div className="flex items-center gap-3">
-            <input
+            <Input
               type="text"
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreateKey()}
               placeholder="e.g. Production Agent, Dev environment"
-              className="flex-1 bg-surface-container-highest rounded-xl px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+              className="flex-1"
             />
-            <button
+            <Button
               onClick={handleCreateKey}
               disabled={creating || !newKeyName.trim()}
-              className="flex items-center gap-2 bg-gradient-to-br from-primary to-primary-container text-on-primary px-4 py-2.5 rounded-xl font-headline font-semibold text-sm hover:brightness-110 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              variant="primary"
+              size="md"
+              iconLeft={creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             >
-              {creating ? (
-                <span className="material-symbols-outlined animate-spin" style={{ fontSize: '16px' }}>
-                  progress_activity
-                </span>
-              ) : (
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                  add
-                </span>
-              )}
               Generate
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Key list */}
         {loadingKeys ? (
-          <div className="flex items-center gap-2 py-4 text-on-surface-variant text-sm">
-            <span className="material-symbols-outlined animate-spin" style={{ fontSize: '18px' }}>
-              progress_activity
-            </span>
+          <div className="flex items-center gap-2 py-4 text-ink-500 text-[14px]">
+            <Loader2 size={16} className="animate-spin" />
             Loading keys…
           </div>
         ) : apiKeys.length === 0 ? (
-          <div className="py-8 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-2xl">
+          <div className="py-8 text-center text-[14px] text-ink-400 bg-white border border-ink-100 rounded-2xl shadow-sm">
             No API keys yet. Create one to connect your agents.
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             {apiKeys.map((key) => (
-              <div
-                key={key.id}
-                className="bg-surface-container-lowest rounded-2xl px-5 py-4 flex items-center gap-4"
-              >
-                <div className="w-9 h-9 rounded-xl bg-surface-container flex items-center justify-center flex-shrink-0">
-                  <span
-                    className="material-symbols-outlined text-on-surface-variant"
-                    style={{ fontSize: '18px' }}
-                  >
-                    vpn_key
-                  </span>
+              <div key={key.id} className="bg-white border border-ink-100 rounded-2xl px-5 py-4 flex items-center gap-4 shadow-sm">
+                <div className="w-9 h-9 rounded-xl bg-ink-50 flex items-center justify-center shrink-0">
+                  <Key size={16} className="text-ink-400" />
                 </div>
-
                 <div className="flex-1 min-w-0">
-                  <p className="font-headline font-semibold text-sm text-on-surface">
-                    {key.name}
-                  </p>
-                  <p className="text-xs text-on-surface-variant mt-0.5">
+                  <p className="font-semibold text-[14px] text-ink-900">{key.name}</p>
+                  <p className="text-[12px] text-ink-400 mt-0.5">
                     <code className="font-mono">{key.prefix}••••••••</code>
-                    {' · '}
-                    Created {formatDate(key.createdAt)}
+                    {' · '}Created {formatDate(key.createdAt)}
                     {key.lastUsedAt && ` · Last used ${formatDate(key.lastUsedAt)}`}
                   </p>
                 </div>
-
                 <button
                   onClick={() => handleDeleteKey(key.id)}
-                  className="flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-error transition-colors px-3 py-1.5 rounded-lg hover:bg-error-container/30"
+                  className="flex items-center gap-1.5 text-[12px] text-ink-400 hover:text-red-600 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-50"
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-                    delete
-                  </span>
+                  <Trash2 size={13} />
                   Revoke
                 </button>
               </div>

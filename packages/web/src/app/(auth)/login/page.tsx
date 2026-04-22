@@ -2,10 +2,14 @@
 
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
+import { BitatlasLogo } from '@/design-system/logo/BitatlasLogo';
+import { Button } from '@/design-system/components/Button';
+import { Input } from '@/design-system/components/Input';
+import { IconShield } from '@/design-system/icons';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,37 +41,26 @@ export default function LoginPage() {
       {/* Logo */}
       <div className="flex justify-center mb-10">
         <Link href="/">
-          <Image
-            src="/logo-full.jpg"
-            alt="BitAtlas"
-            width={280}
-            height={76}
-            className="h-16 w-auto object-contain"
-          />
+          <BitatlasLogo size={32} color="#3B82F6" wordColor="#FFFFFF" />
         </Link>
       </div>
 
       {/* Card */}
-      <div className="bg-surface-container-lowest rounded-3xl p-8 shadow-xl shadow-primary/5">
+      <div className="bg-white rounded-2xl p-8 shadow-lg border border-ink-100">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="font-headline font-extrabold text-2xl text-primary tracking-tight">
+        <div className="mb-6">
+          <h1 className="text-[24px] font-semibold text-ink-900 tracking-tight">
             Welcome back
           </h1>
-          <p className="text-on-surface-variant text-sm mt-1">
+          <p className="text-ink-500 text-[14px] mt-1">
             Sign in to access your encrypted vault
           </p>
         </div>
 
         {/* Encryption indicator */}
-        <div className="flex items-center gap-2 bg-tertiary-container px-3 py-2 rounded-xl mb-6">
-          <span
-            className="material-symbols-outlined text-tertiary-fixed-dim"
-            style={{ fontSize: '16px', fontVariationSettings: "'FILL' 1" }}
-          >
-            lock
-          </span>
-          <span className="text-xs font-bold text-tertiary-fixed-dim uppercase tracking-wider">
+        <div className="flex items-center gap-2 bg-brand-50 border border-brand-100 px-3 py-2 rounded-xl mb-6">
+          <IconShield size={14} className="text-brand-500 shrink-0" />
+          <span className="text-[11px] font-semibold text-brand-600 uppercase tracking-wider">
             End-to-end encrypted — we never see your key
           </span>
         </div>
@@ -75,70 +68,63 @@ export default function LoginPage() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-headline font-semibold text-on-surface-variant uppercase tracking-widest">
+            <label className="text-[11px] font-semibold text-ink-400 uppercase tracking-[0.16em]">
               Email
             </label>
-            <input
+            <Input
               type="email"
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="you@example.com"
-              className="w-full bg-surface-container-highest rounded-xl px-4 py-3 text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20 transition-all font-body text-sm"
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-headline font-semibold text-on-surface-variant uppercase tracking-widest">
+            <label className="text-[11px] font-semibold text-ink-400 uppercase tracking-[0.16em]">
               Password
             </label>
-            <input
+            <Input
               type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               placeholder="••••••••"
-              className="w-full bg-surface-container-highest rounded-xl px-4 py-3 text-on-surface placeholder:text-on-surface-variant/50 outline-none focus:ring-2 focus:ring-primary/20 transition-all font-body text-sm"
             />
           </div>
 
           {error && (
-            <div className="bg-error-container text-on-error-container text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                error
-              </span>
+            <div className="flex items-center gap-2 bg-red-50 text-red-700 text-[13px] px-4 py-3 rounded-xl border border-red-100">
+              <AlertCircle size={14} className="shrink-0" />
               {error}
             </div>
           )}
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="lg"
             disabled={loading}
-            className="mt-2 w-full bg-gradient-to-br from-primary to-primary-container text-on-primary py-3.5 rounded-xl font-headline font-bold text-sm tracking-tight hover:brightness-110 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="mt-2 w-full justify-center"
           >
             {loading ? (
               <>
-                <span className="material-symbols-outlined animate-spin" style={{ fontSize: '18px' }}>
-                  progress_activity
-                </span>
+                <Loader2 size={16} className="animate-spin" />
                 Deriving encryption key…
               </>
             ) : (
               'Sign In'
             )}
-          </button>
+          </Button>
         </form>
       </div>
 
       {/* Footer link */}
-      <p className="text-center text-sm text-on-surface-variant mt-6">
+      <p className="text-center text-[14px] text-ink-400 mt-6">
         Don&apos;t have an account?{' '}
-        <Link
-          href="/register"
-          className="text-primary font-headline font-semibold hover:underline underline-offset-4"
-        >
+        <Link href="/register" className="text-brand-400 font-medium hover:text-brand-500 transition-colors">
           Create one free
         </Link>
       </p>

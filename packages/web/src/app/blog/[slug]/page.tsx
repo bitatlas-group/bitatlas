@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
 import { MDXRemote } from 'next-mdx-remote/rsc';
 import remarkGfm from 'remark-gfm';
 import { getPostBySlug, getAllSlugs } from '@/lib/blog';
+import { BitatlasLogo } from '@/design-system/logo/BitatlasLogo';
+import { Button } from '@/design-system/components/Button';
+import { Badge } from '@/design-system/components/Badge';
+import { IconArrow } from '@/design-system/icons';
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -38,6 +41,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
+const NAV = [
+  { href: '/#features', label: 'Product' },
+  { href: '/#why',      label: 'Why BitAtlas' },
+  { href: '/blog',      label: 'Blog' },
+];
+
+const FOOTER_LINKS = [
+  { label: 'Security', href: '/security' },
+  { label: 'Blog',     href: '/blog' },
+  { label: 'GitHub',   href: 'https://github.com/bitatlas-group/bitatlas' },
+  { label: 'npm',      href: 'https://www.npmjs.com/package/@bitatlas/mcp-server' },
+  { label: 'Contact',  href: 'mailto:support@bitatlas.com' },
+];
+
 export default async function BlogPostPage({ params }: Props) {
   const { slug } = await params;
   const post = getPostBySlug(slug);
@@ -55,12 +72,12 @@ export default async function BlogPostPage({ params }: Props) {
       name: 'BitAtlas',
       url: 'https://bitatlas.com',
     },
-    mainEntityOfPage: `https://bitatlas.io/blog/${slug}`,
+    mainEntityOfPage: `https://bitatlas.com/blog/${slug}`,
     keywords: post.keywords.join(', '),
   };
 
   return (
-    <div className="bg-surface font-body text-on-surface min-h-screen">
+    <div className="bg-ink-25 text-ink-900 min-h-screen">
       {/* JSON-LD */}
       <script
         type="application/ld+json"
@@ -68,68 +85,43 @@ export default async function BlogPostPage({ params }: Props) {
       />
 
       {/* ── Navigation ── */}
-      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl">
+      <header className="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-xl border-b border-ink-100">
         <div className="flex justify-between items-center w-full px-6 py-4 max-w-7xl mx-auto">
-          <Link href="/" className="flex items-center">
-            <Image
-              src="/logo-full.jpg"
-              alt="BitAtlas — Secure Cloud for Humans & Agents"
-              width={240}
-              height={66}
-              className="h-12 w-auto object-contain"
-              priority
-            />
+          <Link href="/" aria-label="BitAtlas home">
+            <BitatlasLogo size={28} color="#2563EB" wordColor="#081220" />
           </Link>
-
-          <div className="hidden md:flex gap-8 items-center">
-            <Link href="/#features" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Product</Link>
-            <Link href="/#why" className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary transition-colors">Why BitAtlas</Link>
-            <Link
-              href="/blog"
-              className="font-headline font-medium text-sm tracking-tight text-primary transition-colors"
-            >
-              Blog
-            </Link>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <Link
-              href="/login"
-              className="font-headline font-medium text-sm tracking-tight text-on-surface-variant hover:text-primary px-4 py-2"
-            >
-              Log In
-            </Link>
-            <Link
-              href="/register"
-              className="bg-gradient-to-br from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-headline font-semibold text-sm tracking-tight hover:brightness-110 transition-all"
-            >
-              Sign Up
-            </Link>
+          <nav className="hidden md:flex gap-8 text-[14px] font-medium text-ink-500">
+            {NAV.map((n) => (
+              <Link key={n.href} href={n.href}
+                className={`hover:text-ink-900 transition-colors${n.href === '/blog' ? ' text-brand-500' : ''}`}>
+                {n.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="flex items-center gap-2.5">
+            <Link href="/login"><Button variant="ghost" size="sm">Log In</Button></Link>
+            <Link href="/register"><Button variant="primary" size="sm">Sign Up</Button></Link>
           </div>
         </div>
-        <div className="bg-slate-100/50 h-[1px] w-full absolute bottom-0" />
-      </nav>
+      </header>
 
-      <main className="pt-24">
+      <main className="pt-[72px]">
         <article className="max-w-3xl mx-auto px-6 py-12 md:py-16">
+
           {/* Back link */}
           <Link
             href="/blog"
-            className="inline-flex items-center gap-1.5 text-sm font-headline font-medium text-secondary hover:text-primary transition-colors mb-10"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-brand-500 hover:text-brand-600 transition-colors mb-10"
           >
-            <span className="material-symbols-outlined text-base leading-none">
-              arrow_back
-            </span>
+            <IconArrow size={14} className="rotate-180" />
             Back to blog
           </Link>
 
           {/* Meta */}
-          <div className="flex flex-wrap items-center gap-3 text-sm text-on-surface-variant/60 mb-5">
+          <div className="flex flex-wrap items-center gap-2.5 font-mono text-[12px] text-ink-400 mb-5">
             <time dateTime={post.date}>
               {new Date(post.date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
+                year: 'numeric', month: 'long', day: 'numeric',
               })}
             </time>
             <span>·</span>
@@ -138,26 +130,21 @@ export default async function BlogPostPage({ params }: Props) {
             <span>{post.author}</span>
           </div>
 
-          <h1 className="font-headline font-extrabold text-3xl md:text-4xl text-primary tracking-tight leading-tight">
+          <h1 className="text-[32px] md:text-[40px] font-semibold tracking-[-0.02em] text-ink-900 leading-tight">
             {post.title}
           </h1>
-          <p className="mt-4 text-lg text-on-surface-variant leading-relaxed">
+          <p className="mt-4 text-[17px] text-ink-500 leading-relaxed">
             {post.description}
           </p>
 
           {/* Keywords */}
-          <div className="mt-6 flex flex-wrap gap-2">
+          <div className="mt-5 flex flex-wrap gap-1.5">
             {post.keywords.map((kw) => (
-              <span
-                key={kw}
-                className="text-xs bg-surface-container-high text-on-surface-variant rounded-full px-3 py-1 font-medium border border-outline-variant/20"
-              >
-                {kw}
-              </span>
+              <Badge key={kw} tone="neutral">{kw}</Badge>
             ))}
           </div>
 
-          <div className="my-10 h-[1px] w-full bg-outline-variant/30" />
+          <div className="my-10 h-px w-full bg-ink-100" />
 
           {/* MDX Content */}
           <div className="blog-prose">
@@ -165,65 +152,49 @@ export default async function BlogPostPage({ params }: Props) {
           </div>
 
           {/* CTA */}
-          <div className="mt-16 bg-primary rounded-[2rem] p-8 md:p-10 text-center relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-primary-container rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2 opacity-50" />
-            <div className="absolute bottom-0 left-0 w-64 h-64 bg-secondary rounded-full blur-[80px] translate-y-1/2 -translate-x-1/2 opacity-20" />
-            <h2 className="relative z-10 font-headline font-extrabold text-2xl text-on-primary tracking-tight">
+          <div className="mt-16 bg-ink-900 rounded-2xl p-8 md:p-10 text-center">
+            <h2 className="text-[24px] font-semibold text-white tracking-tight">
               Encrypt your agent&apos;s data today
             </h2>
-            <p className="relative z-10 mt-3 text-on-primary-container max-w-md mx-auto">
+            <p className="mt-3 text-ink-400 max-w-md mx-auto text-[15px]">
               BitAtlas gives your AI agents AES-256-GCM encrypted storage with
               zero-knowledge guarantees. Free tier, no credit card required.
             </p>
-            <Link
-              href="/register"
-              className="relative z-10 mt-6 inline-flex items-center justify-center px-8 py-4 rounded-xl bg-on-primary text-primary font-headline font-bold text-lg hover:bg-primary-fixed transition-all"
-            >
-              Get Started Free
-            </Link>
+            <div className="mt-6">
+              <Link href="/register">
+                <Button variant="primary" size="lg">Get Started Free</Button>
+              </Link>
+            </div>
           </div>
+
         </article>
       </main>
 
       {/* ── Footer ── */}
-      <footer className="bg-slate-50 w-full">
-        <div className="h-[1px] w-full bg-slate-200" />
-        <div className="max-w-7xl mx-auto px-8 py-12 flex flex-col md:flex-row justify-between items-center gap-8">
-          <div className="flex flex-col items-center md:items-start gap-4">
-            <Link href="/">
-              <Image
-                src="/logo-full.jpg"
-                alt="BitAtlas"
-                width={200}
-                height={55}
-                className="h-10 w-auto object-contain"
-              />
-            </Link>
-            <p className="text-xs tracking-wide uppercase font-semibold text-slate-500">
-              © 2026 BitAtlas. Zero-Knowledge Cloud Storage.
-            </p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-8 items-center">
-            {[
-              { label: "Security", href: "/security" },
-              { label: "Blog", href: "/blog" },
-              { label: "GitHub", href: "https://github.com/bitatlas-group/bitatlas" },
-              { label: "npm", href: "https://www.npmjs.com/package/@bitatlas/mcp-server" },
-              { label: "Contact", href: "mailto:support@bitatlas.com" },
-            ].map((link) => (
+      <footer className="bg-ink-900 text-white px-6 md:px-16 pt-12 pb-8 border-t border-ink-800">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+          <Link href="/">
+            <BitatlasLogo size={24} color="#3B82F6" wordColor="#FFFFFF" />
+          </Link>
+          <div className="flex flex-wrap justify-center gap-6">
+            {FOOTER_LINKS.map((link) => (
               <a
                 key={link.label}
                 href={link.href}
-                target={link.href.startsWith("http") || link.href.startsWith("mailto") ? "_blank" : undefined}
-                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
-                className="text-xs tracking-wide uppercase font-semibold text-slate-500 hover:text-primary transition-colors underline decoration-blue-500/30 underline-offset-4"
+                target={link.href.startsWith('http') || link.href.startsWith('mailto') ? '_blank' : undefined}
+                rel={link.href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                className="text-[13px] font-medium text-ink-400 hover:text-white transition-colors"
               >
                 {link.label}
               </a>
             ))}
           </div>
         </div>
+        <div className="max-w-7xl mx-auto mt-8 pt-6 border-t border-ink-800 text-center font-mono text-[12px] text-ink-600">
+          © {new Date().getFullYear()} BitAtlas. Zero-Knowledge Cloud Storage.
+        </div>
       </footer>
+
     </div>
   );
 }
