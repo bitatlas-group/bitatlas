@@ -1,328 +1,105 @@
 {
-  "nextIndex": 19,
-  "product": "bitatlas",
-  "language": "en",
-  "repoUrl": "https://github.com/bitatlas-group/bitatlas.git",
-  "blogDir": "/tmp/bitatlas-check/packages/web/content/blog",
+  "nextIndex": 1,
   "topics": [
     {
-      "slug": "what-is-zero-knowledge-encryption",
-      "keywords": [
-        "zero knowledge encryption",
-        "client-side encryption",
-        "AES-256-GCM",
-        "end-to-end encryption cloud",
-        "zero knowledge cloud storage"
-      ],
-      "brief": "A developer-friendly explainer of zero-knowledge encryption. How BitAtlas encrypts files in your browser before upload using AES-256-GCM, PBKDF2 key derivation, and per-file random keys. Why the server literally cannot see your data."
+      "slug": "zero-knowledge-proof-authentication",
+      "keywords": ["zero knowledge proof", "authentication", "privacy", "cryptography"],
+      "brief": "How zero-knowledge proofs enable passwordless authentication without exposing user credentials to servers."
     },
     {
-      "slug": "why-ai-agents-need-encrypted-storage",
-      "keywords": [
-        "AI agent storage",
-        "MCP server encrypted",
-        "agent file management",
-        "AI agent security",
-        "autonomous agent data"
-      ],
-      "brief": "AI agents are reading and writing files on your behalf. But where do those files live? Why agents need a dedicated encrypted vault — not just a folder on your desktop. How BitAtlas's MCP server gives agents secure, scoped file access."
+      "slug": "mcp-protocol-ai-agents-collaboration",
+      "keywords": ["MCP", "AI agents", "protocol", "interoperability", "developer tools"],
+      "brief": "Understanding the Model Context Protocol and how it standardizes AI agent communication and tool integration."
     },
     {
-      "slug": "germany-deutschland-stack-open-standards",
-      "keywords": [
-        "Deutschland-Stack",
-        "ODF mandate Germany",
-        "digital sovereignty",
-        "open document format",
-        "vendor lock-in"
-      ],
-      "brief": "Germany mandated ODF and PDF/UA for all public administration. What this means for digital sovereignty, vendor lock-in, and why BitAtlas is built on the same principles of open, vendor-neutral infrastructure."
+      "slug": "eu-right-to-data-portability-encryption",
+      "keywords": ["GDPR", "data portability", "encryption", "EU regulation", "user rights"],
+      "brief": "Building data portability into encrypted systems: technical strategies for GDPR Article 20 compliance."
     },
     {
-      "slug": "dropbox-vs-zero-knowledge-cloud-storage",
-      "keywords": [
-        "Dropbox encryption",
-        "Dropbox zero knowledge",
-        "pCloud vs Tresorit",
-        "encrypted cloud storage comparison",
-        "zero knowledge Dropbox alternative"
-      ],
-      "brief": "Dropbox, Google Drive, and OneDrive can all read your files. A comparison of mainstream cloud storage vs zero-knowledge alternatives like BitAtlas, Tresorit, and pCloud Crypto. What 'encryption at rest' really means vs true zero-knowledge."
+      "slug": "homomorphic-encryption-practical-guide",
+      "keywords": ["homomorphic encryption", "computation", "encrypted data", "privacy-preserving"],
+      "brief": "Performing computations on encrypted data without decryption: applications and current limitations."
     },
     {
-      "slug": "building-mcp-server-encrypted-vault",
-      "keywords": [
-        "build MCP server",
-        "MCP server tutorial",
-        "Model Context Protocol",
-        "MCP encrypted storage",
-        "AI tool development"
-      ],
-      "brief": "A technical walkthrough of how we built the BitAtlas MCP server. 7 tools, client-side AES-256-GCM, presigned S3 uploads, and how any AI agent can interact with an encrypted vault via the Model Context Protocol."
+      "slug": "edge-decryption-vs-server-side-validation",
+      "keywords": ["edge computing", "decryption", "validation", "security", "performance"],
+      "brief": "Trade-offs between client-side decryption and server validation in zero-knowledge architectures."
     },
     {
-      "slug": "client-side-encryption-web-crypto-api",
-      "keywords": [
-        "Web Crypto API",
-        "client-side encryption JavaScript",
-        "AES-GCM browser",
-        "PBKDF2 key derivation",
-        "browser encryption tutorial"
-      ],
-      "brief": "A deep-dive into implementing client-side encryption using the Web Crypto API. How BitAtlas derives keys with PBKDF2, encrypts files with AES-256-GCM, and wraps per-file keys with the master key — all in the browser."
+      "slug": "secure-deletion-cryptographic-shredding",
+      "keywords": ["secure deletion", "cryptographic shredding", "data destruction", "compliance"],
+      "brief": "Going beyond TRIM: cryptographic shredding techniques for guaranteed data destruction in encrypted systems."
     },
     {
-      "slug": "eu-data-sovereignty-why-hosting-matters",
-      "keywords": [
-        "EU data sovereignty",
-        "GDPR hosting",
-        "European cloud providers",
-        "Hetzner vs AWS",
-        "CLOUD Act Europe"
-      ],
-      "brief": "Why hosting your data on European-owned infrastructure (not just an EU region of AWS) matters. The US CLOUD Act, GDPR, and why BitAtlas chose Hetzner over hyperscalers."
+      "slug": "agent-sandbox-isolation-techniques",
+      "keywords": ["AI agents", "sandboxing", "isolation", "security", "trusted execution"],
+      "brief": "Isolating untrusted AI agent code using WebAssembly, VMs, and kernel-level sandboxing."
     },
     {
-      "slug": "password-derived-keys-and-the-no-reset-tradeoff",
-      "keywords": [
-        "password derived encryption key",
-        "no password reset encryption",
-        "key derivation security",
-        "zero knowledge password",
-        "encryption key management"
-      ],
-      "brief": "The tradeoff every zero-knowledge service faces: if you lose your password, your data is gone. Why this is a feature, not a bug. How PBKDF2 key derivation works and why we refuse to add a 'reset password' backdoor."
+      "slug": "key-derivation-function-comparison-pbkdf2-argon2",
+      "keywords": ["key derivation", "PBKDF2", "Argon2", "password security", "cryptography"],
+      "brief": "Modern key derivation functions: choosing between PBKDF2, Argon2, and scrypt for password-based encryption."
     },
     {
-      "slug": "presigned-urls-zero-knowledge-file-upload",
-      "keywords": [
-        "presigned URL S3",
-        "MinIO presigned upload",
-        "zero knowledge file upload",
-        "direct S3 upload encryption",
-        "secure file upload architecture"
-      ],
-      "brief": "How BitAtlas uploads files without the server ever touching them. The presigned URL pattern: client encrypts → gets a signed URL → uploads directly to S3/MinIO. The server only stores metadata and encrypted keys."
+      "slug": "oauth-2-zero-knowledge-hybrid-auth",
+      "keywords": ["OAuth 2.0", "zero knowledge", "authentication", "hybrid", "identity"],
+      "brief": "Combining OAuth 2.0 with zero-knowledge proofs for privacy-preserving delegated access."
     },
     {
-      "slug": "ai-agent-api-keys-scoped-access",
-      "keywords": [
-        "API key management",
-        "agent authentication",
-        "scoped API access",
-        "MCP authentication",
-        "AI agent permissions"
-      ],
-      "brief": "How to give AI agents access to your vault without giving them your password. BitAtlas API keys, permission scoping, and why the agent needs a pre-derived master key (not your password) for encryption."
+      "slug": "temporal-access-control-encrypted-data",
+      "keywords": ["temporal access", "time-based access", "encryption", "authorization", "zero knowledge"],
+      "brief": "Implementing time-bound access tokens and expiring encryption keys for temporary data sharing."
     },
     {
-      "slug": "digital-legacy-meets-agentic-storage",
-      "keywords": [
-        "digital legacy AI",
-        "estate planning technology",
-        "AI agent estate access",
-        "encrypted vault legacy",
-        "digital inheritance automation"
-      ],
-      "brief": "The intersection of digital legacy planning and AI agent infrastructure. How LegacyShield uses BitAtlas as its storage layer, and why the future of estate planning is zero-knowledge + agent-accessible."
+      "slug": "audit-logging-without-plaintext-exposure",
+      "keywords": ["audit logging", "encryption", "compliance", "forensics", "privacy"],
+      "brief": "Creating tamper-proof audit logs that preserve user privacy while meeting compliance requirements."
     },
     {
-      "slug": "comparing-encryption-at-rest-vs-zero-knowledge",
-      "keywords": [
-        "encryption at rest vs zero knowledge",
-        "server-side encryption limitations",
-        "Google Drive encryption",
-        "true zero knowledge",
-        "encryption comparison"
-      ],
-      "brief": "Most cloud providers encrypt your data 'at rest' — but they hold the keys. That's like a hotel safe where the front desk has a master key. The difference between encryption at rest, in transit, and true zero-knowledge."
+      "slug": "mcp-server-authentication-patterns",
+      "keywords": ["MCP server", "authentication", "token management", "security patterns"],
+      "brief": "Best practices for securing MCP servers: API key rotation, rate limiting, and audit trails."
     },
     {
-      "slug": "self-hosting-encrypted-storage-with-minio",
-      "keywords": [
-        "self-hosted encrypted storage",
-        "MinIO encrypted vault",
-        "self-hosted S3 alternative",
-        "privacy-first cloud storage",
-        "home server encryption"
-      ],
-      "brief": "For the privacy maximalists: how to self-host your own BitAtlas-style encrypted storage using MinIO, Node.js, and the Web Crypto API. A practical guide to building your own zero-knowledge vault."
+      "slug": "client-side-validation-vs-server-trust",
+      "keywords": ["client-side validation", "server trust", "security", "zero knowledge", "cryptography"],
+      "brief": "Why client-side validation isn't security, and how zero-knowledge proofs change the game."
     },
     {
-      "slug": "gdpr-right-to-erasure-zero-knowledge",
-      "keywords": [
-        "GDPR right to erasure",
-        "data deletion encryption",
-        "zero knowledge GDPR compliance",
-        "encrypted data deletion",
-        "privacy by design"
-      ],
-      "brief": "How zero-knowledge encryption makes GDPR compliance simpler. When you delete your account, the encrypted blobs become permanently unreadable — because the key is gone. True erasure by design."
+      "slug": "eu-schrems-ii-safe-framework-encryption",
+      "keywords": ["Schrems II", "SAFE framework", "data transfers", "encryption", "EU regulation"],
+      "brief": "Post-Schrems II compliance through encryption: building US-safe cloud storage with end-to-end encryption."
     },
     {
-      "slug": "mcp-ecosystem-2026-state-of-agent-tools",
-      "keywords": [
-        "MCP ecosystem 2026",
-        "Model Context Protocol tools",
-        "AI agent tools landscape",
-        "MCP server directory",
-        "agent infrastructure"
-      ],
-      "brief": "The state of the MCP ecosystem in 2026. How many servers exist, what categories dominate, and where encrypted storage fits in. A survey of Smithery, Glama, awesome-mcp-servers, and the registries."
+      "slug": "quantum-resistant-encryption-lattice-based",
+      "keywords": ["post-quantum cryptography", "lattice-based", "quantum resistance", "future-proofing"],
+      "brief": "Preparing for quantum computers: lattice-based encryption and post-quantum cryptography standards."
     },
     {
-      "slug": "browser-side-large-file-encryption-strategies",
-      "keywords": [
-        "large file encryption browser",
-        "Web Crypto stream encryption",
-        "JavaScript file chunks",
-        "performance browser encryption",
-        "IndexedDB for encryption"
-      ],
-      "brief": "Encrypting a 5GB file in a browser tab is hard. We break down chunking strategies, readable streams, and using IndexedDB as a buffer to ensure smooth user experience without crashing the main thread."
+      "slug": "agent-context-window-memory-security",
+      "keywords": ["AI agents", "context window", "memory", "privacy", "inference"],
+      "brief": "Managing sensitive data in AI agent context windows: preventing unintended information leakage."
     },
     {
-      "slug": "hybrid-encryption-rsa-aes-key-wrapping",
-      "keywords": [
-        "hybrid encryption",
-        "RSA AES key wrap",
-        "public key infrastructure",
-        "asymmetric encryption",
-        "secure key exchange"
-      ],
-      "brief": "Beyond passwords: using RSA or Ed25519 for key wrapping. How BitAtlas allows for shared vaults by encrypting per-file AES keys with the recipient's public key."
+      "slug": "zero-knowledge-range-proofs-use-cases",
+      "keywords": ["range proofs", "zero knowledge", "privacy", "cryptography", "verification"],
+      "brief": "Using range proofs to prove numerical properties without revealing exact values."
     },
     {
-      "slug": "sharding-secrets-shamirs-secret-sharing-cloud",
-      "keywords": [
-        "Shamir's Secret Sharing",
-        "distributed key management",
-        "decentralized encryption",
-        "multi-sig storage",
-        "secret sharding"
-      ],
-      "brief": "What if you lose your master key? Exploring Shamir's Secret Sharing (SSS) to split your master key among trusted friends or multiple devices, ensuring recovery without a central authority."
+      "slug": "mcp-tool-discovery-agent-capability-negotiation",
+      "keywords": ["MCP tools", "discovery", "capability negotiation", "agent coordination"],
+      "brief": "Dynamic tool discovery in MCP: how agents negotiate capabilities and find compatible integrations."
     },
     {
-      "slug": "post-quantum-cryptography-on-the-web",
-      "keywords": [
-        "post-quantum cryptography JS",
-        "lattice-based encryption browser",
-        "Kyber Web Crypto",
-        "quantum resistant cloud",
-        "future-proofing encryption"
-      ],
-      "brief": "Is your data safe from future quantum computers? A look at NIST's post-quantum standards (Kyber, Dilithium) and how they can be implemented in the browser today to protect against 'harvest now, decrypt later' attacks."
+      "slug": "secrets-management-mcp-agents-rotation",
+      "keywords": ["secrets management", "credential rotation", "MCP agents", "security operations"],
+      "brief": "Automated secrets rotation for AI agents: integrating secret managers with MCP workflows."
     },
     {
-      "slug": "verifiable-computing-and-encrypted-storage",
-      "keywords": [
-        "verifiable computing",
-        "zero knowledge proofs",
-        "ZKP storage",
-        "proof of storage",
-        "verifiable data integrity"
-      ],
-      "brief": "How Zero-Knowledge Proofs (ZKP) can be used to verify that a server is actually storing your data correctly without the server ever knowing what the data is. The intersection of BitAtlas and verifiable computing."
-    },
-    {
-      "slug": "data-residency-vs-data-sovereignty",
-      "keywords": [
-        "data residency vs sovereignty",
-        "geofencing data",
-        "legal data protection",
-        "sovereign cloud EU",
-        "GDPR compliance"
-      ],
-      "brief": "Data residency is where it sits; data sovereignty is who has jurisdiction. Why BitAtlas prioritizes both by using EU-owned infrastructure and client-side encryption to remove jurisdictional risk."
-    },
-    {
-      "slug": "building-secure-enclaves-for-ai-agents",
-      "keywords": [
-        "TEE for AI agents",
-        "trusted execution environments",
-        "Intel SGX cloud",
-        "AWS Nitro Enclaves agent",
-        "secure agent computing"
-      ],
-      "brief": "Using Trusted Execution Environments (TEEs) like Intel SGX or AWS Nitro Enclaves to run AI agents that process BitAtlas data without the host provider being able to peek inside the RAM."
-    },
-    {
-      "slug": "mcp-server-security-best-practices",
-      "keywords": [
-        "MCP security",
-        "model context protocol safety",
-        "agent tool security",
-        "MCP auth patterns",
-        "secure agent integration"
-      ],
-      "brief": "A checklist for MCP server developers: how to handle API keys, how to scope tool permissions, and why you should never pass raw user credentials through an LLM."
-    },
-    {
-      "slug": "encrypted-collaborative-editing-no-server-access",
-      "keywords": [
-        "encrypted CRDT",
-        "zero knowledge collaboration",
-        "Yjs encryption",
-        "Automerge secure",
-        "real-time encrypted docs"
-      ],
-      "brief": "Can you have Google Docs-style collaboration with zero-knowledge encryption? Exploring CRDTs (Conflict-free Replicated Data Types) like Yjs and Automerge with client-side encryption for secure team work."
-    },
-    {
-      "slug": "ephemeral-vaults-self-destructing-data",
-      "keywords": [
-        "self-destructing files",
-        "ephemeral storage",
-        "time-based encryption",
-        "secure file sharing",
-        "burn-after-reading storage"
-      ],
-      "brief": "Implementing 'burn-after-reading' logic in BitAtlas. How we can use time-limited presigned URLs and client-side key deletion to create vaults that literally disappear."
-    },
-    {
-      "slug": "auditing-open-source-encryption-tools",
-      "keywords": [
-        "encryption audit",
-        "security audit guide",
-        "open source security",
-        "cryptography verification",
-        "auditing BitAtlas"
-      ],
-      "brief": "How do you know BitAtlas is actually doing what it says? A guide for security researchers to audit our open-source client-side code and verify the encryption implementation."
-    },
-    {
-      "slug": "the-rise-of-the-sovereign-developer",
-      "keywords": [
-        "sovereign developer",
-        "decentralized dev tools",
-        "local-first development",
-        "independent infrastructure",
-        "developer autonomy"
-      ],
-      "brief": "The trend towards developers owning their entire stack — from hardware to encryption. How tools like BitAtlas, Nix, and Tailscale are enabling a new era of infrastructure independence."
-    },
-    {
-      "slug": "immutable-backups-vs-ransomware",
-      "keywords": [
-        "ransomware protection",
-        "immutable storage",
-        "S3 object lock",
-        "zero knowledge ransomware",
-        "secure backup strategy"
-      ],
-      "brief": "Using S3 Object Lock and zero-knowledge encryption to create a backup strategy that is immune to ransomware. Even if your master key is stolen, the attacker can't delete your old versions."
-    },
-    {
-      "slug": "decoupling-identity-from-data-ownership",
-      "keywords": [
-        "decentralized identity",
-        "DID encryption",
-        "identity-less storage",
-        "anonymous cloud storage",
-        "privacy-first identity"
-      ],
-      "brief": "Why BitAtlas doesn't need to know who you are to store your data. Exploring decentralized identifiers (DIDs) and how we can decouple your identity from your encrypted blobs."
+      "slug": "european-sovereign-cloud-architecture",
+      "keywords": ["sovereign cloud", "Europe", "data residency", "infrastructure", "GDPR"],
+      "brief": "Building European-first cloud infrastructure: data centers, regulations, and technical implementation."
     }
   ]
 }
