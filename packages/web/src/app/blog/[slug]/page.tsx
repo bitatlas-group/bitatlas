@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { MDXRemote } from 'next-mdx-remote/rsc';
+import remarkGfm from 'remark-gfm';
 import { getPostBySlug, getAllSlugs } from '@/lib/blog';
 
 interface Props {
@@ -160,7 +161,7 @@ export default async function BlogPostPage({ params }: Props) {
 
           {/* MDX Content */}
           <div className="blog-prose">
-            <MDXRemote source={post.content} />
+            <MDXRemote source={post.content} options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }} />
           </div>
 
           {/* CTA */}

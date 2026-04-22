@@ -163,3 +163,23 @@
   padding: 0;
   font-size: inherit;
 }
+.blog-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+}
+.blog-prose th {
+  background-color: var(--color-surface-container-high);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--color-outline-variant);
+}
+.blog-prose td {
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--color-outline-variant);
+}
+.blog-prose tr:nth-child(even) td {
+  background-color: var(--color-surface-container-lowest);
+}
