@@ -2,104 +2,79 @@
   "nextIndex": 1,
   "topics": [
     {
-      "slug": "zero-knowledge-proof-authentication",
-      "keywords": ["zero knowledge proof", "authentication", "privacy", "cryptography"],
-      "brief": "How zero-knowledge proofs enable passwordless authentication without exposing user credentials to servers."
+      "slug": "zero-knowledge-encryption-fundamentals",
+      "keywords": ["zero-knowledge encryption", "ZKE", "cryptography", "privacy", "client-side encryption"],
+      "brief": "Deep dive into ZKE principles and applications for modern web apps"
     },
     {
-      "slug": "mcp-protocol-ai-agents-collaboration",
-      "keywords": ["MCP", "AI agents", "protocol", "interoperability", "developer tools"],
-      "brief": "Understanding the Model Context Protocol and how it standardizes AI agent communication and tool integration."
+      "slug": "mcp-servers-enterprise-automation",
+      "keywords": ["MCP servers", "model context protocol", "automation", "enterprise", "LLM integration"],
+      "brief": "How MCP servers enable seamless enterprise integration with AI models"
     },
     {
-      "slug": "eu-right-to-data-portability-encryption",
-      "keywords": ["GDPR", "data portability", "encryption", "EU regulation", "user rights"],
-      "brief": "Building data portability into encrypted systems: technical strategies for GDPR Article 20 compliance."
+      "slug": "eu-data-sovereignty-compliance-guide",
+      "keywords": ["EU data sovereignty", "GDPR", "data residency", "compliance", "cloud storage"],
+      "brief": "Building compliant applications for the European market"
     },
     {
-      "slug": "homomorphic-encryption-practical-guide",
-      "keywords": ["homomorphic encryption", "computation", "encrypted data", "privacy-preserving"],
-      "brief": "Performing computations on encrypted data without decryption: applications and current limitations."
+      "slug": "ai-agent-infrastructure-patterns",
+      "keywords": ["AI agents", "agent infrastructure", "distributed systems", "orchestration", "reliability"],
+      "brief": "Architectural patterns for resilient AI agent deployments"
     },
     {
-      "slug": "edge-decryption-vs-server-side-validation",
-      "keywords": ["edge computing", "decryption", "validation", "security", "performance"],
-      "brief": "Trade-offs between client-side decryption and server validation in zero-knowledge architectures."
+      "slug": "end-to-end-encryption-web-applications",
+      "keywords": ["end-to-end encryption", "E2EE", "web security", "TLS", "application-level encryption"],
+      "brief": "Implementing E2EE in modern JavaScript/TypeScript applications"
     },
     {
-      "slug": "secure-deletion-cryptographic-shredding",
-      "keywords": ["secure deletion", "cryptographic shredding", "data destruction", "compliance"],
-      "brief": "Going beyond TRIM: cryptographic shredding techniques for guaranteed data destruction in encrypted systems."
+      "slug": "mcp-protocol-custom-tools",
+      "keywords": ["MCP protocol", "custom tools", "developer tools", "tooling", "integration"],
+      "brief": "Building custom MCP tools for specialized workflows"
     },
     {
-      "slug": "agent-sandbox-isolation-techniques",
-      "keywords": ["AI agents", "sandboxing", "isolation", "security", "trusted execution"],
-      "brief": "Isolating untrusted AI agent code using WebAssembly, VMs, and kernel-level sandboxing."
+      "slug": "client-side-encryption-performance",
+      "keywords": ["client-side encryption", "performance optimization", "crypto", "benchmarking"],
+      "brief": "Optimizing encryption without sacrificing user experience"
     },
     {
-      "slug": "key-derivation-function-comparison-pbkdf2-argon2",
-      "keywords": ["key derivation", "PBKDF2", "Argon2", "password security", "cryptography"],
-      "brief": "Modern key derivation functions: choosing between PBKDF2, Argon2, and scrypt for password-based encryption."
+      "slug": "zero-knowledge-proofs-authentication",
+      "keywords": ["zero-knowledge proofs", "ZKP", "authentication", "privacy", "passwordless"],
+      "brief": "Using ZKPs for privacy-preserving authentication systems"
     },
     {
-      "slug": "oauth-2-zero-knowledge-hybrid-auth",
-      "keywords": ["OAuth 2.0", "zero knowledge", "authentication", "hybrid", "identity"],
-      "brief": "Combining OAuth 2.0 with zero-knowledge proofs for privacy-preserving delegated access."
+      "slug": "developer-tools-crypto-libraries",
+      "keywords": ["developer tools", "crypto libraries", "TweetNaCl", "libsodium", "cryptography"],
+      "brief": "Essential cryptography libraries and tools for developers"
     },
     {
-      "slug": "temporal-access-control-encrypted-data",
-      "keywords": ["temporal access", "time-based access", "encryption", "authorization", "zero knowledge"],
-      "brief": "Implementing time-bound access tokens and expiring encryption keys for temporary data sharing."
+      "slug": "ai-agent-monitoring-observability",
+      "keywords": ["AI agents", "monitoring", "observability", "logging", "tracing"],
+      "brief": "Comprehensive monitoring strategies for AI agent systems"
     },
     {
-      "slug": "audit-logging-without-plaintext-exposure",
-      "keywords": ["audit logging", "encryption", "compliance", "forensics", "privacy"],
-      "brief": "Creating tamper-proof audit logs that preserve user privacy while meeting compliance requirements."
+      "slug": "eu-gdpr-technical-implementation",
+      "keywords": ["GDPR", "technical implementation", "right to be forgotten", "data processing"],
+      "brief": "Technical approaches to GDPR compliance in applications"
     },
     {
-      "slug": "mcp-server-authentication-patterns",
-      "keywords": ["MCP server", "authentication", "token management", "security patterns"],
-      "brief": "Best practices for securing MCP servers: API key rotation, rate limiting, and audit trails."
+      "slug": "mcp-server-security-best-practices",
+      "keywords": ["MCP security", "server security", "authentication", "authorization", "threat model"],
+      "brief": "Security considerations when building and deploying MCP servers"
     },
     {
-      "slug": "client-side-validation-vs-server-trust",
-      "keywords": ["client-side validation", "server trust", "security", "zero knowledge", "cryptography"],
-      "brief": "Why client-side validation isn't security, and how zero-knowledge proofs change the game."
+      "slug": "distributed-agent-coordination",
+      "keywords": ["distributed agents", "coordination", "consensus", "message passing"],
+      "brief": "Patterns for coordinating multiple AI agents in distributed systems"
     },
     {
-      "slug": "eu-schrems-ii-safe-framework-encryption",
-      "keywords": ["Schrems II", "SAFE framework", "data transfers", "encryption", "EU regulation"],
-      "brief": "Post-Schrems II compliance through encryption: building US-safe cloud storage with end-to-end encryption."
+      "slug": "quantum-resistant-encryption-ready",
+      "keywords": ["quantum cryptography", "post-quantum", "lattice-based", "future-proof"],
+      "brief": "Preparing encryption strategies for the quantum computing era"
     },
     {
-      "slug": "quantum-resistant-encryption-lattice-based",
-      "keywords": ["post-quantum cryptography", "lattice-based", "quantum resistance", "future-proofing"],
-      "brief": "Preparing for quantum computers: lattice-based encryption and post-quantum cryptography standards."
-    },
-    {
-      "slug": "agent-context-window-memory-security",
-      "keywords": ["AI agents", "context window", "memory", "privacy", "inference"],
-      "brief": "Managing sensitive data in AI agent context windows: preventing unintended information leakage."
-    },
-    {
-      "slug": "zero-knowledge-range-proofs-use-cases",
-      "keywords": ["range proofs", "zero knowledge", "privacy", "cryptography", "verification"],
-      "brief": "Using range proofs to prove numerical properties without revealing exact values."
-    },
-    {
-      "slug": "mcp-tool-discovery-agent-capability-negotiation",
-      "keywords": ["MCP tools", "discovery", "capability negotiation", "agent coordination"],
-      "brief": "Dynamic tool discovery in MCP: how agents negotiate capabilities and find compatible integrations."
-    },
-    {
-      "slug": "secrets-management-mcp-agents-rotation",
-      "keywords": ["secrets management", "credential rotation", "MCP agents", "security operations"],
-      "brief": "Automated secrets rotation for AI agents: integrating secret managers with MCP workflows."
-    },
-    {
-      "slug": "european-sovereign-cloud-architecture",
-      "keywords": ["sovereign cloud", "Europe", "data residency", "infrastructure", "GDPR"],
-      "brief": "Building European-first cloud infrastructure: data centers, regulations, and technical implementation."
+      "slug": "serverless-mcp-agent-architecture",
+      "keywords": ["serverless", "MCP agents", "cloud functions", "event-driven", "scalability"],
+      "brief": "Building scalable MCP agent systems on serverless platforms"
     }
   ]
 }
