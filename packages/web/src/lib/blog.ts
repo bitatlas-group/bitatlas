@@ -4,6 +4,13 @@ import matter from 'gray-matter';
 
 const BLOG_DIR = path.join(process.cwd(), 'content', 'blog');
 
+function normalizeReadingTime(value: unknown): string {
+  if (!value) return '5 min read';
+  const s = String(value).trim();
+  if (/^\d+$/.test(s)) return `${s} min read`;
+  return s;
+}
+
 export interface BlogPost {
   slug: string;
   title: string;
@@ -35,7 +42,7 @@ export function getAllPosts(): BlogPost[] {
       date: data.date,
       author: data.author,
       keywords: data.keywords || [],
-      readingTime: data.readingTime || '5 min read',
+      readingTime: normalizeReadingTime(data.readingTime),
       content,
     });
   }
