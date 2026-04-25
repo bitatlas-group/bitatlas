@@ -1,79 +1,165 @@
 {
-  "nextIndex": 2,
+  "nextIndex": 3,
   "topics": [
     {
       "slug": "zero-knowledge-encryption-fundamentals",
-      "keywords": ["zero-knowledge encryption", "ZKE", "cryptography", "privacy", "client-side encryption"],
+      "keywords": [
+        "zero-knowledge encryption",
+        "ZKE",
+        "cryptography",
+        "privacy",
+        "client-side encryption"
+      ],
       "brief": "Deep dive into ZKE principles and applications for modern web apps"
     },
     {
       "slug": "mcp-servers-enterprise-automation",
-      "keywords": ["MCP servers", "model context protocol", "automation", "enterprise", "LLM integration"],
+      "keywords": [
+        "MCP servers",
+        "model context protocol",
+        "automation",
+        "enterprise",
+        "LLM integration"
+      ],
       "brief": "How MCP servers enable seamless enterprise integration with AI models"
     },
     {
       "slug": "eu-data-sovereignty-compliance-guide",
-      "keywords": ["EU data sovereignty", "GDPR", "data residency", "compliance", "cloud storage"],
+      "keywords": [
+        "EU data sovereignty",
+        "GDPR",
+        "data residency",
+        "compliance",
+        "cloud storage"
+      ],
       "brief": "Building compliant applications for the European market"
     },
     {
       "slug": "ai-agent-infrastructure-patterns",
-      "keywords": ["AI agents", "agent infrastructure", "distributed systems", "orchestration", "reliability"],
+      "keywords": [
+        "AI agents",
+        "agent infrastructure",
+        "distributed systems",
+        "orchestration",
+        "reliability"
+      ],
       "brief": "Architectural patterns for resilient AI agent deployments"
     },
     {
       "slug": "end-to-end-encryption-web-applications",
-      "keywords": ["end-to-end encryption", "E2EE", "web security", "TLS", "application-level encryption"],
+      "keywords": [
+        "end-to-end encryption",
+        "E2EE",
+        "web security",
+        "TLS",
+        "application-level encryption"
+      ],
       "brief": "Implementing E2EE in modern JavaScript/TypeScript applications"
     },
     {
       "slug": "mcp-protocol-custom-tools",
-      "keywords": ["MCP protocol", "custom tools", "developer tools", "tooling", "integration"],
+      "keywords": [
+        "MCP protocol",
+        "custom tools",
+        "developer tools",
+        "tooling",
+        "integration"
+      ],
       "brief": "Building custom MCP tools for specialized workflows"
     },
     {
       "slug": "client-side-encryption-performance",
-      "keywords": ["client-side encryption", "performance optimization", "crypto", "benchmarking"],
+      "keywords": [
+        "client-side encryption",
+        "performance optimization",
+        "crypto",
+        "benchmarking"
+      ],
       "brief": "Optimizing encryption without sacrificing user experience"
     },
     {
       "slug": "zero-knowledge-proofs-authentication",
-      "keywords": ["zero-knowledge proofs", "ZKP", "authentication", "privacy", "passwordless"],
+      "keywords": [
+        "zero-knowledge proofs",
+        "ZKP",
+        "authentication",
+        "privacy",
+        "passwordless"
+      ],
       "brief": "Using ZKPs for privacy-preserving authentication systems"
     },
     {
       "slug": "developer-tools-crypto-libraries",
-      "keywords": ["developer tools", "crypto libraries", "TweetNaCl", "libsodium", "cryptography"],
+      "keywords": [
+        "developer tools",
+        "crypto libraries",
+        "TweetNaCl",
+        "libsodium",
+        "cryptography"
+      ],
       "brief": "Essential cryptography libraries and tools for developers"
     },
     {
       "slug": "ai-agent-monitoring-observability",
-      "keywords": ["AI agents", "monitoring", "observability", "logging", "tracing"],
+      "keywords": [
+        "AI agents",
+        "monitoring",
+        "observability",
+        "logging",
+        "tracing"
+      ],
       "brief": "Comprehensive monitoring strategies for AI agent systems"
     },
     {
       "slug": "eu-gdpr-technical-implementation",
-      "keywords": ["GDPR", "technical implementation", "right to be forgotten", "data processing"],
+      "keywords": [
+        "GDPR",
+        "technical implementation",
+        "right to be forgotten",
+        "data processing"
+      ],
       "brief": "Technical approaches to GDPR compliance in applications"
     },
     {
       "slug": "mcp-server-security-best-practices",
-      "keywords": ["MCP security", "server security", "authentication", "authorization", "threat model"],
+      "keywords": [
+        "MCP security",
+        "server security",
+        "authentication",
+        "authorization",
+        "threat model"
+      ],
       "brief": "Security considerations when building and deploying MCP servers"
     },
     {
       "slug": "distributed-agent-coordination",
-      "keywords": ["distributed agents", "coordination", "consensus", "message passing"],
+      "keywords": [
+        "distributed agents",
+        "coordination",
+        "consensus",
+        "message passing"
+      ],
       "brief": "Patterns for coordinating multiple AI agents in distributed systems"
     },
     {
       "slug": "quantum-resistant-encryption-ready",
-      "keywords": ["quantum cryptography", "post-quantum", "lattice-based", "future-proof"],
+      "keywords": [
+        "quantum cryptography",
+        "post-quantum",
+        "lattice-based",
+        "future-proof"
+      ],
       "brief": "Preparing encryption strategies for the quantum computing era"
     },
     {
       "slug": "serverless-mcp-agent-architecture",
-      "keywords": ["serverless", "MCP agents", "cloud functions", "event-driven", "scalability"],
+      "keywords": [
+        "serverless",
+        "MCP agents",
+        "cloud functions",
+        "event-driven",
+        "scalability"
+      ],
       "brief": "Building scalable MCP agent systems on serverless platforms"
     }
   ]
