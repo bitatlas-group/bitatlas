@@ -9,12 +9,12 @@ import { useFolders } from '@/contexts/FolderContext';
 import { authApi } from '@/lib/api';
 import { BitatlasLogo } from '@/design-system/logo/BitatlasLogo';
 import {
-  LayoutGrid, Settings, FolderPlus, Home, Folder as FolderIcon,
+  Settings, FolderPlus, Home, Folder as FolderIcon,
   LogOut, Menu, X, ShieldCheck,
 } from 'lucide-react';
 
 function VaultLayoutInner({ children }: { children: ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user, bootstrapped, logout } = useAuth();
   const { clearMasterKey } = useCrypto();
   const { folders, createFolder } = useFolders();
   const router = useRouter();
@@ -27,10 +27,10 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (bootstrapped && !user) {
       router.replace('/login');
     }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, bootstrapped]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const closeSidebar = pathname + (selectedFolderId ?? '');
   useEffect(() => {
@@ -63,8 +63,7 @@ function VaultLayoutInner({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   const navItems = [
-    { href: '/vault',          Icon: LayoutGrid, label: 'My Vault' },
-    { href: '/vault/settings', Icon: Settings,   label: 'Settings' },
+    { href: '/vault/settings', Icon: Settings, label: 'Settings' },
   ];
 
   return (

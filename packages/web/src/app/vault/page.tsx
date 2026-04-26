@@ -246,38 +246,48 @@ function VaultContent() {
       </div>
 
       {/* Breadcrumb */}
-      <div className="px-4 mt-4 flex items-center gap-1.5 min-h-[28px]">
-        <Link href="/vault" className="flex items-center gap-1 text-[13px] no-underline">
-          <Home size={14} className={folderId ? 'text-ink-400' : 'text-ink-900'} />
-          <span className={folderId ? 'text-ink-400 font-medium' : 'text-ink-900 font-bold'}>My Vault</span>
-        </Link>
-        {currentFolder && (
+      <div className="px-4 mt-4 flex items-center gap-1.5 min-h-[44px]">
+        {currentFolder ? (
           <>
+            <Link
+              href="/vault"
+              className="flex items-center gap-1 text-[13px] no-underline text-ink-400 hover:text-ink-700 transition-colors py-2 -my-2"
+            >
+              <Home size={14} />
+              <span className="font-medium">All files</span>
+            </Link>
             <ChevronRight size={12} className="text-ink-200" />
-            <span className="text-[13px] font-bold text-ink-900">{currentFolder.name}</span>
+            <span className="text-[13px] font-bold text-ink-900 truncate">{currentFolder.name}</span>
           </>
+        ) : (
+          <div className="flex items-center gap-1 text-[13px]">
+            <Home size={14} className="text-ink-900" />
+            <span className="font-bold text-ink-900">All files</span>
+          </div>
         )}
       </div>
 
-      {/* Sort */}
-      <div className="px-4 mt-3 flex items-center gap-2">
-        <span className="text-[11px] font-semibold text-ink-500 uppercase tracking-[0.1em]">Sort</span>
-        {(['date', 'name', 'size'] as SortField[]).map(field => {
-          const active = sortField === field;
-          return (
-            <button
-              key={field}
-              onClick={() => handleSort(field)}
-              className={active
-                ? 'bg-white border border-ink-200 rounded-full px-3.5 py-1 text-[13px] font-semibold text-ink-900 cursor-pointer'
-                : 'bg-transparent border-none px-2 py-1 text-[13px] font-medium text-ink-400 cursor-pointer hover:text-ink-700 transition-colors'
-              }
-            >
-              {active ? `${field.charAt(0).toUpperCase() + field.slice(1)}${sortDir === 'desc' ? ' ↓' : ' ↑'}` : field.charAt(0).toUpperCase() + field.slice(1)}
-            </button>
-          );
-        })}
-      </div>
+      {/* Sort — hidden when empty so the empty state takes the focal point */}
+      {!(loading || (sortedFiles.length === 0 && visibleFolders.length === 0)) && (
+        <div className="px-4 mt-3 flex items-center gap-2">
+          <span className="text-[11px] font-semibold text-ink-500 uppercase tracking-[0.1em]">Sort</span>
+          {(['date', 'name', 'size'] as SortField[]).map(field => {
+            const active = sortField === field;
+            return (
+              <button
+                key={field}
+                onClick={() => handleSort(field)}
+                className={active
+                  ? 'bg-white border border-ink-200 rounded-full px-3.5 py-1 text-[13px] font-semibold text-ink-900 cursor-pointer'
+                  : 'bg-transparent border-none px-2 py-1 text-[13px] font-medium text-ink-400 cursor-pointer hover:text-ink-700 transition-colors'
+                }
+              >
+                {active ? `${field.charAt(0).toUpperCase() + field.slice(1)}${sortDir === 'desc' ? ' ↓' : ' ↑'}` : field.charAt(0).toUpperCase() + field.slice(1)}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Upload progress */}
       {uploading && uploadStatus && (
@@ -306,7 +316,14 @@ function VaultContent() {
             <p className="text-[14px] text-ink-400">Loading your vault…</p>
           </div>
         ) : sortedFiles.length === 0 && visibleFolders.length === 0 ? (
-          <EmptyState onUpload={() => fileInputRef.current?.click()} />
+          <EmptyState
+            inFolder={!!currentFolder}
+            onUpload={() => fileInputRef.current?.click()}
+            onCreateFolder={async (name) => {
+              const folder = await createFolderCtx(name, folderId ?? undefined);
+              return folder;
+            }}
+          />
         ) : (
           <>
             {visibleFolders.map(folder => (
@@ -351,7 +368,7 @@ function VaultContent() {
                 className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-ink-50 transition-colors disabled:opacity-40 text-[15px] text-ink-900"
               >
                 <Home size={18} className="text-ink-400" />
-                All files
+                All files <span className="text-[12px] text-ink-400">(root)</span>
                 {!moveTarget.folderId && <span className="text-[12px] text-ink-400 ml-auto">current</span>}
               </button>
               {folders.map(folder => {
@@ -583,25 +600,101 @@ function FileCard({
   );
 }
 
-function EmptyState({ onUpload }: { onUpload: () => void }) {
+function EmptyState({
+  inFolder,
+  onUpload,
+  onCreateFolder,
+}: {
+  inFolder: boolean;
+  onUpload: () => void;
+  onCreateFolder: (name: string) => Promise<unknown>;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    try {
+      await onCreateFolder(trimmed);
+      setName('');
+      setCreating(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center h-96 gap-6">
+    <div className="flex flex-col items-center justify-center h-96 gap-6 px-4">
       <div className="flex items-center justify-center w-24 h-24 rounded-3xl bg-ink-100">
         <ShieldCheck size={48} className="text-ink-300" />
       </div>
-      <div className="text-center max-w-[280px]">
-        <h3 className="font-semibold text-[20px] text-ink-900">Your vault is empty</h3>
+      <div className="text-center max-w-[320px]">
+        <h3 className="font-semibold text-[20px] text-ink-900">
+          {inFolder ? 'This folder is empty' : 'Your vault is empty'}
+        </h3>
         <p className="mt-2 text-[14px] text-ink-400 leading-relaxed">
-          Upload files to encrypt them client-side with AES-256-GCM before they ever reach our servers.
+          {inFolder
+            ? 'Upload files here, or move existing files into this folder. Everything is encrypted in your browser before it leaves your device.'
+            : 'Files and folders you create live here. Everything is encrypted in your browser before it ever reaches our servers.'}
         </p>
       </div>
-      <button
-        onClick={onUpload}
-        className="flex items-center gap-2 bg-ink-900 text-white px-6 py-3 rounded-xl font-semibold text-[14px] hover:bg-ink-800 transition-colors"
-      >
-        <UploadCloud size={16} />
-        Upload your first file
-      </button>
+
+      {creating ? (
+        <div className="w-full max-w-[320px] flex flex-col gap-2">
+          <input
+            autoFocus
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit();
+              if (e.key === 'Escape') { setCreating(false); setName(''); }
+            }}
+            placeholder="Folder name"
+            disabled={busy}
+            className="w-full h-12 bg-white rounded-xl px-4 text-[15px] text-ink-900 placeholder:text-ink-300 outline-none focus:ring-2 focus:ring-brand-500/20 border border-ink-100 transition-all"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setCreating(false); setName(''); }}
+              disabled={busy}
+              className="flex-1 flex items-center justify-center gap-2 bg-white text-ink-700 px-4 py-3 rounded-xl font-semibold text-[14px] border border-ink-100 hover:bg-ink-50 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={busy || !name.trim()}
+              className="flex-1 flex items-center justify-center gap-2 bg-ink-900 text-white px-4 py-3 rounded-xl font-semibold text-[14px] hover:bg-ink-800 transition-colors disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <FolderPlus size={16} />}
+              Create
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="w-full max-w-[420px] flex flex-col sm:flex-row gap-2">
+          <button
+            onClick={onUpload}
+            className="flex-1 flex items-center justify-center gap-2 bg-ink-900 text-white px-6 py-3 rounded-xl font-semibold text-[14px] hover:bg-ink-800 transition-colors order-1 sm:order-2"
+          >
+            <UploadCloud size={16} />
+            Upload a file
+          </button>
+          {!inFolder && (
+            <button
+              onClick={() => setCreating(true)}
+              className="flex-1 flex items-center justify-center gap-2 bg-white text-ink-900 px-6 py-3 rounded-xl font-semibold text-[14px] border border-ink-100 hover:bg-ink-50 transition-colors order-2 sm:order-1"
+            >
+              <FolderPlus size={16} />
+              New folder
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

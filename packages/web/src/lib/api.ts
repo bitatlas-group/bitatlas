@@ -1,10 +1,15 @@
 /**
  * BitAtlas API Client
  * Fetch wrapper with JWT auth, auto-refresh on 401, typed endpoints.
- * All tokens stored in module-level memory — never persisted.
+ *
+ * Refresh token + encryption salt persist to localStorage so a page reload
+ * doesn't log the user out. The master encryption key is intentionally NOT
+ * persisted — the user must re-enter their password to decrypt files.
  */
 
-// ── In-memory token storage ──────────────────────────────────────────────────
+const REFRESH_KEY = 'bitatlas.refreshToken';
+const SALT_KEY = 'bitatlas.encryptionSalt';
+
 let _accessToken: string | null = null;
 let _refreshToken: string | null = null;
 let _onUnauthorized: (() => void) | null = null;
@@ -12,14 +17,80 @@ let _isRefreshing = false;
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.bitatlas.com';
 
+function readPersistedRefresh(): string | null {
+  if (typeof window === 'undefined') return null;
+  try { return window.localStorage.getItem(REFRESH_KEY); } catch { return null; }
+}
+
+function writePersistedRefresh(token: string | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) window.localStorage.setItem(REFRESH_KEY, token);
+    else window.localStorage.removeItem(REFRESH_KEY);
+  } catch { /* ignore */ }
+}
+
+export function persistEncryptionSalt(salt: string) {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.setItem(SALT_KEY, salt); } catch { /* ignore */ }
+}
+
+export function readPersistedEncryptionSalt(): string | null {
+  if (typeof window === 'undefined') return null;
+  try { return window.localStorage.getItem(SALT_KEY); } catch { return null; }
+}
+
+export function clearPersistedEncryptionSalt() {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.removeItem(SALT_KEY); } catch { /* ignore */ }
+}
+
 export function setTokens(access: string, refresh: string) {
   _accessToken = access;
   _refreshToken = refresh;
+  writePersistedRefresh(refresh);
 }
 
 export function clearTokens() {
   _accessToken = null;
   _refreshToken = null;
+  writePersistedRefresh(null);
+  clearPersistedEncryptionSalt();
+}
+
+/**
+ * Attempt to restore an authenticated session from a persisted refresh token.
+ * Returns the rehydrated user (and a fresh access token in memory) on success,
+ * or null if no refresh token is stored or it's no longer valid.
+ */
+export async function restoreSession(): Promise<User | null> {
+  const refresh = readPersistedRefresh();
+  if (!refresh) return null;
+
+  try {
+    const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: refresh }),
+    });
+    if (!refreshRes.ok) {
+      writePersistedRefresh(null);
+      clearPersistedEncryptionSalt();
+      return null;
+    }
+    const data = await refreshRes.json();
+    setTokens(data.accessToken, data.refreshToken);
+    const meRes = await fetch(`${BASE_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${data.accessToken}` },
+    });
+    if (!meRes.ok) {
+      clearTokens();
+      return null;
+    }
+    return (await meRes.json()) as User;
+  } catch {
+    return null;
+  }
 }
 
 export function setUnauthorizedHandler(fn: () => void) {
