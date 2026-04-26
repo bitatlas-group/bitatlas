@@ -15,9 +15,9 @@ const NAV = [
 const PILLARS = [
   {
     icon: <IconShield size={24} />,
-    label: "ZERO KNOWLEDGE",
-    title: "Your keys, your data.",
-    body: "Files are encrypted in your browser before upload. The server stores ciphertext only. We cannot read, sell, or disclose your data — mathematically.",
+    label: "END-TO-END ENCRYPTED",
+    title: "Your keys, your file contents.",
+    body: "Files are encrypted in your browser with AES-256-GCM before upload — we only ever see ciphertext. Filenames, folders, sizes and tags are stored plaintext to power search; everything else stays sealed.",
   },
   {
     icon: <IconGlobe size={24} />,
@@ -99,7 +99,7 @@ export default function Home() {
               Encrypted cloud<br />for agents &amp; humans.
             </h1>
             <p className="mt-6 max-w-[520px] text-[18px] leading-relaxed text-ink-300">
-              AES-256-GCM client-side encryption. Zero-knowledge by design.
+              AES-256-GCM client-side encryption — file contents never leave your device unencrypted.
               Built for autonomous AI workflows and high-trust storage.
             </p>
             <div className="mt-9 flex flex-col sm:flex-row gap-3">
@@ -115,7 +115,7 @@ export default function Home() {
               </a>
             </div>
             <div className="mt-14 flex gap-9 font-mono text-[13px] text-ink-400">
-              <span>AES-256-GCM</span><span>·</span><span>Zero-knowledge</span><span>·</span><span>MCP-native</span>
+              <span>AES-256-GCM</span><span>·</span><span>End-to-end encrypted</span><span>·</span><span>MCP-native</span>
             </div>
           </div>
         </section>
@@ -328,7 +328,7 @@ export default function Home() {
           <div>
             <BitatlasLogo size={26} color="#3B82F6" wordColor="#FFFFFF" />
             <p className="mt-4 max-w-[280px] text-[14px] leading-relaxed text-ink-400">
-              Zero-knowledge AES-256-GCM encrypted storage for humans and AI agents.
+              End-to-end AES-256-GCM encrypted file storage for humans and AI agents.
             </p>
           </div>
           <div className="flex flex-wrap gap-8 items-start">
@@ -346,7 +346,7 @@ export default function Home() {
           </div>
         </div>
         <div className="max-w-7xl mx-auto mt-12 flex justify-between border-t border-ink-800 pt-6 font-mono text-[12px] text-ink-500">
-          <span>© {new Date().getFullYear()} BitAtlas. Zero-Knowledge Cloud Storage.</span>
+          <span>© {new Date().getFullYear()} BitAtlas. End-to-end encrypted cloud storage.</span>
           <span>bitatlas.com</span>
         </div>
       </footer>

@@ -104,7 +104,7 @@ export default function SettingsPage() {
           <div className="mt-4 flex items-center gap-2 bg-brand-50 border border-brand-100 px-3 py-2 rounded-xl">
             <ShieldCheck size={13} className="text-brand-500 shrink-0" />
             <span className="text-[12px] font-semibold text-brand-600">
-              Zero-knowledge encryption active — AES-256-GCM
+              End-to-end encrypted — AES-256-GCM, keys derived in your browser
             </span>
           </div>
         </div>
