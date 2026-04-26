@@ -62,6 +62,17 @@ const listFilesSchema = z.object({
 
 // GET /vault/files
 router.get('/files', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
+  // Anonymous x402 callers have no cross-request identity, so listing all
+  // userId:null files would leak every other paid caller's metadata.
+  // They must address files by id + access token.
+  if (isX402Paid(req)) {
+    res.status(400).json({
+      error: 'Listing is not supported for anonymous x402 access',
+      message: 'Use GET /vault/files/:id with the X-Access-Token returned at upload.',
+    });
+    return;
+  }
+
   const parsed = listFilesSchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
@@ -70,22 +81,13 @@ router.get('/files', requirePermission('read'), async (req: Request, res: Respon
 
   const { folderId, category, search, includeDeleted, limit, offset } = parsed.data;
 
-  // x402 anonymous: return all x402-anon files (all are E2E encrypted — no privacy concern)
-  const where = isX402Paid(req)
-    ? {
-        userId: null,
-        storageKey: { startsWith: 'x402-anon/' },
-        ...(category ? { category } : {}),
-        ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
-        deletedAt: includeDeleted === 'true' ? undefined : null,
-      }
-    : {
-        userId: req.user!.id,
-        ...(folderId !== undefined ? { folderId } : {}),
-        ...(category ? { category } : {}),
-        ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
-        deletedAt: includeDeleted === 'true' ? undefined : null,
-      };
+  const where = {
+    userId: req.user!.id,
+    ...(folderId !== undefined ? { folderId } : {}),
+    ...(category ? { category } : {}),
+    ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
+    deletedAt: includeDeleted === 'true' ? undefined : null,
+  };
 
   const [files, total] = await Promise.all([
     prisma.file.findMany({
@@ -395,8 +397,14 @@ router.patch('/files/:id', requirePermission('write'), async (req: Request, res:
 
   const { folderId, name } = parsed.data;
 
-  const where = isX402Paid(req)
-    ? { id: req.params.id, userId: null, deletedAt: null }
+  const x402 = isX402Paid(req);
+  if (x402 && !getAccessToken(req)) {
+    res.status(403).json({ error: 'X-Access-Token header required for anonymous file access' });
+    return;
+  }
+
+  const where = x402
+    ? { id: req.params.id, userId: null, accessToken: getAccessToken(req)!, deletedAt: null }
     : { id: req.params.id, userId: req.user!.id, deletedAt: null };
 
   const file = await prisma.file.findFirst({
