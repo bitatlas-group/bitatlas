@@ -19,7 +19,7 @@
       "environmentVariables": [
         {
           "name": "BITATLAS_API_KEY",
-          "description": "Your BitAtlas API key (starts with ba_). Generate one at https://bitatlas.com/dashboard/settings",
+          "description": "Your BitAtlas API key (starts with ba_). Generate one at https://bitatlas.com/vault/settings",
           "isRequired": true,
           "format": "string",
           "isSecret": true

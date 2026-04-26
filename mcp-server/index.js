@@ -22,7 +22,7 @@ const X402_WALLET_KEY = process.env.BITATLAS_WALLET_PRIVATE_KEY;
 if (!API_KEY && !X402_WALLET_KEY) {
   console.error('Warning: No BITATLAS_API_KEY or BITATLAS_WALLET_PRIVATE_KEY configured.');
   console.error('Vault tools will fail. Set one of:');
-  console.error('  BITATLAS_API_KEY  — get one at https://bitatlas.com/dashboard/settings');
+  console.error('  BITATLAS_API_KEY  — get one at https://bitatlas.com/vault/settings');
   console.error('  BITATLAS_WALLET_PRIVATE_KEY — EVM wallet key to pay per-request via x402');
 }
 
