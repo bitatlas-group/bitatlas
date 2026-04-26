@@ -190,7 +190,7 @@ export const keysApi = {
   },
 
   create: (name: string) =>
-    request<{ key: ApiKeyRecord; apiKey: string }>('/keys', {
+    request<ApiKeyRecord & { key: string }>('/keys', {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
@@ -253,7 +253,9 @@ export interface Folder {
 export interface ApiKeyRecord {
   id: string;
   name: string;
-  prefix: string;
+  keyPrefix: string;
+  permissions: string[];
+  expiresAt: string | null;
   createdAt: string;
-  lastUsedAt: string | null;
+  lastUsedAt?: string | null;
 }

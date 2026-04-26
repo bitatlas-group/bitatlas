@@ -39,9 +39,9 @@ export default function SettingsPage() {
     setCreating(true);
     setError(null);
     try {
-      const { key, apiKey } = await keysApi.create(newKeyName.trim());
-      setApiKeys((prev) => [key, ...prev]);
-      setCreatedKey({ name: key.name, apiKey });
+      const { key: rawKey, ...record } = await keysApi.create(newKeyName.trim());
+      setApiKeys((prev) => [record, ...prev]);
+      setCreatedKey({ name: record.name, apiKey: rawKey });
       setNewKeyName('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create API key');
@@ -196,7 +196,7 @@ export default function SettingsPage() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-[14px] text-ink-900">{key.name}</p>
                   <p className="text-[12px] text-ink-400 mt-0.5">
-                    <code className="font-mono">{key.prefix}••••••••</code>
+                    <code className="font-mono">{key.keyPrefix}••••••••</code>
                     {' · '}Created {formatDate(key.createdAt)}
                     {key.lastUsedAt && ` · Last used ${formatDate(key.lastUsedAt)}`}
                   </p>
