@@ -46,8 +46,9 @@ async function start() {
       logger.info('[DB] Connected');
     });
 
-    // Initialize x402 payment middleware
-    initX402Middleware();
+    // Initialize x402 payment middleware — must complete before serving traffic
+    // so anonymous paid access doesn't silently degrade to 401.
+    await initX402Middleware();
 
     // Start expired file cleanup scheduler (every 6 hours)
     startExpiryScheduler();
