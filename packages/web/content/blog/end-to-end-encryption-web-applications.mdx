@@ -1,0 +1,304 @@
+---
+title: "End-to-End Encryption in Web Applications: Beyond TLS"
+description: "A comprehensive guide to implementing application-level E2EE in modern web apps, covering encryption architectures, key management, and practical TypeScript examples."
+date: "2026-04-27"
+author: "Lobbi"
+slug: "end-to-end-encryption-web-applications"
+keywords: ["end-to-end encryption", "E2EE", "web security", "TLS", "application-level encryption"]
+readingTime: "10 min"
+---
+
+Transport-layer security (TLS) protects data in transit, but once it reaches your server, you own the decryption keys. End-to-end encryption (E2EE) shifts this responsibility to the application layer: data is encrypted before it leaves the client, and only the intended recipient holds the decryption key. This post explores how to implement E2EE in modern JavaScript/TypeScript applications.
+
+## Why E2EE in Web Applications?
+
+TLS creates an illusion of privacy: your data is encrypted during transmission, but the server has full visibility. For applications handling sensitive data—medical records, financial information, communications—this trust model is insufficient. E2EE ensures that even if your server is compromised or subpoenaed, encrypted data remains useless without the client's keys.
+
+Common use cases:
+- **Real-time messaging**: WhatsApp, Signal, Matrix
+- **Cloud storage**: Proton Drive, Tresorit, BitAtlas
+- **Healthcare applications**: HIPAA-compliant patient portals
+- **Legal/financial platforms**: Attorney-client communications, encrypted vaults
+
+## Architecture Patterns
+
+### Single-Recipient E2EE
+
+The simplest pattern: Alice encrypts with her own key, sends to Bob, who decrypts with his copy of the key (shared via secure channel).
+
+```typescript
+// Client-side encryption
+async function encryptForSelf(data: string, userKey: CryptoKey): Promise<EncryptedPayload> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoder = new TextEncoder();
+  
+  const encryptedData = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    userKey,
+    encoder.encode(data)
+  );
+  
+  return {
+    ciphertext: Buffer.from(encryptedData).toString('base64'),
+    iv: Buffer.from(iv).toString('base64'),
+    algorithm: 'AES-256-GCM'
+  };
+}
+
+// Server stores encrypted payload
+app.post('/api/notes', async (req, res) => {
+  const { ciphertext, iv } = req.body;
+  // Server stores encrypted blob, has no visibility into plaintext
+  await db.notes.insert({
+    userId: req.user.id,
+    ciphertext,
+    iv,
+    createdAt: new Date()
+  });
+  res.json({ success: true });
+});
+```
+
+### Multi-Recipient E2EE (Asymmetric Key Exchange)
+
+For messaging systems, use asymmetric encryption to share a symmetric session key with multiple recipients:
+
+```typescript
+// Generate RSA key pair per user
+async function generateUserKeyPair() {
+  return crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: 4096,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256"
+    },
+    true, // extractable
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Encrypt message for multiple recipients
+async function encryptMultiRecipient(
+  plaintext: string,
+  recipientPublicKeys: CryptoKey[]
+): Promise<MultiRecipientPayload> {
+  // Generate ephemeral session key
+  const sessionKey = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  
+  // Encrypt message with session key
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const messageCiphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    sessionKey,
+    new TextEncoder().encode(plaintext)
+  );
+  
+  // Wrap session key for each recipient
+  const wrappedKeys = await Promise.all(
+    recipientPublicKeys.map(async (pubKey) => {
+      const wrapped = await crypto.subtle.encrypt(
+        { name: "RSA-OAEP" },
+        pubKey,
+        await crypto.subtle.exportKey("raw", sessionKey)
+      );
+      return Buffer.from(wrapped).toString('base64');
+    })
+  );
+  
+  return {
+    messageCiphertext: Buffer.from(messageCiphertext).toString('base64'),
+    iv: Buffer.from(iv).toString('base64'),
+    wrappedKeys // One per recipient
+  };
+}
+
+// Each recipient decrypts with their private key
+async function decryptMessage(
+  payload: MultiRecipientPayload,
+  userPrivateKey: CryptoKey
+): Promise<string> {
+  // Decrypt session key with user's private key
+  const wrappedKey = Buffer.from(payload.wrappedKeys[userIndex], 'base64');
+  const sessionKeyBuffer = await crypto.subtle.decrypt(
+    { name: "RSA-OAEP" },
+    userPrivateKey,
+    wrappedKey
+  );
+  
+  const sessionKey = await crypto.subtle.importKey(
+    "raw",
+    sessionKeyBuffer,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"]
+  );
+  
+  // Decrypt message
+  const iv = Buffer.from(payload.iv, 'base64');
+  const messageCiphertext = Buffer.from(payload.messageCiphertext, 'base64');
+  
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    sessionKey,
+    messageCiphertext
+  );
+  
+  return new TextDecoder().decode(plaintext);
+}
+```
+
+## Key Management
+
+The cryptographic hardness is only as strong as the key management:
+
+### Key Derivation from Passwords
+
+Use PBKDF2 with high iteration counts to resist brute-force attacks:
+
+```typescript
+async function deriveKeyFromPassword(
+  password: string,
+  salt: Uint8Array,
+  iterations: number = 600000
+): Promise<CryptoKey> {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations,
+      hash: "SHA-256"
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+### Secure Key Storage
+
+**Never store keys in localStorage or IndexedDB.** These APIs are vulnerable to XSS attacks. Instead:
+
+1. **Volatile memory**: Keep keys in a module-scoped variable or closure
+2. **Session-based derivation**: Re-derive keys from the user's password at login (acceptable for single-device use)
+3. **Hardware security modules**: For high-security applications, integrate with WebAuthn/FIDO2
+
+```typescript
+// Bad: persistent storage
+localStorage.setItem('encryptionKey', keyMaterial); // XSS vulnerability
+
+// Good: volatile memory
+let sessionKey: CryptoKey | null = null;
+
+async function initSession(password: string) {
+  const salt = new Uint8Array(16); // Retrieved from server
+  sessionKey = await deriveKeyFromPassword(password, salt);
+  // sessionKey cleared on page unload
+}
+```
+
+## Large File Handling
+
+Encrypting multi-gigabyte files requires streaming to avoid memory exhaustion:
+
+```typescript
+async function* encryptLargeFile(
+  file: File,
+  key: CryptoKey,
+  chunkSize: number = 5 * 1024 * 1024
+): AsyncGenerator<Uint8Array> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  yield iv; // Send IV first
+  
+  let offset = 0;
+  while (offset < file.size) {
+    const chunk = file.slice(offset, offset + chunkSize);
+    const buffer = await chunk.arrayBuffer();
+    
+    const encryptedChunk = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      buffer
+    );
+    
+    yield new Uint8Array(encryptedChunk);
+    offset += chunkSize;
+  }
+}
+
+// Upload with FormData
+async function uploadEncryptedFile(file: File, key: CryptoKey) {
+  const formData = new FormData();
+  
+  for await (const chunk of encryptLargeFile(file, key)) {
+    formData.append('chunks', new Blob([chunk]));
+  }
+  
+  return fetch('/api/upload', { method: 'POST', body: formData });
+}
+```
+
+## Testing and Verification
+
+E2EE systems require rigorous testing:
+
+```typescript
+describe('E2EE', () => {
+  it('should encrypt and decrypt data correctly', async () => {
+    const plaintext = 'sensitive information';
+    const key = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+    
+    const encrypted = await encryptForSelf(plaintext, key);
+    const decrypted = await decryptData(encrypted, key);
+    expect(decrypted).toBe(plaintext);
+  });
+  
+  it('should produce different ciphertexts for same plaintext', async () => {
+    const key = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+    
+    const encrypted1 = await encryptForSelf('data', key);
+    const encrypted2 = await encryptForSelf('data', key);
+    // Different IVs produce different ciphertexts
+    expect(encrypted1.ciphertext).not.toBe(encrypted2.ciphertext);
+  });
+});
+```
+
+## Common Pitfalls
+
+1. **Reusing IVs**: Each encryption operation must use a unique IV. Reusing IVs with the same key leaks plaintext.
+2. **Forgetting HTTPS**: E2EE is meaningless without transport security. Always enforce HTTPS and CSP headers.
+3. **Trusting localStorage**: XSS attacks can exfiltrate keys from client-side storage.
+4. **Weak key derivation**: Use at least 600,000 PBKDF2 iterations for password-based keys.
+5. **No authentication**: Always use authenticated encryption (AES-GCM, ChaCha20-Poly1305) to detect tampering.
+
+## Conclusion
+
+E2EE in web applications is achievable with the Web Crypto API and careful key management. The pattern is: encrypt on the client, store on the server, decrypt on the client. Combined with TLS transport security, it creates a robust defense against server breaches, surveillance, and data misuse.
+
+At BitAtlas, this philosophy guides every deployment. Your data is yours alone—technically and architecturally.
+
+Stay secure,
+The BitAtlas Team
