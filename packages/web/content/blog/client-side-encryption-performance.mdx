@@ -182,7 +182,7 @@ Testing with actual users reveals:
 
 | Scenario | Implementation | Perception |
 |----------|---|---|
-| <10KB encryption | Web Crypto API (main thread) | Imperceptible (~0-2ms) |
+| `<10KB` encryption | Web Crypto API (main thread) | Imperceptible (~0-2ms) |
 | 100KB encryption | Web Crypto API + Worker | ~15-50ms, no UI lag |
 | 1MB encryption | Streaming + Worker | ~200-500ms, progressive UX |
 | 100MB file | Streaming + Worker | Constant memory, smooth progress bar |
