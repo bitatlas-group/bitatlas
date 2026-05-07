@@ -1,1 +1,329 @@
-{"nextIndex": 12, "topics": [{"slug": "zero-knowledge-encryption-fundamentals", "keywords": ["zero-knowledge encryption", "ZKE", "cryptography", "privacy", "client-side encryption"], "brief": "Deep dive into ZKE principles and applications for modern web apps"}, {"slug": "mcp-servers-enterprise-automation", "keywords": ["MCP servers", "model context protocol", "automation", "enterprise", "LLM integration"], "brief": "How MCP servers enable seamless enterprise integration with AI models"}, {"slug": "eu-data-sovereignty-compliance-guide", "keywords": ["EU data sovereignty", "GDPR", "data residency", "compliance", "cloud storage"], "brief": "Building compliant applications for the European market"}, {"slug": "ai-agent-infrastructure-patterns", "keywords": ["AI agents", "agent infrastructure", "distributed systems", "orchestration", "reliability"], "brief": "Architectural patterns for resilient AI agent deployments"}, {"slug": "end-to-end-encryption-web-applications", "keywords": ["end-to-end encryption", "E2EE", "web security", "TLS", "application-level encryption"], "brief": "Implementing E2EE in modern JavaScript/TypeScript applications"}, {"slug": "mcp-protocol-custom-tools", "keywords": ["MCP protocol", "custom tools", "developer tools", "tooling", "integration"], "brief": "Building custom MCP tools for specialized workflows"}, {"slug": "client-side-encryption-performance", "keywords": ["client-side encryption", "performance optimization", "crypto", "benchmarking"], "brief": "Optimizing encryption without sacrificing user experience"}, {"slug": "zero-knowledge-proofs-authentication", "keywords": ["zero-knowledge proofs", "ZKP", "authentication", "privacy", "passwordless"], "brief": "Using ZKPs for privacy-preserving authentication systems"}, {"slug": "developer-tools-crypto-libraries", "keywords": ["developer tools", "crypto libraries", "TweetNaCl", "libsodium", "cryptography"], "brief": "Essential cryptography libraries and tools for developers"}, {"slug": "ai-agent-monitoring-observability", "keywords": ["AI agents", "monitoring", "observability", "logging", "tracing"], "brief": "Comprehensive monitoring strategies for AI agent systems"}, {"slug": "eu-gdpr-technical-implementation", "keywords": ["GDPR", "technical implementation", "right to be forgotten", "data processing"], "brief": "Technical approaches to GDPR compliance in applications"}, {"slug": "mcp-server-security-best-practices", "keywords": ["MCP security", "server security", "authentication", "authorization", "threat model"], "brief": "Security considerations when building and deploying MCP servers"}, {"slug": "distributed-agent-coordination", "keywords": ["distributed agents", "coordination", "consensus", "message passing"], "brief": "Patterns for coordinating multiple AI agents in distributed systems"}, {"slug": "quantum-resistant-encryption-ready", "keywords": ["quantum cryptography", "post-quantum", "lattice-based", "future-proof"], "brief": "Preparing encryption strategies for the quantum computing era"}, {"slug": "serverless-mcp-agent-architecture", "keywords": ["serverless", "MCP agents", "cloud functions", "event-driven", "scalability"], "brief": "Building scalable MCP agent systems on serverless platforms"}]}
+{
+  "nextIndex": 13,
+  "topics": [
+    {
+      "slug": "zero-knowledge-encryption-fundamentals",
+      "keywords": [
+        "zero-knowledge encryption",
+        "ZKE",
+        "cryptography",
+        "privacy",
+        "client-side encryption"
+      ],
+      "brief": "Deep dive into ZKE principles and applications for modern web apps"
+    },
+    {
+      "slug": "mcp-servers-enterprise-automation",
+      "keywords": [
+        "MCP servers",
+        "model context protocol",
+        "automation",
+        "enterprise",
+        "LLM integration"
+      ],
+      "brief": "How MCP servers enable seamless enterprise integration with AI models"
+    },
+    {
+      "slug": "eu-data-sovereignty-compliance-guide",
+      "keywords": [
+        "EU data sovereignty",
+        "GDPR",
+        "data residency",
+        "compliance",
+        "cloud storage"
+      ],
+      "brief": "Building compliant applications for the European market"
+    },
+    {
+      "slug": "ai-agent-infrastructure-patterns",
+      "keywords": [
+        "AI agents",
+        "agent infrastructure",
+        "distributed systems",
+        "orchestration",
+        "reliability"
+      ],
+      "brief": "Architectural patterns for resilient AI agent deployments"
+    },
+    {
+      "slug": "end-to-end-encryption-web-applications",
+      "keywords": [
+        "end-to-end encryption",
+        "E2EE",
+        "web security",
+        "TLS",
+        "application-level encryption"
+      ],
+      "brief": "Implementing E2EE in modern JavaScript/TypeScript applications"
+    },
+    {
+      "slug": "mcp-protocol-custom-tools",
+      "keywords": [
+        "MCP protocol",
+        "custom tools",
+        "developer tools",
+        "tooling",
+        "integration"
+      ],
+      "brief": "Building custom MCP tools for specialized workflows"
+    },
+    {
+      "slug": "client-side-encryption-performance",
+      "keywords": [
+        "client-side encryption",
+        "performance optimization",
+        "crypto",
+        "benchmarking"
+      ],
+      "brief": "Optimizing encryption without sacrificing user experience"
+    },
+    {
+      "slug": "zero-knowledge-proofs-authentication",
+      "keywords": [
+        "zero-knowledge proofs",
+        "ZKP",
+        "authentication",
+        "privacy",
+        "passwordless"
+      ],
+      "brief": "Using ZKPs for privacy-preserving authentication systems"
+    },
+    {
+      "slug": "developer-tools-crypto-libraries",
+      "keywords": [
+        "developer tools",
+        "crypto libraries",
+        "TweetNaCl",
+        "libsodium",
+        "cryptography"
+      ],
+      "brief": "Essential cryptography libraries and tools for developers"
+    },
+    {
+      "slug": "ai-agent-monitoring-observability",
+      "keywords": [
+        "AI agents",
+        "monitoring",
+        "observability",
+        "logging",
+        "tracing"
+      ],
+      "brief": "Comprehensive monitoring strategies for AI agent systems"
+    },
+    {
+      "slug": "eu-gdpr-technical-implementation",
+      "keywords": [
+        "GDPR",
+        "technical implementation",
+        "right to be forgotten",
+        "data processing"
+      ],
+      "brief": "Technical approaches to GDPR compliance in applications"
+    },
+    {
+      "slug": "mcp-server-security-best-practices",
+      "keywords": [
+        "MCP security",
+        "server security",
+        "authentication",
+        "authorization",
+        "threat model"
+      ],
+      "brief": "Security considerations when building and deploying MCP servers"
+    },
+    {
+      "slug": "distributed-agent-coordination",
+      "keywords": [
+        "distributed agents",
+        "coordination",
+        "consensus",
+        "message passing"
+      ],
+      "brief": "Patterns for coordinating multiple AI agents in distributed systems"
+    },
+    {
+      "slug": "quantum-resistant-encryption-ready",
+      "keywords": [
+        "quantum cryptography",
+        "post-quantum",
+        "lattice-based",
+        "future-proof"
+      ],
+      "brief": "Preparing encryption strategies for the quantum computing era"
+    },
+    {
+      "slug": "serverless-mcp-agent-architecture",
+      "keywords": [
+        "serverless",
+        "MCP agents",
+        "cloud functions",
+        "event-driven",
+        "scalability"
+      ],
+      "brief": "Building scalable MCP agent systems on serverless platforms"
+    },
+    {
+      "slug": "ephemeral-agent-credentials-zero-trust",
+      "keywords": [
+        "ephemeral credentials",
+        "zero-trust",
+        "agent authentication",
+        "temporary tokens",
+        "security"
+      ],
+      "brief": "Implementing ephemeral credentials and zero-trust for AI agents"
+    },
+    {
+      "slug": "mcp-server-rate-limiting-quotas",
+      "keywords": [
+        "MCP server",
+        "rate limiting",
+        "quotas",
+        "resource management",
+        "fairness"
+      ],
+      "brief": "Rate limiting and quota management for multi-tenant MCP servers"
+    },
+    {
+      "slug": "homomorphic-encryption-search-queries",
+      "keywords": [
+        "homomorphic encryption",
+        "searchable encryption",
+        "privacy",
+        "computation"
+      ],
+      "brief": "Searching encrypted data without decryption using homomorphic schemes"
+    },
+    {
+      "slug": "agent-memory-persistence-encrypted-stores",
+      "keywords": [
+        "agent memory",
+        "encrypted storage",
+        "persistence",
+        "state management",
+        "vector stores"
+      ],
+      "brief": "Persisting agent memory and context in encrypted databases"
+    },
+    {
+      "slug": "zero-knowledge-credentials-oauth-replacement",
+      "keywords": [
+        "zero-knowledge",
+        "credentials",
+        "passwordless",
+        "decentralized identity",
+        "OAuth alternative"
+      ],
+      "brief": "Using ZK credentials as a privacy-first alternative to OAuth"
+    },
+    {
+      "slug": "mcp-plugin-ecosystem-building-blocks",
+      "keywords": [
+        "MCP plugins",
+        "ecosystem",
+        "extensibility",
+        "integrations",
+        "composability"
+      ],
+      "brief": "Building a plugin ecosystem around MCP servers"
+    },
+    {
+      "slug": "encrypted-vector-databases-rag-agents",
+      "keywords": [
+        "encrypted databases",
+        "vector search",
+        "RAG",
+        "semantic search",
+        "privacy"
+      ],
+      "brief": "Using encrypted vector databases for private RAG in agents"
+    },
+    {
+      "slug": "eu-cross-border-data-transfers-adequacy",
+      "keywords": [
+        "GDPR",
+        "data transfers",
+        "adequacy decisions",
+        "SCCs",
+        "EU regulations"
+      ],
+      "brief": "GDPR-compliant cross-border data transfers and adequacy decisions"
+    },
+    {
+      "slug": "agent-audit-logs-immutable-ledgers",
+      "keywords": [
+        "audit logs",
+        "immutability",
+        "blockchain",
+        "compliance",
+        "accountability"
+      ],
+      "brief": "Building immutable audit trails for agent actions"
+    },
+    {
+      "slug": "deterministic-encryption-file-deduplication",
+      "keywords": [
+        "deterministic encryption",
+        "deduplication",
+        "storage efficiency",
+        "security"
+      ],
+      "brief": "Using deterministic encryption for secure file deduplication"
+    },
+    {
+      "slug": "mcp-server-connection-pooling",
+      "keywords": [
+        "MCP server",
+        "connection pooling",
+        "performance",
+        "concurrency",
+        "optimization"
+      ],
+      "brief": "Connection pooling strategies for high-concurrency MCP deployments"
+    },
+    {
+      "slug": "privacy-preserving-analytics-agents",
+      "keywords": [
+        "privacy-preserving",
+        "analytics",
+        "differential privacy",
+        "agents",
+        "telemetry"
+      ],
+      "brief": "Implementing privacy-preserving analytics for agent systems"
+    },
+    {
+      "slug": "agent-cost-attribution-shared-resources",
+      "keywords": [
+        "cost attribution",
+        "billing",
+        "resource sharing",
+        "multi-tenant",
+        "chargeback"
+      ],
+      "brief": "Attributing costs fairly in shared AI agent infrastructure"
+    },
+    {
+      "slug": "zkp-private-credential-verification",
+      "keywords": [
+        "zero-knowledge proofs",
+        "credentials",
+        "verification",
+        "privacy",
+        "attributes"
+      ],
+      "brief": "Zero-knowledge proofs for privacy-preserving credential verification"
+    },
+    {
+      "slug": "mcp-server-testing-frameworks",
+      "keywords": [
+        "MCP server",
+        "testing",
+        "unit tests",
+        "integration tests",
+        "mock tools"
+      ],
+      "brief": "Testing frameworks and strategies for MCP server development"
+    }
+  ]
+}
