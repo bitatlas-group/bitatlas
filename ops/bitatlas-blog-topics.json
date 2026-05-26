@@ -1,5 +1,5 @@
 {
-  "nextIndex": 31,
+  "nextIndex": 32,
   "topics": [
     {
       "slug": "zero-knowledge-encryption-fundamentals",
@@ -489,6 +489,171 @@
         "privacy"
       ],
       "brief": "Building confidential agent routing with trusted execution environments for sensitive operations"
+    },
+    {
+      "slug": "agent-rate-limiting-vault-policy-engine",
+      "keywords": [
+        "rate limiting",
+        "Vault policies",
+        "agent throttling",
+        "resource quotas",
+        "API protection"
+      ],
+      "brief": "Implementing fine-grained rate limiting for agents using Vault policy engines"
+    },
+    {
+      "slug": "mcp-server-database-backend-integration",
+      "keywords": [
+        "MCP server",
+        "database backend",
+        "data access",
+        "SQL",
+        "schema management"
+      ],
+      "brief": "Building MCP servers with database backends for secure data access patterns"
+    },
+    {
+      "slug": "client-side-encryption-browser-storage-quota",
+      "keywords": [
+        "browser storage",
+        "IndexedDB",
+        "encryption",
+        "quota management",
+        "performance"
+      ],
+      "brief": "Managing encryption in browser storage with IndexedDB quota considerations"
+    },
+    {
+      "slug": "eu-vendor-lock-in-prevention-encryption",
+      "keywords": [
+        "EU regulations",
+        "vendor lock-in",
+        "encryption portability",
+        "interoperability",
+        "data freedom"
+      ],
+      "brief": "Architectural patterns to prevent vendor lock-in through encryption and data portability"
+    },
+    {
+      "slug": "ai-agent-token-exchange-oauth-oidc",
+      "keywords": [
+        "OAuth 2.0",
+        "OIDC",
+        "token exchange",
+        "agent delegation",
+        "federation"
+      ],
+      "brief": "Using OAuth token exchange patterns for secure agent-to-service authentication"
+    },
+    {
+      "slug": "encrypted-agent-logs-splunk-elk-integration",
+      "keywords": [
+        "encrypted logging",
+        "Splunk",
+        "ELK",
+        "agent telemetry",
+        "compliance"
+      ],
+      "brief": "Shipping encrypted agent logs to Splunk or ELK while maintaining confidentiality"
+    },
+    {
+      "slug": "zero-knowledge-machine-learning-inference",
+      "keywords": [
+        "zero-knowledge",
+        "machine learning",
+        "inference",
+        "privacy",
+        "neural networks"
+      ],
+      "brief": "Privacy-preserving ML inference using zero-knowledge proofs and homomorphic encryption"
+    },
+    {
+      "slug": "mcp-server-streaming-responses-async-patterns",
+      "keywords": [
+        "MCP server",
+        "streaming",
+        "async",
+        "performance",
+        "large responses"
+      ],
+      "brief": "Designing MCP servers for streaming responses and async request handling"
+    },
+    {
+      "slug": "agent-billing-cost-tracking-encrypted-ledger",
+      "keywords": [
+        "cost tracking",
+        "billing",
+        "encrypted ledger",
+        "chargeback",
+        "accounting"
+      ],
+      "brief": "Building encrypted billing ledgers for accurate agent cost attribution"
+    },
+    {
+      "slug": "secure-agent-environment-variable-injection",
+      "keywords": [
+        "environment variables",
+        "secrets injection",
+        "Vault",
+        "agent initialization",
+        "security"
+      ],
+      "brief": "Safely injecting sensitive environment variables into agents from encrypted vaults"
+    },
+    {
+      "slug": "homomorphic-encryption-anomaly-detection",
+      "keywords": [
+        "homomorphic encryption",
+        "anomaly detection",
+        "agent monitoring",
+        "privacy",
+        "security"
+      ],
+      "brief": "Detecting agent anomalies using homomorphic encryption without decrypting data"
+    },
+    {
+      "slug": "gdpr-data-subject-access-request-automation",
+      "keywords": [
+        "GDPR",
+        "data subject access",
+        "DSR",
+        "automation",
+        "compliance"
+      ],
+      "brief": "Automating GDPR data subject access requests for agent-managed user information"
+    },
+    {
+      "slug": "mcp-graceful-shutdown-connection-pooling",
+      "keywords": [
+        "graceful shutdown",
+        "connection pooling",
+        "MCP server",
+        "reliability",
+        "deployment"
+      ],
+      "brief": "Implementing graceful shutdown and connection cleanup in MCP servers"
+    },
+    {
+      "slug": "client-side-key-backup-recovery-protocols",
+      "keywords": [
+        "key backup",
+        "recovery",
+        "client-side",
+        "disaster recovery",
+        "encryption"
+      ],
+      "brief": "Designing secure key backup and recovery protocols for client-side encryption"
+    },
+    {
+      "slug": "eu-processing-agreement-templates-saas-agents",
+      "keywords": [
+        "GDPR",
+        "data processing agreement",
+        "DPA",
+        "SaaS",
+        "legal compliance"
+      ],
+      "brief": "Navigating DPA requirements when deploying SaaS-based AI agent services in EU"
     }
   ]
 }
