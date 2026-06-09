@@ -1,0 +1,242 @@
+---
+title: "Instrumenting MCP Servers: OpenTelemetry for Distributed Tracing"
+description: "Implement comprehensive observability in MCP servers using OpenTelemetry, enabling trace-driven debugging and performance monitoring across distributed AI agent infrastructure."
+date: "2026-06-09"
+author: "BitAtlas Engineering"
+slug: "mcp-server-observability-metrics-tracing"
+keywords: ["observability", "metrics", "distributed tracing", "OpenTelemetry", "MCP server", "AI agents", "monitoring"]
+readingTime: 10
+---
+
+Building reliable AI agent infrastructure means understanding what's happening inside your MCP servers in production. Whether you're routing requests to multiple agents, orchestrating complex workflows, or debugging performance bottlenecks, observability is non-negotiable. OpenTelemetry provides the foundation for implementing traces, metrics, and logs at scale—without vendor lock-in.
+
+## Why Tracing Matters for MCP Servers
+
+MCP servers act as bridges between applications and language models. A single user request might span:
+
+- Initial request validation and routing
+- Tool discovery and schema resolution
+- Multiple tool invocations with dependencies
+- State mutations and side effects
+- Response aggregation and formatting
+
+Without visibility into this flow, you're blind to where latency accumulates, where errors originate, or why a particular request failed after 3 seconds instead of 300ms.
+
+Traditional logging captures discrete events. Tracing captures the *relationships* between events—parent-child causality across process boundaries. When agent A calls tool B, which triggers agent C, your trace shows the full lineage.
+
+## Setting Up OpenTelemetry in an MCP Server
+
+Start with the Node.js OpenTelemetry SDK. You'll need:
+
+```javascript
+npm install @opentelemetry/api @opentelemetry/sdk-node @opentelemetry/sdk-trace-node \
+  @opentelemetry/exporter-trace-otlp-http @opentelemetry/resources @opentelemetry/semantic-conventions \
+  @opentelemetry/instrumentation @opentelemetry/auto-instrumentations-node
+```
+
+Initialize the SDK early—before importing your application code:
+
+```javascript
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces",
+  }),
+  instrumentations: [getNodeAutoInstrumentations()],
+});
+
+sdk.start();
+process.on("SIGTERM", () => sdk.shutdown());
+```
+
+This bootstraps automatic instrumentation for HTTP, database queries, and async operations.
+
+## Instrumenting MCP Tool Invocations
+
+MCP servers typically expose tools via a request-response pattern. Instrument each tool invocation as a span:
+
+```javascript
+import { trace } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("mcp-server", "1.0.0");
+
+export async function invokeTool(toolName, args) {
+  const span = tracer.startSpan(`tool.invoke`, {
+    attributes: {
+      "tool.name": toolName,
+      "tool.arg.count": Object.keys(args).length,
+      "mcp.operation": "tool_invocation",
+    },
+  });
+
+  try {
+    const result = await executeToolLogic(toolName, args);
+    span.addEvent("tool.completed", {
+      "result.size": JSON.stringify(result).length,
+    });
+    return result;
+  } catch (error) {
+    span.recordException(error);
+    span.setStatus({ code: 2, message: error.message }); // ERROR
+    throw error;
+  } finally {
+    span.end();
+  }
+}
+```
+
+Each tool invocation now appears as a span in your trace with:
+
+- Start and end timestamps
+- Duration
+- Tool name and argument count
+- Success/failure status
+- Exception details if it failed
+
+## Tracking Agent Orchestration
+
+When your MCP server coordinates multiple agents, create parent-child relationships:
+
+```javascript
+export async function orchestrateAgents(agents, task) {
+  const orchestrationSpan = tracer.startSpan("agent.orchestration", {
+    attributes: { "task.id": task.id, "agent.count": agents.length },
+  });
+
+  return trace.context.with(
+    trace.setSpan(trace.context.active(), orchestrationSpan),
+    async () => {
+      const results = await Promise.all(
+        agents.map((agent) =>
+          tracer.startActiveSpan(`agent.execute`, { attributes: { "agent.id": agent.id } }, async (span) => {
+            try {
+              return await agent.run(task);
+            } finally {
+              span.end();
+            }
+          })
+        )
+      );
+
+      orchestrationSpan.end();
+      return results;
+    }
+  );
+}
+```
+
+Now your trace shows: orchestration started → agent A and B ran in parallel → agent C ran after both completed. Debugging distributed failures becomes actionable.
+
+## Metrics for Production Monitoring
+
+Traces are great for debugging, but you also need aggregated metrics for dashboards and alerts:
+
+```javascript
+import { metrics } from "@opentelemetry/api";
+
+const meter = metrics.getMeter("mcp-server");
+
+const toolInvocationCounter = meter.createCounter("tool.invocations.total", {
+  description: "Total tool invocations",
+});
+
+const toolLatencyHistogram = meter.createHistogram("tool.duration.ms", {
+  description: "Tool execution duration in milliseconds",
+});
+
+export async function invokeTool(toolName, args) {
+  const startTime = Date.now();
+  try {
+    const result = await executeToolLogic(toolName, args);
+    toolInvocationCounter.add(1, { "tool.name": toolName, "status": "success" });
+    return result;
+  } catch (error) {
+    toolInvocationCounter.add(1, { "tool.name": toolName, "status": "error" });
+    throw error;
+  } finally {
+    toolLatencyHistogram.record(Date.now() - startTime, { "tool.name": toolName });
+  }
+}
+```
+
+Export these metrics to your observability backend (Datadog, New Relic, Prometheus). You'll see per-tool latencies, error rates, and throughput trends—critical for SLO monitoring.
+
+## Sampling for Cost Control
+
+Shipping every trace to your backend can be expensive at scale. Implement sampling:
+
+```javascript
+import { ProbabilitySampler } from "@opentelemetry/sdk-trace-node";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+  }),
+  sampler: new ProbabilitySampler(0.1), // Sample 10% of traces
+});
+```
+
+Or use tail-based sampling—sample based on error status or latency:
+
+```javascript
+sampler: {
+  shouldSample: (context, traceId, spanName, spanKind, attributes) => {
+    // Always sample errors
+    if (attributes["error"] === true) return { decision: 2 }; // RECORD_AND_SAMPLE
+    // Sample slow requests
+    if (attributes["duration.ms"] > 5000) return { decision: 2 };
+    // Drop 99% of fast successes
+    return { decision: Math.random() < 0.01 ? 2 : 1 }; // RECORD_ONLY or RECORD_AND_SAMPLE
+  },
+},
+```
+
+## Context Propagation Across Boundaries
+
+If your MCP server calls external services (APIs, databases, other agents), propagate trace context:
+
+```javascript
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+
+const propagator = new W3CTraceContextPropagator();
+
+export function makeRequest(url, options = {}) {
+  const headers = {};
+  propagator.inject(
+    trace.context.active(),
+    headers,
+    { set: (carrier, key, value) => (carrier[key] = value) }
+  );
+
+  return fetch(url, { ...options, headers });
+}
+```
+
+The downstream service receives your trace ID in the `traceparent` header. If it also instruments with OpenTelemetry, your traces automatically stitch together across service boundaries.
+
+## Debugging Production Issues
+
+When an agent fails in production, your trace tells the story:
+
+1. **Latency spike**: Drill into the trace to see which tool took 10 seconds instead of 100ms.
+2. **Cascading errors**: If agent A failed and cascaded to B, your trace shows the dependency path.
+3. **Resource exhaustion**: Metrics show you're invoking the same tool 1000x per minute—a runaway loop.
+4. **State corruption**: Span attributes log tool inputs; you can trace exactly what mutation caused the inconsistency.
+
+## Best Practices
+
+- **Name spans semantically**: `tool.invoke` vs. `db.query` vs. `http.request`. Your future self will thank you.
+- **Add attributes early**: Don't wait until a span fails to log context. Attributes at span creation are cheap.
+- **Use baggage for user/request context**: OpenTelemetry baggage carries metadata across spans without explicit threading.
+- **Sample intelligently**: Full tracing of every request is overkill. Sample errors and slow requests; subsample success.
+- **Avoid secrets in spans**: Never log API keys, tokens, or PII in span attributes or events.
+
+## Next Steps
+
+Observability is iterative. Start with automatic instrumentation and key business operations. As you mature, add custom metrics for domain-specific performance (agent response time, model latency, token usage). Build dashboards that let you see agent health at a glance. Alert on SLOs that matter.
+
+Your MCP servers are the nervous system of your AI infrastructure. OpenTelemetry gives you the sensory equipment to understand what's really happening—not just what you assume is happening.
