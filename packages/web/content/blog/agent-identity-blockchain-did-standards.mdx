@@ -1,0 +1,177 @@
+---
+title: "Agent Identity on the Blockchain: DIDs and Verifiable Credentials"
+description: "Implementing decentralized identifiers and verifiable credentials for autonomous agent authentication and trust in distributed systems."
+date: 2026-06-13
+author: BitAtlas
+slug: agent-identity-blockchain-did-standards
+keywords:
+  - decentralized identity
+  - DIDs
+  - blockchain
+  - verifiable credentials
+  - agent authentication
+  - trust framework
+  - agent infrastructure
+readingTime: 7
+---
+
+As AI agents become increasingly autonomous and deploy across distributed networks, traditional identity and trust models break down. Centralized identity providers, API keys stored in vaults, and implicit trust assumptions don't scale when agents operate independently in environments where they may never have interacted before.
+
+**Decentralized Identifiers (DIDs)** and **Verifiable Credentials (VCs)** offer a cryptographic foundation for agent identity that is self-sovereign, portable, and cryptographically verifiable without a central authority. This post explores how to architect agent authentication systems using these standards.
+
+## Why DIDs Matter for Agents
+
+Traditional agent authentication typically relies on:
+- Centralized identity providers (e.g., OAuth, SAML)
+- Pre-provisioned API keys or tokens
+- Trust in intermediaries to verify identity
+
+This creates friction in scenarios where agents:
+- Operate in loosely-coupled, multi-tenant environments
+- Need to prove capabilities without revealing private state
+- Must maintain identity across different platforms
+- Establish trust relationships with previously unknown services
+
+A **DID** is a URI that uniquely identifies an agent, cryptographically bound to a keypair that only the agent controls. Format: `did:key:z6MkhaXgBZDvotDkL5257faWLpa6CBRJJPF6eAA7ewNGyJeV`
+
+Unlike usernames or OAuth identifiers, a DID:
+- Doesn't require a central registry to issue or revoke
+- Can be created offline by the agent itself
+- Proves ownership through cryptographic signatures
+- Is portable across platforms and services
+
+## Implementing DIDs for Agent Authentication
+
+Here's a minimal example using the `did-key` method (the simplest DID method for agent use):
+
+```typescript
+import { generateKeyPairSync } from 'crypto';
+import { base58btc } from 'multibases';
+
+// Generate a keypair for the agent
+const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
+  publicKeyEncoding: { format: 'raw', type: 'spki' },
+  privateKeyEncoding: { format: 'raw', type: 'pkcs8' }
+});
+
+// Create DID from public key using did:key method
+const didKey = createDidKeyFromPublicKey(publicKey);
+console.log('Agent DID:', didKey);
+// Output: did:key:z6MkhaXgBZDvotDkL5257faWLpa6CBRJJPF6eAA7ewNGyJeV
+
+// Store the keypair securely (Vault, HSM, or encrypted envelope)
+const agentIdentity = {
+  did: didKey,
+  publicKey: base58btc.baseEncode(publicKey),
+  // Private key: store in Vault, never serialize to logs
+};
+```
+
+The `did:key` method derives the entire DID from the public key material, eliminating the need for a ledger lookup. For agents that need stronger assurances, methods like `did:web` (anchored to a domain) or `did:ethr` (anchored to Ethereum) are also viable.
+
+## Verifiable Credentials for Agent Capabilities
+
+A **Verifiable Credential** is a cryptographically signed claim that an issuer makes about a subject (the agent). It includes:
+- **Issuer**: The party making the claim (e.g., a service provider authorizing an agent)
+- **Subject**: The agent being described (identified by DID)
+- **Claims**: Structured data about the subject (capabilities, permissions, attributes)
+- **Proof**: A cryptographic signature proving the issuer signed it
+
+Instead of storing OAuth tokens with embedded scopes, agents can carry verifiable credentials that prove their capabilities:
+
+```typescript
+import { sign } from '@digitalbazaar/vc-data-integrity';
+import { Ed25519Signature2020 } from '@digitalbazaar/ed25519-signature-2020';
+
+// Credential issued by a service provider to the agent
+const credential = {
+  '@context': [
+    'https://www.w3.org/2018/credentials/v1',
+    'https://w3id.org/vc-examples/v1'
+  ],
+  type: ['VerifiableCredential', 'ServiceProviderCapability'],
+  issuer: 'did:key:z6MkpGPBgxHJk1Rk9D...',  // Service provider DID
+  credentialSubject: {
+    id: 'did:key:z6MkhaXgBZDvotDkL5257faWLpa6CBRJJPF6eAA7ewNGyJeV',  // Agent DID
+    capabilities: ['read:data', 'write:logs', 'invoke:compute'],
+    issuedAt: '2026-06-13T12:00:00Z',
+    expiresAt: '2027-06-13T12:00:00Z'
+  }
+};
+
+// Issuer signs the credential
+const signedVc = await sign({
+  credential,
+  suite: new Ed25519Signature2020({
+    key: issuerPrivateKey
+  })
+});
+
+// Agent carries this credential and presents it to services
+// Services verify: signature, issuer DID, expiration, and parse capabilities
+```
+
+## Agent-to-Agent Trust Protocols
+
+DIDs enable agents to establish trust without a central provisioning system:
+
+1. **Discovery**: Agent A publishes its DID and its public key (via DID Document)
+2. **Credential Exchange**: Service X issues Agent A a capability credential
+3. **Presentation**: Agent A connects to Agent B, presents its DID and credential
+4. **Verification**: Agent B fetches Agent A's DID Document, verifies the credential signature, checks expiration and issuer reputation
+5. **Authorization**: Agent B allows Agent A to proceed based on capabilities
+
+```typescript
+// Service B verifying Agent A's credentials
+async function verifyAgentIdentity(agentDid, presentedCredentials) {
+  // 1. Resolve DID Document
+  const didDocument = await resolveDid(agentDid);
+  const agentPublicKey = extractPublicKeyFromDidDoc(didDocument);
+
+  // 2. Verify each credential's signature
+  for (const vc of presentedCredentials) {
+    const isValid = await verifyProof(vc, agentPublicKey);
+    if (!isValid) throw new Error('Credential signature invalid');
+
+    // 3. Check expiration
+    if (new Date(vc.credentialSubject.expiresAt) < new Date()) {
+      throw new Error('Credential expired');
+    }
+
+    // 4. Verify issuer is trusted
+    const issuerReputation = await getIssuerReputation(vc.issuer);
+    if (issuerReputation.trustLevel < MIN_TRUST) {
+      throw new Error('Issuer not trusted');
+    }
+  }
+
+  // 5. Extract and apply capabilities
+  const capabilities = vc.credentialSubject.capabilities;
+  return authorizeAgentWithCapabilities(agentDid, capabilities);
+}
+```
+
+## Challenges and Practical Considerations
+
+**Key Rotation**: Agents need to rotate keys periodically. With `did:key`, this requires creating a new DID, which breaks identity continuity. Use `did:web` or methods supporting key versioning for agents with long lifespans.
+
+**Revocation**: Verifiable credentials have expiration dates, but DIDs themselves can't be revoked without a registry. Use short-lived credentials and a revocation registry (e.g., a smart contract) for critical capabilities.
+
+**Network Bootstrap**: How does an agent discover where to fetch DID Documents? For `did:web`, use HTTPS. For other methods, use a registry or gossip protocol.
+
+**Privacy**: Verifiable credentials are signed but not encrypted. Sensitive claims should be in separate, encrypted credentials or use selective disclosure techniques (Zero-Knowledge Proofs can verify only certain claims).
+
+## Production Deployment Patterns
+
+For production agent systems using DIDs:
+
+- **Credential Caching**: Cache DID Document resolution for `<TTL>` (e.g., 1 hour) to avoid latency on every verification
+- **Revocation Checks**: For high-security agents, check a revocation service before granting access
+- **Credential Bundling**: Agents carry multiple credentials (from different issuers) covering different scopes
+- **Hierarchical Agents**: Parent agents can issue credentials to child agents, creating trust delegation chains
+
+## Conclusion
+
+Decentralized identifiers and verifiable credentials decouple agent identity from any single platform or issuer, enabling trustless interactions in distributed systems. By anchoring agent identity to public-key cryptography and signing proofs directly into credentials, you build authentication systems that scale without centralized intermediaries — essential for autonomous agents operating at scale.
+
+The W3C standards for DIDs and VCs are mature and well-supported across JavaScript, Python, and Go libraries. Start with `did:key` for simplicity, then graduate to `did:web` or `did:ethr` as your agent infrastructure matures.
