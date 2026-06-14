@@ -1,7 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "BitAtlas",
-  "description": "Zero Knowledge Cloud Drive for Humans and Agents. Secure, persistent, encrypted storage for AI agents. EU-hosted.",
+  "name": "io.github.bitatlas-group/bitatlas",
+  "title": "BitAtlas",
+  "description": "Zero-knowledge encrypted storage for humans and AI agents. Client-side AES-256-GCM, EU-hosted.",
+  "websiteUrl": "https://bitatlas.com",
   "repository": {
     "url": "https://github.com/bitatlas-group/bitatlas",
     "source": "github",
