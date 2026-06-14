@@ -1,7 +1,28 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/client';
+import { redis } from '../services/redis';
 import { generateDownloadUrl } from '../services/storage';
 import { shareResolveRateLimit } from '../middleware/rateLimit';
+import { getShareLimits } from '../config/shareLimits';
+
+/**
+ * Per-owner daily egress guard. Counts share downloads per owner per UTC day in
+ * Redis (self-expiring) and returns true if this download stays within the
+ * owner's plan cap. Fails OPEN on Redis errors — availability over strictness.
+ */
+async function withinDailyEgress(ownerId: string, plan: string | null | undefined): Promise<boolean> {
+  const cap = getShareLimits(plan).dailyEgressCap;
+  if (cap === null) return true;
+  try {
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const key = `share:egress:${ownerId}:${day}`;
+    const used = await redis.incr(key);
+    if (used === 1) await redis.expire(key, 86400);
+    return used <= cap;
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Public, unauthenticated share-resolve router.
@@ -26,6 +47,7 @@ router.get('/:shareId', shareResolveRateLimit, async (req: Request, res: Respons
     where: { id: req.params.shareId },
     select: {
       id: true,
+      createdBy: true,
       maxDownloads: true,
       downloadCount: true,
       revokedAt: true,
@@ -55,6 +77,13 @@ router.get('/:shareId', shareResolveRateLimit, async (req: Request, res: Respons
   const exhausted = share.maxDownloads !== null && share.downloadCount >= share.maxDownloads;
   if (share.revokedAt || share.expiresAt <= now || exhausted) {
     res.status(410).json({ error: 'This share link is no longer available' });
+    return;
+  }
+
+  // Per-owner daily egress cap (bounds free bandwidth from public links).
+  const owner = await prisma.user.findUnique({ where: { id: share.createdBy }, select: { plan: true } });
+  if (!(await withinDailyEgress(share.createdBy, owner?.plan))) {
+    res.status(429).json({ error: "This share link's owner has reached their daily download limit. Try again tomorrow." });
     return;
   }
 
