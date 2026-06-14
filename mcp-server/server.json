@@ -7,12 +7,12 @@
     "source": "github",
     "subfolder": "mcp-server"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@bitatlas/mcp-server",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "transport": {
         "type": "stdio"
       },
@@ -34,6 +34,13 @@
         {
           "name": "BITATLAS_API_URL",
           "description": "BitAtlas API base URL (default: https://api.bitatlas.com)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "BITATLAS_WEB_URL",
+          "description": "Web origin used to build share links (default: https://www.bitatlas.com)",
           "isRequired": false,
           "format": "string",
           "isSecret": false
