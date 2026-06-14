@@ -15,6 +15,9 @@ require('dotenv').config();
 // ---------------------------------------------------------------------------
 
 const API_URL = process.env.BITATLAS_API_URL || 'https://api.bitatlas.com';
+// Public web origin used to assemble share links. The decryption key is appended
+// as a URL fragment locally, so it never reaches the API.
+const WEB_URL = (process.env.BITATLAS_WEB_URL || 'https://www.bitatlas.com').replace(/\/$/, '');
 const API_KEY = process.env.BITATLAS_API_KEY;
 const MASTER_KEY_HEX = process.env.BITATLAS_MASTER_KEY;
 const X402_WALLET_KEY = process.env.BITATLAS_WALLET_PRIVATE_KEY;
@@ -399,6 +402,49 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['name'],
       },
     },
+    {
+      name: 'bitatlas_share_file',
+      description:
+        'Generate a zero-knowledge share link for a vault file, to hand it to a human. ' +
+        'The returned link is PUBLIC: ANYONE who has the link can open and read the file. ' +
+        'The decryption key is in the URL fragment (#k=...) — BitAtlas never sees it and ' +
+        'cannot read the file, but whoever you send the link to can. ' +
+        'Confirm with the user before sharing anything sensitive. Requires BITATLAS_MASTER_KEY.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_id: { type: 'string', description: 'File UUID to share' },
+          expires_in: {
+            type: 'string',
+            enum: ['24h', '7d', '30d'],
+            description: 'How long the link stays live (default 7d)',
+          },
+          max_downloads: {
+            type: 'number',
+            description: 'Optional cap on total downloads before the link expires',
+          },
+        },
+        required: ['file_id'],
+      },
+    },
+    {
+      name: 'bitatlas_list_shares',
+      description: 'List the share links you have created, with their expiry, download count, and status.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'bitatlas_revoke_share',
+      description:
+        'Revoke a share link so the server stops handing out the file. ' +
+        'Note: anyone who already downloaded the file keeps it — revocation only stops future downloads.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          share_id: { type: 'string', description: 'Share ID to revoke' },
+        },
+        required: ['share_id'],
+      },
+    },
   ],
 }));
 
@@ -616,6 +662,73 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         name: res.data.name,
         parentId: res.data.parentId || null,
       }, null, 2));
+    }
+
+    // -----------------------------------------------------------------------
+    // bitatlas_share_file
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_share_file') {
+      if (!args.file_id) throw new Error('file_id is required');
+      const masterKey = getMasterKey();
+
+      // 1. Fetch the file's wrapped key material.
+      const metaRes = await api.get(`/vault/files/${args.file_id}`);
+      const meta = metaRes.data;
+      if (!meta.ownerEncryptedKey || !meta.ownerIv) {
+        throw new Error('File is missing owner key material; cannot build a share link.');
+      }
+
+      // 2. Unwrap the raw 32-byte file key locally (master key never leaves here).
+      const fileKey = aesGcmDecrypt(
+        Buffer.from(meta.ownerEncryptedKey, 'base64'),
+        masterKey,
+        Buffer.from(meta.ownerIv, 'base64')
+      );
+
+      // 3. Register the share (server learns only a random id + lifecycle data).
+      const sharePayload = {};
+      if (args.expires_in) sharePayload.expiresIn = args.expires_in;
+      if (args.max_downloads !== undefined && args.max_downloads !== null) {
+        sharePayload.maxDownloads = args.max_downloads;
+      }
+      const shareRes = await api.post(`/vault/files/${args.file_id}/share`, sharePayload);
+      const { shareId, expiresAt } = shareRes.data;
+
+      // 4. Assemble the link locally — the key rides in the fragment (#k=...),
+      //    which browsers never send to the server.
+      const link = `${WEB_URL}/s/${shareId}#k=${fileKey.toString('base64url')}`;
+
+      return ok(JSON.stringify({
+        success: true,
+        shareId,
+        link,
+        name: meta.name,
+        expiresAt: expiresAt || null,
+        maxDownloads: args.max_downloads ?? null,
+        warning:
+          'This link is public. ANYONE with it can read the file. ' +
+          'BitAtlas cannot read it, but the recipient can. Share only with intended recipients.',
+      }, null, 2));
+    }
+
+    // -----------------------------------------------------------------------
+    // bitatlas_list_shares
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_list_shares') {
+      const res = await api.get('/vault/shares');
+      return ok(JSON.stringify(res.data.shares || [], null, 2));
+    }
+
+    // -----------------------------------------------------------------------
+    // bitatlas_revoke_share
+    // -----------------------------------------------------------------------
+    if (name === 'bitatlas_revoke_share') {
+      if (!args.share_id) throw new Error('share_id is required');
+      await api.delete(`/vault/shares/${args.share_id}`);
+      return ok(
+        `Share ${args.share_id} revoked. The server will no longer hand out this file. ` +
+        'Note: anyone who already downloaded it keeps the content.'
+      );
     }
 
     throw new Error(`Unknown tool: ${name}`);

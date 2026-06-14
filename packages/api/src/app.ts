@@ -10,6 +10,7 @@ import { x402AnonymousContext } from './middleware/x402Auth';
 
 import authRoutes from './routes/auth';
 import vaultRoutes from './routes/vault';
+import shareRoutes from './routes/share';
 import folderRoutes from './routes/folders';
 import keyRoutes from './routes/keys';
 import statusRoutes from './routes/status';
@@ -56,6 +57,8 @@ app.use('/vault', authOrPay, x402AnonymousContext);
 // Routes
 app.use('/status', statusRoutes);
 app.use('/auth', authRoutes);
+// Public share resolution — deliberately NOT behind the /vault auth-or-pay stack.
+app.use('/share', shareRoutes);
 app.use('/vault', vaultRoutes);
 app.use('/folders', folderRoutes);
 app.use('/keys', keyRoutes);

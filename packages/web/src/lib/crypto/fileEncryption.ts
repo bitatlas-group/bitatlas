@@ -154,6 +154,79 @@ export async function decryptFile(
   return decryptedContent;
 }
 
+/**
+ * Decrypt a shared file using the raw file key directly.
+ *
+ * Unlike decryptFile(), the share viewer never has the owner's master key — it
+ * receives the raw 32-byte file key out of the URL fragment. This imports that
+ * raw key and decrypts the ciphertext (blob layout: ciphertext, with the GCM
+ * auth tag stored separately, same as the vault).
+ *
+ * @param encryptedBlob - Encrypted file blob (ciphertext only)
+ * @param rawKeyBytes - Raw 32-byte AES-256 file key
+ * @param fileIv - IV used to encrypt the file (Base64)
+ * @param authTag - GCM authentication tag (Base64)
+ */
+export async function decryptSharedFile(
+  encryptedBlob: Blob,
+  rawKeyBytes: Uint8Array,
+  fileIv: string,
+  authTag: string
+): Promise<ArrayBuffer> {
+  const fileKey = await crypto.subtle.importKey(
+    'raw',
+    rawKeyBytes as Uint8Array<ArrayBuffer>,
+    'AES-GCM',
+    false,
+    ['decrypt']
+  );
+
+  const fileIvBuffer = base64ToArrayBuffer(fileIv);
+  const authTagBuffer = base64ToArrayBuffer(authTag);
+  const ciphertextBuffer = await encryptedBlob.arrayBuffer();
+
+  const encryptedContent = new Uint8Array(ciphertextBuffer.byteLength + authTagBuffer.byteLength);
+  encryptedContent.set(new Uint8Array(ciphertextBuffer), 0);
+  encryptedContent.set(new Uint8Array(authTagBuffer), ciphertextBuffer.byteLength);
+
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv: fileIvBuffer }, fileKey, encryptedContent);
+}
+
+/**
+ * Unwrap a file's key to raw bytes using the owner's key, for building a share
+ * link. The raw key is what travels in the URL fragment — it never goes to the
+ * server. (Same first step as decryptFile, but returns the key instead of using
+ * it to decrypt the blob.)
+ */
+export async function unwrapRawFileKey(
+  encryptedFileKey: string,
+  keyIv: string,
+  userKey: CryptoKey
+): Promise<Uint8Array> {
+  const fileKeyRaw = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToArrayBuffer(keyIv) },
+    userKey,
+    base64ToArrayBuffer(encryptedFileKey)
+  );
+  return new Uint8Array(fileKeyRaw);
+}
+
+/** Encode raw bytes as base64url (no padding) — for the #k= fragment. */
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Decode a base64url string (no padding) into raw bytes. */
+export function base64UrlToBytes(b64url: string): Uint8Array {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(b64url.length / 4) * 4, '=');
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 // Helper functions
 export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);

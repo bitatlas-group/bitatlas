@@ -8,6 +8,7 @@ vi.mock('../middleware/rateLimit', () => ({
   generalRateLimit: (_req: unknown, _res: unknown, next: () => void) => next(),
   authRateLimit: (_req: unknown, _res: unknown, next: () => void) => next(),
   uploadRateLimit: (_req: unknown, _res: unknown, next: () => void) => next(),
+  shareResolveRateLimit: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 vi.mock('../db/client', () => ({
