@@ -30,8 +30,8 @@ jobs:
             # Always use docker compose — never manual docker run.
             # This ensures correct network (bitatlas_internal), health checks,
             # and dependency ordering are applied.
-            docker compose -f docker-compose.prod.yml build api web
-            docker compose -f docker-compose.prod.yml up -d --force-recreate api web
+            docker compose -f docker-compose.prod.yml build api web mcp
+            docker compose -f docker-compose.prod.yml up -d --force-recreate api web mcp
 
             # Run database migrations
             docker compose -f docker-compose.prod.yml exec -T api npx prisma migrate deploy || echo "Migration skipped (first run or already applied)"
@@ -63,6 +63,16 @@ jobs:
               docker logs bitatlas-api-1 --tail 50
               exit 1
             fi
+
+            # Smoke test: MCP HTTP endpoint is live
+            MCP=$(curl -sf http://127.0.0.1:4002/health || echo 'FAIL')
+            echo "MCP health response: $MCP"
+            if ! echo "$MCP" | grep -q '"status":"ok"'; then
+              echo "❌ MCP health check failed"
+              docker logs bitatlas-mcp-1 --tail 50
+              exit 1
+            fi
+            echo "✅ MCP endpoint healthy"
 
       - name: Verify external endpoints
         run: |
