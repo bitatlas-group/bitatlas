@@ -43,6 +43,28 @@ services:
       retries: 3
       start_period: 30s
 
+  # Remote Streamable-HTTP MCP endpoint (for mcp.bitatlas.com → Smithery).
+  # Multi-tenant: each agent sends its own creds as x-bitatlas-* headers, so do
+  # NOT set BITATLAS_API_KEY / BITATLAS_MASTER_KEY here (a host key would leak to
+  # any agent that omits the header). It calls the public API like web does.
+  mcp:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8000
+    ports:
+      - "127.0.0.1:4002:8000"
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   postgres:
     image: postgres:16-alpine
     environment:
