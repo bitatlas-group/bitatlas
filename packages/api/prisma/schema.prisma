@@ -66,6 +66,7 @@ model File {
   // Authenticated user files always have a userId.
   user                  User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   folder                Folder?   @relation(fields: [folderId], references: [id])
+  shares                Share[]
 
   @@index([userId])
   @@index([folderId])
@@ -73,6 +74,28 @@ model File {
   @@index([deletedAt])
   @@index([expiresAt])
   @@map("files")
+}
+
+// Zero-knowledge share links. No key material is ever stored here — the raw
+// file key travels only in the URL fragment, assembled client-side. The server
+// holds only a random id plus expiry/revocation/download-cap metadata, which is
+// what makes revocation and expiry enforceable (presigned URLs are minted for
+// live shares only).
+model Share {
+  id            String    @id @db.VarChar(32)            // base64url random, NOT uuid — it appears in URLs
+  fileId        String    @db.Uuid @map("file_id")
+  createdBy     String    @db.Uuid @map("created_by")    // userId; v1 = authenticated owners only
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz
+  maxDownloads  Int?      @map("max_downloads")          // NULL = unlimited within expiry
+  downloadCount Int       @default(0) @map("download_count")
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([createdBy])
+  @@map("shares")
 }
 
 model Folder {

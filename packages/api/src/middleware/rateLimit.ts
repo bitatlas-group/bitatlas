@@ -25,3 +25,14 @@ export const uploadRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many upload requests' },
 });
+
+// Public share-resolve endpoint. Keyed by IP + shareId to blunt enumeration
+// (ids are 128-bit random anyway, but this caps brute-force/scanner traffic).
+export const shareResolveRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip}:${req.params.shareId ?? ''}`,
+  message: { error: 'Too many requests' },
+});

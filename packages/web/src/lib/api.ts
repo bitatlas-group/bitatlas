@@ -231,6 +231,27 @@ export const vaultApi = {
   },
 };
 
+// ── Share-link endpoints ──────────────────────────────────────────────────────
+// The raw file key is NEVER sent here — the client unwraps it locally and puts
+// it in the URL fragment. The API only ever sees the share id.
+export const sharesApi = {
+  create: (fileId: string, opts: { expiresIn: ShareExpiry; maxDownloads?: number | null }) =>
+    request<{ shareId: string; expiresAt: string }>(`/vault/files/${fileId}/share`, {
+      method: 'POST',
+      body: JSON.stringify({
+        expiresIn: opts.expiresIn,
+        ...(opts.maxDownloads ? { maxDownloads: opts.maxDownloads } : {}),
+      }),
+    }),
+
+  list: async () => {
+    const res = await request<{ shares: ShareRecord[] }>('/vault/shares');
+    return res.shares;
+  },
+
+  revoke: (shareId: string) => request<void>(`/vault/shares/${shareId}`, { method: 'DELETE' }),
+};
+
 // ── Folder endpoints ──────────────────────────────────────────────────────────
 export const foldersApi = {
   list: async () => {
@@ -319,6 +340,21 @@ export interface Folder {
   name: string;
   parentId: string | null;
   createdAt: string;
+}
+
+export type ShareExpiry = '24h' | '7d' | '30d';
+
+export interface ShareRecord {
+  shareId: string;
+  fileId: string;
+  fileName: string;
+  mimeType: string | null;
+  expiresAt: string;
+  maxDownloads: number | null;
+  downloadCount: number;
+  revokedAt: string | null;
+  createdAt: string;
+  active: boolean;
 }
 
 export interface ApiKeyRecord {

@@ -445,6 +445,155 @@ router.patch('/files/:id', requirePermission('write'), async (req: Request, res:
   });
 });
 
+// ---------------------------------------------------------------------------
+// Share links (zero-knowledge). The raw file key never touches the server —
+// it travels in the URL fragment, assembled by the client. We store only a
+// random id + lifecycle metadata, which is what makes expiry/revocation real.
+// ---------------------------------------------------------------------------
+
+/** Random 22-char base64url id (128-bit). Lives in URLs, so not a UUID. */
+function generateShareId(): string {
+  return crypto.randomBytes(16).toString('base64url');
+}
+
+const EXPIRES_IN_MS: Record<string, number> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+};
+
+// Active (non-revoked, unexpired) shares a free-plan user may hold at once.
+const FREE_PLAN_ACTIVE_SHARE_CAP = 10;
+
+const createShareSchema = z.object({
+  expiresIn: z.enum(['24h', '7d', '30d']).default('7d'),
+  maxDownloads: z.number().int().positive().max(10000).optional().nullable(),
+});
+
+// POST /vault/files/:id/share — mint a zero-knowledge share link (auth, owner-only)
+router.post('/files/:id/share', uploadRateLimit, requirePermission('write'), async (req: Request, res: Response): Promise<void> => {
+  // Shares are owner-scoped; anonymous x402 callers have no durable identity to
+  // own or later revoke a share, so we reject them in v1 (mirrors folder rule).
+  if (isX402Paid(req)) {
+    res.status(403).json({ error: 'Anonymous x402 callers cannot create share links' });
+    return;
+  }
+
+  const parsed = createShareSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    return;
+  }
+
+  const userId = req.user!.id;
+  const { expiresIn, maxDownloads } = parsed.data;
+
+  // File must exist and belong to the caller.
+  const file = await prisma.file.findFirst({
+    where: { id: req.params.id, userId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!file) {
+    res.status(404).json({ error: 'File not found' });
+    return;
+  }
+
+  // Per-plan cap on active shares.
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { plan: true } });
+  if (user?.plan === 'free') {
+    const activeShares = await prisma.share.count({
+      where: { createdBy: userId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (activeShares >= FREE_PLAN_ACTIVE_SHARE_CAP) {
+      res.status(403).json({
+        error: 'Active share limit reached',
+        message: `Free plan allows ${FREE_PLAN_ACTIVE_SHARE_CAP} active share links. Revoke one or upgrade.`,
+        limit: FREE_PLAN_ACTIVE_SHARE_CAP,
+      });
+      return;
+    }
+  }
+
+  const expiresAt = new Date(Date.now() + EXPIRES_IN_MS[expiresIn]);
+  const share = await prisma.share.create({
+    data: {
+      id: generateShareId(),
+      fileId: file.id,
+      createdBy: userId,
+      expiresAt,
+      maxDownloads: maxDownloads ?? null,
+    },
+    select: { id: true, expiresAt: true },
+  });
+
+  // No URL is returned: the client appends `#k=<rawFileKey>` locally so the key
+  // never appears in a server response or log.
+  res.status(201).json({ shareId: share.id, expiresAt: share.expiresAt });
+});
+
+// GET /vault/shares — list the caller's share links (auth)
+router.get('/shares', requirePermission('read'), async (req: Request, res: Response): Promise<void> => {
+  if (isX402Paid(req)) {
+    res.status(400).json({ error: 'Listing shares is not supported for anonymous x402 access' });
+    return;
+  }
+
+  const shares = await prisma.share.findMany({
+    where: { createdBy: req.user!.id },
+    select: {
+      id: true,
+      fileId: true,
+      expiresAt: true,
+      maxDownloads: true,
+      downloadCount: true,
+      revokedAt: true,
+      createdAt: true,
+      file: { select: { name: true, mimeType: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const now = new Date();
+  res.json({
+    shares: shares.map((s) => ({
+      shareId: s.id,
+      fileId: s.fileId,
+      fileName: s.file.name,
+      mimeType: s.file.mimeType,
+      expiresAt: s.expiresAt,
+      maxDownloads: s.maxDownloads,
+      downloadCount: s.downloadCount,
+      revokedAt: s.revokedAt,
+      createdAt: s.createdAt,
+      active: !s.revokedAt && s.expiresAt > now &&
+        (s.maxDownloads === null || s.downloadCount < s.maxDownloads),
+    })),
+  });
+});
+
+// DELETE /vault/shares/:shareId — revoke (auth, owner-only)
+router.delete('/shares/:shareId', requirePermission('delete'), async (req: Request, res: Response): Promise<void> => {
+  if (isX402Paid(req)) {
+    res.status(403).json({ error: 'Anonymous x402 callers cannot revoke share links' });
+    return;
+  }
+
+  // Owner-scoped + idempotent: only revoke a live share the caller owns.
+  const result = await prisma.share.updateMany({
+    where: { id: req.params.shareId, createdBy: req.user!.id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+
+  if (result.count === 0) {
+    res.status(404).json({ error: 'Share not found or already revoked' });
+    return;
+  }
+
+  // Honest caveat: revocation stops FUTURE downloads. Anyone who already
+  // fetched ciphertext + key keeps the content.
+  res.json({ ok: true });
+});
+
 // DELETE /vault/files/:id — soft delete + S3 cleanup + quota update
 router.delete('/files/:id', requirePermission('delete'), async (req: Request, res: Response): Promise<void> => {
   const x402 = isX402Paid(req);

@@ -6,12 +6,13 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCrypto } from '@/contexts/CryptoContext';
 import { useFolders } from '@/contexts/FolderContext';
-import { vaultApi, uploadToPresignedUrl, type VaultFile, type Folder } from '@/lib/api';
+import { vaultApi, sharesApi, uploadToPresignedUrl, type VaultFile, type Folder, type ShareRecord, type ShareExpiry } from '@/lib/api';
+import { unwrapRawFileKey, bytesToBase64Url } from '@/lib/crypto/fileEncryption';
 import {
   Loader2, Search, Upload, Download, X, Home, Folder as FolderIcon,
   FolderPlus, ChevronRight, AlertCircle, FileImage, Video, Music,
   FileText, Sheet, AlignLeft, File, Trash2, FolderInput, Lock, Eye,
-  MoreVertical, UploadCloud, ShieldCheck,
+  MoreVertical, UploadCloud, ShieldCheck, Link2, Copy, Check,
 } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ export default function VaultPage() {
 
 function VaultContent() {
   const { user } = useAuth();
-  const { encryptFile, decryptFile } = useCrypto();
+  const { encryptFile, decryptFile, masterKey } = useCrypto();
   const { folders, createFolder: createFolderCtx } = useFolders();
   const searchParams = useSearchParams();
   const folderId = searchParams.get('folderId') ?? undefined;
@@ -83,6 +84,8 @@ function VaultContent() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [shareTarget, setShareTarget] = useState<VaultFile | null>(null);
+  const [sharesPanelOpen, setSharesPanelOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -209,6 +212,21 @@ function VaultContent() {
     catch (err) { setError(err instanceof Error ? err.message : 'Delete failed'); }
   }
 
+  // ── Share link ───────────────────────────────────────────────────────────────
+  // Unwrap the file key locally, register the share, and assemble the link. The
+  // raw key only ever lives in the URL fragment — the API never sees it.
+  async function generateShareLink(
+    file: VaultFile,
+    opts: { expiresIn: ShareExpiry; maxDownloads?: number | null },
+  ): Promise<{ link: string; expiresAt: string }> {
+    if (!masterKey) throw new Error('No master key — please log in again');
+    const full = await vaultApi.getFile(file.id);
+    const rawKey = await unwrapRawFileKey(full.ownerEncryptedKey, full.ownerIv, masterKey);
+    const { shareId, expiresAt } = await sharesApi.create(file.id, opts);
+    const link = `${window.location.origin}/s/${shareId}#k=${bytesToBase64Url(rawKey)}`;
+    return { link, expiresAt };
+  }
+
   // ── Move ───────────────────────────────────────────────────────────────────
   async function handleMoveToFolder(fileId: string, targetFolderId: string | null) {
     setError(null);
@@ -232,6 +250,13 @@ function VaultContent() {
               className="w-full h-12 bg-white rounded-xl pl-10 pr-4 text-[15px] text-ink-900 placeholder:text-ink-300 outline-none focus:ring-2 focus:ring-brand-500/20 border border-ink-100 transition-all"
             />
           </div>
+          <button
+            onClick={() => setSharesPanelOpen(true)}
+            title="Manage share links"
+            className="flex items-center justify-center w-12 h-12 bg-white rounded-xl hover:bg-ink-50 transition-colors border border-ink-100 shrink-0"
+          >
+            <Link2 size={20} className="text-ink-700" />
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
@@ -338,6 +363,7 @@ function VaultContent() {
                 onDownload={() => handleDownload(file)}
                 onDelete={() => handleDelete(file.id)}
                 onMoveOpen={() => setMoveTarget(file)}
+                onShareOpen={() => setShareTarget(file)}
               />
             ))}
           </>
@@ -480,6 +506,18 @@ function VaultContent() {
         </>
       )}
 
+      {/* ── Share Link Modal ── */}
+      {shareTarget && (
+        <ShareModal
+          file={shareTarget}
+          onClose={() => setShareTarget(null)}
+          onGenerate={generateShareLink}
+        />
+      )}
+
+      {/* ── Shared Links Panel ── */}
+      {sharesPanelOpen && <SharesPanel onClose={() => setSharesPanelOpen(false)} />}
+
       <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelected} />
 
       <style jsx global>{`
@@ -514,7 +552,7 @@ function FolderCard({ folder }: { folder: Folder }) {
 
 // ── File Card ─────────────────────────────────────────────────────────────────
 function FileCard({
-  file, downloading, onTap, onDownload, onDelete, onMoveOpen,
+  file, downloading, onTap, onDownload, onDelete, onMoveOpen, onShareOpen,
 }: {
   file: VaultFile;
   downloading: boolean;
@@ -522,6 +560,7 @@ function FileCard({
   onDownload: () => void;
   onDelete: () => void;
   onMoveOpen: () => void;
+  onShareOpen: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const previewable = canPreview(file.mimeType);
@@ -578,6 +617,13 @@ function FileCard({
                   Download
                 </button>
                 <button
+                  onClick={() => { setMenuOpen(false); onShareOpen(); }}
+                  className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-ink-50 transition-colors text-[14px] text-ink-700"
+                >
+                  <Link2 size={14} />
+                  Share link
+                </button>
+                <button
                   onClick={() => { setMenuOpen(false); onMoveOpen(); }}
                   className="flex items-center gap-2 w-full px-4 py-3 text-left hover:bg-ink-50 transition-colors text-[14px] text-ink-700"
                 >
@@ -597,6 +643,250 @@ function FileCard({
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Share Link Modal ────────────────────────────────────────────────────────
+function ShareModal({
+  file,
+  onClose,
+  onGenerate,
+}: {
+  file: VaultFile;
+  onClose: () => void;
+  onGenerate: (
+    file: VaultFile,
+    opts: { expiresIn: ShareExpiry; maxDownloads?: number | null },
+  ) => Promise<{ link: string; expiresAt: string }>;
+}) {
+  const [expiresIn, setExpiresIn] = useState<ShareExpiry>('7d');
+  const [capEnabled, setCapEnabled] = useState(false);
+  const [maxDownloads, setMaxDownloads] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function generate() {
+    setBusy(true); setError(null);
+    try {
+      const { link } = await onGenerate(file, {
+        expiresIn,
+        maxDownloads: capEnabled ? maxDownloads : null,
+      });
+      setLink(link);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create link');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { /* clipboard unavailable */ }
+  }
+
+  const EXPIRY_OPTIONS: { value: ShareExpiry; label: string }[] = [
+    { value: '24h', label: '24 hours' },
+    { value: '7d', label: '7 days' },
+    { value: '30d', label: '30 days' },
+  ];
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl flex flex-col animate-slide-up shadow-lg max-w-lg mx-auto sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 sm:rounded-2xl">
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-9 h-1 rounded-full bg-ink-200" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100">
+          <div className="min-w-0">
+            <h3 className="text-[16px] font-semibold text-ink-900 flex items-center gap-2">
+              <Link2 size={16} className="text-brand-500" /> Share link
+            </h3>
+            <p className="text-[13px] text-ink-400 mt-0.5 truncate max-w-[280px]">{file.name}</p>
+          </div>
+          <button onClick={onClose} className="text-ink-400 hover:text-ink-700 transition-colors p-1">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {!link ? (
+            <>
+              <div>
+                <label className="text-[13px] font-medium text-ink-700 block mb-1.5">Link expires after</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {EXPIRY_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setExpiresIn(opt.value)}
+                      className={`py-2.5 rounded-xl text-[14px] font-medium border transition-colors ${
+                        expiresIn === opt.value
+                          ? 'bg-brand-500 text-white border-brand-500'
+                          : 'bg-white text-ink-700 border-ink-100 hover:bg-ink-50'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-[14px] text-ink-700 cursor-pointer">
+                  <input type="checkbox" checked={capEnabled} onChange={e => setCapEnabled(e.target.checked)} className="accent-brand-500" />
+                  Limit total downloads
+                </label>
+                {capEnabled && (
+                  <input
+                    type="number" min={1} max={10000} value={maxDownloads}
+                    onChange={e => setMaxDownloads(Math.max(1, Number(e.target.value) || 1))}
+                    className="mt-2 w-28 h-10 rounded-lg border border-ink-100 px-3 text-[14px] text-ink-900 outline-none focus:ring-2 focus:ring-brand-500/20"
+                  />
+                )}
+              </div>
+
+              <div className="flex items-start gap-2 rounded-xl bg-ink-25 p-3 text-[12px] text-ink-500">
+                <ShieldCheck size={15} className="text-success shrink-0 mt-0.5" />
+                <span>Anyone with the link can open this file. The key lives in the link itself — BitAtlas never sees it and cannot read the file.</span>
+              </div>
+
+              {error && <p className="text-[13px] text-danger">{error}</p>}
+
+              <button
+                onClick={generate}
+                disabled={busy}
+                className="w-full h-11 bg-ink-900 text-white rounded-xl font-medium text-[15px] hover:bg-ink-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+                Create link
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly value={link}
+                  onFocus={e => e.target.select()}
+                  className="flex-1 h-11 rounded-lg border border-ink-100 px-3 text-[13px] text-ink-700 bg-ink-25 outline-none font-mono"
+                />
+                <button
+                  onClick={copy}
+                  className="flex items-center gap-1.5 h-11 px-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-[14px] font-medium shrink-0"
+                >
+                  {copied ? <Check size={15} /> : <Copy size={15} />}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <p className="text-[12px] text-ink-400">
+                Share this link with the recipient. Revocation stops future downloads, but anyone who already opened it keeps the file.
+              </p>
+              <button
+                onClick={onClose}
+                className="w-full h-11 border border-ink-100 text-ink-700 rounded-xl font-medium text-[15px] hover:bg-ink-50 transition-colors"
+              >
+                Done
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Shared Links Panel ──────────────────────────────────────────────────────
+function SharesPanel({ onClose }: { onClose: () => void }) {
+  const [shares, setShares] = useState<ShareRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      setShares(await sharesApi.list());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load shares');
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function revoke(shareId: string) {
+    setRevoking(shareId);
+    try {
+      await sharesApi.revoke(shareId);
+      setShares(prev => prev?.map(s => s.shareId === shareId ? { ...s, revokedAt: new Date().toISOString(), active: false } : s) ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke');
+    } finally {
+      setRevoking(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl max-h-[75vh] flex flex-col animate-slide-up shadow-lg max-w-lg mx-auto sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:max-h-[70vh]">
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-9 h-1 rounded-full bg-ink-200" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100">
+          <h3 className="text-[16px] font-semibold text-ink-900 flex items-center gap-2">
+            <Link2 size={16} className="text-brand-500" /> Shared links
+          </h3>
+          <button onClick={onClose} className="text-ink-400 hover:text-ink-700 transition-colors p-1">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          {error && <p className="text-[13px] text-danger px-2 pb-2">{error}</p>}
+          {shares === null ? (
+            <div className="flex justify-center py-10"><Loader2 size={24} className="animate-spin text-ink-300" /></div>
+          ) : shares.length === 0 ? (
+            <p className="text-center text-[14px] text-ink-400 py-10">No share links yet.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {shares.map(s => (
+                <li key={s.shareId} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-ink-25 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[14px] font-medium text-ink-900 truncate">{s.fileName}</p>
+                    <p className="text-[12px] text-ink-400">
+                      {s.active
+                        ? `Expires ${formatDate(s.expiresAt)}`
+                        : s.revokedAt ? 'Revoked' : 'Expired'}
+                      {' · '}
+                      {s.downloadCount}{s.maxDownloads !== null ? `/${s.maxDownloads}` : ''} download{s.downloadCount === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0 ${
+                    s.active ? 'bg-emerald-800 text-white' : 'bg-ink-100 text-ink-400'
+                  }`}>
+                    {s.active ? 'Active' : 'Inactive'}
+                  </span>
+                  {s.active && (
+                    <button
+                      onClick={() => revoke(s.shareId)}
+                      disabled={revoking === s.shareId}
+                      className="text-[13px] text-danger hover:underline shrink-0 disabled:opacity-50"
+                    >
+                      {revoking === s.shareId ? '…' : 'Revoke'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
