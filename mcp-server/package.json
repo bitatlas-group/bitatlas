@@ -12,7 +12,9 @@
     "url": "git+https://github.com/bitatlas-group/bitatlas.git"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:http": "node http.js",
+    "test": "node test-buildserver.js"
   },
   "keywords": [
     "mcp",

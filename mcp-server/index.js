@@ -14,33 +14,23 @@ require('dotenv').config();
 // Config
 // ---------------------------------------------------------------------------
 
-const API_URL = process.env.BITATLAS_API_URL || 'https://api.bitatlas.com';
-// Public web origin used to assemble share links. The decryption key is appended
-// as a URL fragment locally, so it never reaches the API.
-const WEB_URL = (process.env.BITATLAS_WEB_URL || 'https://www.bitatlas.com').replace(/\/$/, '');
-const API_KEY = process.env.BITATLAS_API_KEY;
-const MASTER_KEY_HEX = process.env.BITATLAS_MASTER_KEY;
-const X402_WALLET_KEY = process.env.BITATLAS_WALLET_PRIVATE_KEY;
-
-if (!API_KEY && !X402_WALLET_KEY) {
-  console.error('Warning: No BITATLAS_API_KEY or BITATLAS_WALLET_PRIVATE_KEY configured.');
-  console.error('Vault tools will fail. Set one of:');
-  console.error('  BITATLAS_API_KEY  — get one at https://bitatlas.com/vault/settings');
-  console.error('  BITATLAS_WALLET_PRIVATE_KEY — EVM wallet key to pay per-request via x402');
-}
+// Config defaults. Per-request credentials are passed into buildServer(); the
+// stdio entry (and single-tenant self-hosting) falls back to these env vars.
+const DEFAULT_API_URL = 'https://api.bitatlas.com';
+const DEFAULT_WEB_URL = 'https://www.bitatlas.com';
 
 /** Returns the master key as a 32-byte Buffer. Throws if not configured or invalid. */
-function getMasterKey() {
-  if (!MASTER_KEY_HEX) {
+function parseMasterKey(masterKeyHex) {
+  if (!masterKeyHex) {
     throw new Error(
       'BITATLAS_MASTER_KEY is required for encrypt/decrypt operations. ' +
       'Set it to your hex-encoded 256-bit master key (64 hex characters).'
     );
   }
-  const key = Buffer.from(MASTER_KEY_HEX, 'hex');
+  const key = Buffer.from(masterKeyHex, 'hex');
   if (key.length !== 32) {
     throw new Error(
-      `BITATLAS_MASTER_KEY must be a 64-character hex string (32 bytes). Got ${MASTER_KEY_HEX.length} characters.`
+      `BITATLAS_MASTER_KEY must be a 64-character hex string (32 bytes). Got ${masterKeyHex.length} characters.`
     );
   }
   return key;
@@ -49,15 +39,6 @@ function getMasterKey() {
 // ---------------------------------------------------------------------------
 // API Client
 // ---------------------------------------------------------------------------
-
-// Existing axios client — used when BITATLAS_API_KEY is set
-const axiosApi = axios.create({
-  baseURL: API_URL,
-  headers: {
-    Authorization: `Bearer ${API_KEY}`,
-    'Content-Type': 'application/json',
-  },
-});
 
 /**
  * Build an x402 payment client wrapping the native fetch.
@@ -102,22 +83,25 @@ function createX402Client(x402Fetch, baseUrl) {
 }
 
 /**
- * Resolve the active API client at startup.
+ * Resolve an API client for the given credentials.
  * Priority: API key > wallet key > unauthenticated (status only).
  */
-function buildApiClient() {
-  if (API_KEY) {
-    return axiosApi;
+function buildApiClient(apiKey, walletKey, apiUrl) {
+  if (apiKey) {
+    return axios.create({
+      baseURL: apiUrl,
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    });
   }
 
-  if (X402_WALLET_KEY) {
+  if (walletKey) {
     try {
       const { wrapFetchWithPayment } = require('@x402/fetch');
       const { ExactEvmScheme } = require('@x402/evm/exact/client');
-      const evmScheme = new ExactEvmScheme(X402_WALLET_KEY);
+      const evmScheme = new ExactEvmScheme(walletKey);
       const x402Fetch = wrapFetchWithPayment(fetch, [evmScheme]);
       console.error('[x402] Using wallet-based x402 payments for vault access');
-      return createX402Client(x402Fetch, API_URL);
+      return createX402Client(x402Fetch, apiUrl);
     } catch (err) {
       console.error('[x402] Failed to initialize x402 client:', err.message);
       console.error('[x402] Ensure @x402/fetch and @x402/evm are installed (npm install in mcp-server/)');
@@ -125,10 +109,8 @@ function buildApiClient() {
   }
 
   // No auth — unauthenticated client (only /status will work)
-  return axios.create({ baseURL: API_URL });
+  return axios.create({ baseURL: apiUrl });
 }
-
-const api = buildApiClient();
 
 // ---------------------------------------------------------------------------
 // Node.js Crypto — ported from sdk/encryption/fileEncryption.ts
@@ -299,7 +281,23 @@ function ok(str) {
 
 // ---------------------------------------------------------------------------
 // MCP Server
+//
+// buildServer(creds) returns a fully wired Server. Credentials are passed per
+// call so the same handlers serve both the stdio entry (index.js) and the
+// remote Streamable-HTTP entry (http.js), where each agent supplies its own
+// keys via request headers. creds fields fall back to env for self-hosting.
 // ---------------------------------------------------------------------------
+
+function buildServer(creds = {}) {
+const API_URL = creds.apiUrl || process.env.BITATLAS_API_URL || DEFAULT_API_URL;
+// Public web origin used to assemble share links. The decryption key is appended
+// as a URL fragment locally, so it never reaches the API.
+const WEB_URL = (creds.webUrl || process.env.BITATLAS_WEB_URL || DEFAULT_WEB_URL).replace(/\/$/, '');
+const API_KEY = creds.apiKey || process.env.BITATLAS_API_KEY;
+const MASTER_KEY_HEX = creds.masterKey || process.env.BITATLAS_MASTER_KEY;
+const X402_WALLET_KEY = creds.walletKey || process.env.BITATLAS_WALLET_PRIVATE_KEY;
+const getMasterKey = () => parseMasterKey(MASTER_KEY_HEX);
+const api = buildApiClient(API_KEY, X402_WALLET_KEY, API_URL);
 
 const server = new Server(
   { name: 'bitatlas-vault', version: '1.1.0' },
@@ -745,15 +743,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+  return server;
+}
+
+module.exports = { buildServer };
+
 // ---------------------------------------------------------------------------
-// Start
+// Start (stdio) — only when run directly, not when required by http.js
 // ---------------------------------------------------------------------------
 
 async function main() {
+  const API_KEY = process.env.BITATLAS_API_KEY;
+  const X402_WALLET_KEY = process.env.BITATLAS_WALLET_PRIVATE_KEY;
+  if (!API_KEY && !X402_WALLET_KEY) {
+    console.error('Warning: No BITATLAS_API_KEY or BITATLAS_WALLET_PRIVATE_KEY configured.');
+    console.error('Vault tools will fail. Set one of:');
+    console.error('  BITATLAS_API_KEY  — get one at https://bitatlas.com/vault/settings');
+    console.error('  BITATLAS_WALLET_PRIVATE_KEY — EVM wallet key to pay per-request via x402');
+  }
+
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await buildServer().connect(transport);
   console.error('BitAtlas MCP Server running on stdio');
-  console.error(`API: ${API_URL}`);
+  console.error(`API: ${process.env.BITATLAS_API_URL || DEFAULT_API_URL}`);
   if (API_KEY) {
     console.error('Auth: API key');
   } else if (X402_WALLET_KEY) {
@@ -761,10 +773,12 @@ async function main() {
   } else {
     console.error('Auth: none (vault tools unavailable)');
   }
-  console.error(`Master key: ${MASTER_KEY_HEX ? 'configured' : 'NOT SET (encrypt/decrypt unavailable)'}`);
+  console.error(`Master key: ${process.env.BITATLAS_MASTER_KEY ? 'configured' : 'NOT SET (encrypt/decrypt unavailable)'}`);
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}
