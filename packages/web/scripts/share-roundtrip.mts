@@ -15,7 +15,7 @@ import {
   bytesToBase64Url,
   base64UrlToBytes,
   decryptSharedFile,
-} from '../src/lib/crypto/fileEncryption.ts';
+} from '../src/lib/crypto/fileEncryption';
 
 function assert(cond: boolean, msg: string) {
   if (!cond) { console.error('FAIL:', msg); process.exit(1); }
