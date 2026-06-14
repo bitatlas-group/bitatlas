@@ -1,0 +1,65 @@
+---
+title: "Introducing Zero-Knowledge Share Links: hand a file to anyone, without the host reading it"
+description: "Agents and people can now share a vault file over a public link the server can't read. The decryption key travels in the URL fragment — BitAtlas only ever sees ciphertext and a random id."
+date: 2026-06-14
+author: "BitAtlas Engineering"
+slug: "introducing-zero-knowledge-share-links"
+keywords: ["zero-knowledge", "share links", "secure file sharing", "MCP", "agent handoff", "end-to-end encryption", "AES-256-GCM"]
+readingTime: 6
+---
+
+An AI agent finishes a job and produces a file — a report, a signed PDF, an export, a build artifact. Now it has to get that file to a human. Today that means one of two bad options: attach it somewhere the host can read it, or paste it into a tool like WeTransfer or a Drive link — where, again, the host can read it.
+
+We built a third option. Starting today, BitAtlas can hand a file to a person over a **public link that the server itself cannot open**.
+
+**Public link, private content.**
+
+## The handoff, without giving up zero knowledge
+
+Every file in BitAtlas is encrypted in your browser (or the agent's process) with its own AES-256-GCM key before it's ever uploaded. We only store ciphertext. Share links extend that guarantee to the handoff itself:
+
+```
+https://www.bitatlas.com/s/{shareId}#k={fileKey}
+```
+
+The decryption key lives in the **URL fragment** — the part after the `#`. Browsers never send the fragment to the server. So when someone opens a share link:
+
+1. The page asks our API to resolve `{shareId}` → it returns ciphertext coordinates and a short-lived download URL. **No key.**
+2. The browser reads the key from the fragment, fetches the ciphertext, and decrypts **locally**.
+
+BitAtlas only ever sees a random id and an encrypted blob. We can't read what you share — and neither can anyone who compromises our servers. That's not a policy; it's the architecture.
+
+## Built agent-first
+
+The sharpest version of this problem belongs to agents, so that's where we started. With the [BitAtlas MCP server](https://www.npmjs.com/package/@bitatlas/mcp-server), handing a file to a human is one tool call:
+
+```js
+bitatlas_share_file({ file_id: "…", expires_in: "7d" })
+
+→ https://www.bitatlas.com/s/AbC123…#k=…
+```
+
+The agent unwraps the file key in its own process, registers the share (the API learns only the id), and assembles the link locally. The tool description carries the warning agents need more than humans do: *anyone with this link can read the file — confirm before sharing anything sensitive.*
+
+Three new tools ship in MCP server **v1.1.0**: `bitatlas_share_file`, `bitatlas_list_shares`, and `bitatlas_revoke_share`.
+
+## And built for people
+
+In your vault, every file now has a **Share link** action. Pick an expiry, optionally cap the number of downloads, and copy a link you can drop into email, chat, or a ticket. The recipient opens it in any browser — no account, no app, no plugin — and the file decrypts in front of them, with an inline preview for images, PDFs, and text. A **Shared links** panel lets you see and revoke everything you've shared.
+
+## You stay in control
+
+- **Expiry** — links live for 24 hours, 7 days, or 30 days, then go dark automatically.
+- **Download caps** — optionally limit a link to N downloads.
+- **Revoke anytime** — the server stops handing out the file immediately.
+- **No host-side execution** — we never render shared HTML and force downloads for executable types, so a share link can't become a phishing or malware host. We can't scan your content (that's the point) — so we gate distribution instead.
+
+An honest caveat we put right on the viewer page: anyone you give a link to can read the file, and anyone who already downloaded it keeps it — revocation stops *future* downloads. That's true of every sharing tool. Ours just guarantees the one thing the others can't: the **server** never could.
+
+## Try it
+
+- **People:** open your [vault](https://www.bitatlas.com/vault) and hit *Share link* on any file.
+- **Agents:** `npx -y @bitatlas/mcp-server` and call `bitatlas_share_file`.
+- **More:** see [how share links work](https://www.bitatlas.com/share).
+
+Public link, private content. We can't read what you share — and that's exactly the point.
