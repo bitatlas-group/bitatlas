@@ -8,6 +8,7 @@ import { IconShield, IconGlobe, IconChart, IconArrow, IconCheck } from "@/design
 
 const NAV = [
   { href: "/#features", label: "Product" },
+  { href: "/share",     label: "Share" },
   { href: "/#why",      label: "Why BitAtlas" },
   { href: "/blog",      label: "Blog" },
 ];
@@ -48,6 +49,7 @@ const PRICING_FEATURES = [
 ];
 
 const FOOTER_LINKS = [
+  { label: "Share",     href: "/share" },
   { label: "Security",  href: "/security" },
   { label: "Blog",      href: "/blog" },
   { label: "GitHub",    href: "https://github.com/bitatlas-group/bitatlas" },
@@ -208,6 +210,45 @@ export default function Home() {
                 <div className="mt-4 flex items-center gap-2 bg-brand-500/10 rounded-xl px-3 py-2">
                   <IconShield size={14} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">AES-256-GCM Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Share links ── */}
+        <section id="share" className="px-6 md:px-16 py-24">
+          <div className="max-w-7xl mx-auto">
+            <div className="bg-ink-900 text-white rounded-2xl px-8 md:px-14 py-16 relative overflow-hidden">
+              <div className="absolute -right-16 -bottom-16 opacity-20 pointer-events-none">
+                <DottedGlobe size={420} color="#3B82F6" dim="#1D4ED8" />
+              </div>
+              <div className="relative z-10 max-w-3xl">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-brand-400">New — Share links</div>
+                <h2 className="mt-3 text-[40px] font-semibold leading-[1.1] tracking-[-0.02em]">
+                  Public link, private content.
+                </h2>
+                <p className="mt-5 text-[17px] leading-relaxed text-ink-300 max-w-[600px]">
+                  Hand a file to anyone — or let an agent hand one to a human — over a link the host can&apos;t read.
+                  The decryption key travels in the link itself, so BitAtlas only ever sees ciphertext and a random id.
+                </p>
+                <div className="mt-7 grid sm:grid-cols-2 gap-3 max-w-[600px]">
+                  <div className="flex items-start gap-3 bg-white/5 rounded-xl px-4 py-3">
+                    <IconCheck size={16} className="text-brand-400 mt-0.5 shrink-0" />
+                    <span className="text-[14px] text-ink-200"><span className="font-semibold text-white">People:</span> one click in your vault → a link anyone can open, no account.</span>
+                  </div>
+                  <div className="flex items-start gap-3 bg-white/5 rounded-xl px-4 py-3">
+                    <IconCheck size={16} className="text-brand-400 mt-0.5 shrink-0" />
+                    <span className="text-[14px] text-ink-200"><span className="font-semibold text-white">Agents:</span> one MCP tool call → a zero-knowledge link to hand a human.</span>
+                  </div>
+                </div>
+                <div className="mt-8 flex flex-col sm:flex-row gap-3">
+                  <Link href="/share">
+                    <Button variant="primary" size="lg" iconRight={<IconArrow size={16} />}>How share links work</Button>
+                  </Link>
+                  <Link href="/register">
+                    <Button variant="ghost" size="lg" className="text-white border-ink-600 hover:bg-ink-800">Start for free</Button>
+                  </Link>
                 </div>
               </div>
             </div>
