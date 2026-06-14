@@ -302,7 +302,7 @@ function ok(str) {
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: 'bitatlas-vault', version: '1.0.0' },
+  { name: 'bitatlas-vault', version: '1.1.0' },
   { capabilities: { tools: {} } }
 );
 

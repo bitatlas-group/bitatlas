@@ -1,7 +1,7 @@
 {
   "name": "@bitatlas/mcp-server",
-  "version": "1.0.0",
-  "description": "Zero-Knowledge Cloud Drive for Humans and Agents — client-side AES-256-GCM encryption, presigned S3 uploads, 7 MCP tools.",
+  "version": "1.1.0",
+  "description": "Zero-Knowledge Cloud Drive for Humans and Agents — client-side AES-256-GCM encryption, presigned S3 uploads, zero-knowledge share links, 10 MCP tools.",
   "author": "BitAtlas Group",
   "license": "MIT",
   "repository": {
@@ -23,6 +23,10 @@
       },
       "BITATLAS_API_URL": {
         "description": "API base URL (default: https://api.bitatlas.com)",
+        "required": false
+      },
+      "BITATLAS_WEB_URL": {
+        "description": "Web origin used to build share links (default: https://www.bitatlas.com)",
         "required": false
       }
     }
