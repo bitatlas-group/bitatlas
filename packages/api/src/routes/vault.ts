@@ -8,6 +8,7 @@ import { uploadRateLimit } from '../middleware/rateLimit';
 import { generateUploadUrl, generateDownloadUrl, deleteObject } from '../services/storage';
 import { isX402Paid } from '../middleware/x402Auth';
 import { STORAGE_DAYS_INCLUDED } from '../config/x402';
+import { getShareLimits, EXPIRY_RANK } from '../config/shareLimits';
 
 /** Generate a random 32-byte hex access token for x402 anonymous files */
 function generateAccessToken(): string {
@@ -462,12 +463,9 @@ const EXPIRES_IN_MS: Record<string, number> = {
   '30d': 30 * 24 * 60 * 60 * 1000,
 };
 
-// Active (non-revoked, unexpired) shares a free-plan user may hold at once.
-const FREE_PLAN_ACTIVE_SHARE_CAP = 10;
-
 const createShareSchema = z.object({
   expiresIn: z.enum(['24h', '7d', '30d']).default('7d'),
-  maxDownloads: z.number().int().positive().max(10000).optional().nullable(),
+  maxDownloads: z.number().int().positive().max(1000000).optional().nullable(),
 });
 
 // POST /vault/files/:id/share — mint a zero-knowledge share link (auth, owner-only)
@@ -491,27 +489,60 @@ router.post('/files/:id/share', uploadRateLimit, requirePermission('write'), asy
   // File must exist and belong to the caller.
   const file = await prisma.file.findFirst({
     where: { id: req.params.id, userId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, sizeBytes: true, originalSizeBytes: true },
   });
   if (!file) {
     res.status(404).json({ error: 'File not found' });
     return;
   }
 
-  // Per-plan cap on active shares.
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { plan: true } });
-  if (user?.plan === 'free') {
+  const limits = getShareLimits(user?.plan);
+
+  // Cap shareable file size by plan (use plaintext size when known).
+  const fileBytes = Number(file.originalSizeBytes ?? file.sizeBytes);
+  if (fileBytes > limits.maxShareableBytes) {
+    res.status(403).json({
+      error: 'File too large to share on this plan',
+      message: `Your plan allows sharing files up to ${Math.floor(limits.maxShareableBytes / (1024 * 1024))} MB. Upgrade to share larger files.`,
+      maxShareableBytes: limits.maxShareableBytes,
+    });
+    return;
+  }
+
+  // Cap expiry by plan.
+  if (EXPIRY_RANK[expiresIn] > EXPIRY_RANK[limits.maxExpiry]) {
+    res.status(403).json({
+      error: 'Expiry exceeds plan limit',
+      message: `Your plan allows share links up to ${limits.maxExpiry}. Upgrade for longer-lived links.`,
+      maxExpiry: limits.maxExpiry,
+    });
+    return;
+  }
+
+  // Cap on active (non-revoked, unexpired) shares.
+  if (limits.activeShareCap !== null) {
     const activeShares = await prisma.share.count({
       where: { createdBy: userId, revokedAt: null, expiresAt: { gt: new Date() } },
     });
-    if (activeShares >= FREE_PLAN_ACTIVE_SHARE_CAP) {
+    if (activeShares >= limits.activeShareCap) {
       res.status(403).json({
         error: 'Active share limit reached',
-        message: `Free plan allows ${FREE_PLAN_ACTIVE_SHARE_CAP} active share links. Revoke one or upgrade.`,
-        limit: FREE_PLAN_ACTIVE_SHARE_CAP,
+        message: `Your plan allows ${limits.activeShareCap} active share links. Revoke one or upgrade.`,
+        limit: limits.activeShareCap,
       });
       return;
     }
+  }
+
+  // Clamp the per-share download cap to the plan ceiling, and apply a default
+  // cap when the caller omits one (bounds worst-case egress per share).
+  let effectiveMaxDownloads = maxDownloads ?? null;
+  if (limits.maxDownloadsPerShare !== null) {
+    effectiveMaxDownloads =
+      effectiveMaxDownloads === null
+        ? limits.defaultDownloads
+        : Math.min(effectiveMaxDownloads, limits.maxDownloadsPerShare);
   }
 
   const expiresAt = new Date(Date.now() + EXPIRES_IN_MS[expiresIn]);
@@ -521,7 +552,7 @@ router.post('/files/:id/share', uploadRateLimit, requirePermission('write'), asy
       fileId: file.id,
       createdBy: userId,
       expiresAt,
-      maxDownloads: maxDownloads ?? null,
+      maxDownloads: effectiveMaxDownloads,
     },
     select: { id: true, expiresAt: true },
   });

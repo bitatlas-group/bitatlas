@@ -37,6 +37,8 @@ vi.mock('../services/redis', () => ({
     set: vi.fn(),
     setex: vi.fn(),
     del: vi.fn(),
+    incr: vi.fn(),
+    expire: vi.fn(),
     ping: vi.fn().mockResolvedValue('PONG'),
     connect: vi.fn().mockResolvedValue(undefined),
     quit: vi.fn().mockResolvedValue(undefined),
@@ -94,7 +96,11 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.mocked(redis.get).mockResolvedValue(sessionPayload());
+  vi.mocked(redis.incr).mockResolvedValue(1);
+  vi.mocked(redis.expire).mockResolvedValue(1);
   vi.mocked(isX402Paid).mockReturnValue(false);
+  // Owner plan lookup (resolve egress + create limits) defaults to free.
+  vi.mocked(prisma.user.findUnique).mockResolvedValue({ plan: 'free' } as never);
 });
 
 // ────────────────────────────────────────────────
@@ -102,8 +108,10 @@ beforeEach(() => {
 // ────────────────────────────────────────────────
 
 describe('POST /vault/files/:id/share', () => {
+  const smallFile = { id: mockFile.id, sizeBytes: BigInt(1024), originalSizeBytes: BigInt(1024) };
+
   it('creates a share and returns shareId + expiresAt, never a key or URL', async () => {
-    vi.mocked(prisma.file.findFirst).mockResolvedValue({ id: mockFile.id } as never);
+    vi.mocked(prisma.file.findFirst).mockResolvedValue(smallFile as never);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({ plan: 'free' } as never);
     vi.mocked(prisma.share.count).mockResolvedValue(0);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -119,6 +127,56 @@ describe('POST /vault/files/:id/share', () => {
     expect(res.body.expiresAt).toBeDefined();
     // The server response must never contain key material or an assembled URL.
     expect(JSON.stringify(res.body)).not.toMatch(/#k=|http/);
+  });
+
+  it('applies the free-plan default download cap (100) when none is given', async () => {
+    vi.mocked(prisma.file.findFirst).mockResolvedValue(smallFile as never);
+    vi.mocked(prisma.share.count).mockResolvedValue(0);
+    vi.mocked(prisma.share.create).mockResolvedValue({ id: SHARE_ID, expiresAt: new Date() } as never);
+
+    await request(app).post(`/vault/files/${mockFile.id}/share`).set(authHeader()).send({});
+
+    expect(prisma.share.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ maxDownloads: 100 }) }),
+    );
+  });
+
+  it('clamps an over-limit download cap down to the free-plan ceiling (100)', async () => {
+    vi.mocked(prisma.file.findFirst).mockResolvedValue(smallFile as never);
+    vi.mocked(prisma.share.count).mockResolvedValue(0);
+    vi.mocked(prisma.share.create).mockResolvedValue({ id: SHARE_ID, expiresAt: new Date() } as never);
+
+    await request(app).post(`/vault/files/${mockFile.id}/share`).set(authHeader()).send({ maxDownloads: 5000 });
+
+    expect(prisma.share.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ maxDownloads: 100 }) }),
+    );
+  });
+
+  it('rejects expiry beyond the free-plan max (30d → 403)', async () => {
+    vi.mocked(prisma.file.findFirst).mockResolvedValue(smallFile as never);
+
+    const res = await request(app)
+      .post(`/vault/files/${mockFile.id}/share`)
+      .set(authHeader())
+      .send({ expiresIn: '30d' });
+
+    expect(res.status).toBe(403);
+    expect(prisma.share.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a file larger than the free-plan shareable size (403)', async () => {
+    vi.mocked(prisma.file.findFirst).mockResolvedValue(
+      { id: mockFile.id, sizeBytes: BigInt(30 * 1024 * 1024), originalSizeBytes: BigInt(30 * 1024 * 1024) } as never,
+    );
+
+    const res = await request(app)
+      .post(`/vault/files/${mockFile.id}/share`)
+      .set(authHeader())
+      .send({ expiresIn: '7d' });
+
+    expect(res.status).toBe(403);
+    expect(prisma.share.create).not.toHaveBeenCalled();
   });
 
   it('returns 404 when the file is not owned by the caller', async () => {
@@ -254,6 +312,17 @@ describe('GET /share/:shareId', () => {
     const res = await request(app).get(`/share/${SHARE_ID}`);
     expect(res.status).toBe(200);
     expect(res.body.downloadsRemaining).toBe(3); // 5 - (1 + 1)
+  });
+
+  it('returns 429 when the owner exceeds the daily egress cap', async () => {
+    vi.mocked(prisma.share.findUnique).mockResolvedValue(makeShare() as never);
+    // Redis counter reports usage just over the free cap (500).
+    vi.mocked(redis.incr).mockResolvedValue(501);
+
+    const res = await request(app).get(`/share/${SHARE_ID}`);
+    expect(res.status).toBe(429);
+    // Must not consume a download when egress-capped.
+    expect(prisma.share.updateMany).not.toHaveBeenCalled();
   });
 });
 
