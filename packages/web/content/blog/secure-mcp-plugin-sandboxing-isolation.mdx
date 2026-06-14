@@ -1,0 +1,285 @@
+---
+title: "Sandboxing Untrusted MCP Plugins: A Practical Security Model"
+description: "Implement process isolation and capability-based security to safely execute untrusted MCP plugins without risking your infrastructure"
+date: 2026-06-14
+author: "BitAtlas Engineering"
+slug: "secure-mcp-plugin-sandboxing-isolation"
+keywords: ["sandboxing", "isolation", "plugin security", "MCP plugins", "capability model", "process isolation", "threat model"]
+readingTime: 9
+---
+
+MCP servers enable powerful integrations between AI agents and enterprise systems—but deploying untrusted or third-party plugins introduces security risks. A compromised plugin can escalate privileges, exfiltrate data, or pivot to adjacent systems. This guide covers practical sandboxing techniques to isolate plugin code and limit blast radius.
+
+## The Plugin Threat Model
+
+When you load an untrusted MCP plugin, you're running code you didn't write in your agent's process space. It can:
+
+- **Access all server memory** (including agent state, API keys, user data)
+- **Make arbitrary network requests** (exfil data, attack adjacent services)
+- **Modify filesystem** (inject persistence, corrupt data stores)
+- **Spawn child processes** (deploy malware, ddos from your infra)
+- **Consume unbounded resources** (DOS, memory exhaustion)
+
+Even buggy plugins (not malicious) can accidentally delete files or leak sensitive information. Sandboxing addresses this by restricting capabilities to what the plugin *needs* to function.
+
+## Process Isolation via Subprocess
+
+The strongest sandbox is a separate process. Launch plugins in isolated child processes and communicate via a restricted IPC channel.
+
+```javascript
+import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
+
+const pluginRegistry = new Map();
+
+export async function loadPlugin(pluginPath) {
+  const pluginId = randomUUID();
+  const proc = spawn('node', [
+    '--experimental-permission',           // Node.js permission model (v20.9+)
+    '--allow-fs-read=<plugin-dir>',       // Only read from plugin directory
+    '--allow-fs-write=<temp-dir>',        // Only write to temp dir
+    '--allow-net',                         // Network, but see network policy below
+    pluginPath
+  ], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: false,                       // Kill children on parent exit
+    timeout: 30000,                        // Hard timeout
+    maxBuffer: 10 * 1024 * 1024            // 10MB output limit (prevent memory blow)
+  });
+
+  pluginRegistry.set(pluginId, {
+    proc,
+    startTime: Date.now(),
+    cpuUsage: 0,
+    memoryLimit: 256 * 1024 * 1024         // 256MB max
+  });
+
+  // Monitor memory and kill if exceeded
+  const monitor = setInterval(() => {
+    const usage = proc.memoryUsage();
+    if (usage.heapUsed > 256 * 1024 * 1024) {
+      proc.kill('SIGKILL');
+      clearInterval(monitor);
+      pluginRegistry.delete(pluginId);
+      console.error(`Plugin ${pluginId} killed: memory limit exceeded`);
+    }
+  }, 1000);
+
+  return pluginId;
+}
+
+export async function unloadPlugin(pluginId) {
+  const entry = pluginRegistry.get(pluginId);
+  if (entry) {
+    entry.proc.kill('SIGTERM');
+    pluginRegistry.delete(pluginId);
+  }
+}
+```
+
+**Key controls:**
+- **Node permission model**: Explicitly allow only necessary filesystem and network access. Deny access to `/etc`, `/home`, or other sensitive dirs.
+- **Timeout**: Kill runaway processes after 30 seconds.
+- **Memory limit**: Prevent resource exhaustion. Monitor `heapUsed` and kill if exceeded.
+- **Buffering limit**: Cap stdout/stderr to prevent unbounded memory use.
+
+## Capability-Based Messaging
+
+Don't give plugins direct access to server resources. Instead, expose a minimal RPC interface with only the capabilities they need.
+
+```javascript
+import { parentPort } from 'worker_threads';
+
+// Plugin child process: only calls back to parent for sanctioned operations
+async function callParent(method, args) {
+  return new Promise((resolve, reject) => {
+    const requestId = randomUUID();
+    const timeout = setTimeout(
+      () => reject(new Error('RPC timeout')),
+      5000
+    );
+
+    const handler = (msg) => {
+      if (msg.requestId === requestId) {
+        clearTimeout(timeout);
+        parentPort.off('message', handler);
+        if (msg.error) reject(new Error(msg.error));
+        else resolve(msg.result);
+      }
+    };
+
+    parentPort.on('message', handler);
+    parentPort.postMessage({
+      requestId,
+      method,
+      args
+    });
+  });
+}
+
+// Example: plugin queries data only via sanctioned RPC
+export async function getData(key) {
+  return callParent('getData', { key });
+}
+```
+
+Parent-side RPC dispatcher:
+
+```javascript
+const allowedMethods = {
+  getData: async (args) => {
+    // Validate key is in allowed list
+    if (!isAllowedDataKey(args.key)) {
+      throw new Error(`Access denied: ${args.key}`);
+    }
+    return dataStore.get(args.key);
+  },
+  writeLog: async (args) => {
+    // Append-only logging, no deletion
+    return auditLog.append({
+      pluginId: args.pluginId,
+      timestamp: Date.now(),
+      message: args.message
+    });
+  }
+  // No file write, no execute, no network—plugin can't do them
+};
+
+proc.on('message', async (msg) => {
+  try {
+    const method = allowedMethods[msg.method];
+    if (!method) {
+      throw new Error(`Method not allowed: ${msg.method}`);
+    }
+    const result = await method(msg.args);
+    proc.send({ requestId: msg.requestId, result });
+  } catch (err) {
+    proc.send({ requestId: msg.requestId, error: err.message });
+  }
+});
+```
+
+This model ensures plugins **can't do anything you didn't explicitly allow**. They can't spawn processes, write files, or call random APIs—only the methods you whitelisted.
+
+## Network Isolation with Egress Filtering
+
+Even with process boundaries, untrusted code can exfiltrate data over the network.
+
+```javascript
+import net from 'net';
+
+const allowedHosts = new Set([
+  'api.trusted-service.com',
+  'data.internal.corp'
+]);
+
+function validateNetworkRequest(hostname, port) {
+  // Only allow outbound HTTPS to whitelisted hosts
+  if (port !== 443) {
+    throw new Error(`Port ${port} not allowed, only 443`);
+  }
+  if (!allowedHosts.has(hostname)) {
+    throw new Error(`Host ${hostname} not whitelisted`);
+  }
+}
+
+// Use proxy agent in plugin container
+import { HttpProxyAgent, HttpsProxyAgent } from 'https-proxy-agent';
+
+const proxyUrl = 'socks5://localhost:9050';  // Tor, I2P, or corporate proxy
+export const httpsAgent = new HttpsProxyAgent(proxyUrl);
+
+// Plugin fetch calls are routed through proxy with rate limiting
+const rateLimiter = new Map();
+
+export async function pluginFetch(pluginId, url) {
+  const urlObj = new URL(url);
+  validateNetworkRequest(urlObj.hostname, parseInt(urlObj.port || 443));
+
+  // Rate limit per plugin: max 100 req/min
+  const key = pluginId;
+  if (!rateLimiter.has(key)) rateLimiter.set(key, []);
+  const timestamps = rateLimiter.get(key);
+  const now = Date.now();
+  const recentReqs = timestamps.filter(t => now - t <  60000);
+
+  if (recentReqs.length >= 100) {
+    throw new Error(`Rate limit exceeded for plugin ${pluginId}`);
+  }
+  recentReqs.push(now);
+  rateLimiter.set(key, recentReqs);
+
+  return fetch(url, { agent: httpsAgent });
+}
+```
+
+**Controls:**
+- **Port whitelist**: Only allow HTTPS (443). Block DNS (53), SSH (22), internal services.
+- **Hostname whitelist**: Plugins can only reach services you approve.
+- **Rate limiting**: Prevent data exfiltration floods.
+- **Proxy routing**: Route through corp proxy or privacy-preserving transport for additional logging/filtering.
+
+## Resource Limits and Monitoring
+
+Untrusted code will find edge cases. Monitor for abuse patterns.
+
+```javascript
+function monitorPlugin(pluginId, proc) {
+  const metrics = {
+    cpuTime: 0,
+    networkBytesOut: 0,
+    fileWrites: 0,
+    startTime: Date.now(),
+    lastActivity: Date.now(),
+    rpcCallCount: 0
+  };
+
+  // Track CPU time via /proc (Linux)
+  const cpuMonitor = setInterval(() => {
+    try {
+      const stat = fs.readFileSync(`/proc/${proc.pid}/stat`, 'utf8');
+      const fields = stat.split(' ');
+      const utime = parseInt(fields[13]);  // User time in jiffies
+      const stime = parseInt(fields[14]); // System time in jiffies
+      const cpuTimeMs = (utime + stime) * (1000 / os.cpus().length);
+
+      if (cpuTimeMs > 60000) { // > 1 minute CPU
+        console.warn(`Plugin ${pluginId}: excessive CPU, killing`);
+        proc.kill('SIGKILL');
+        clearInterval(cpuMonitor);
+      }
+    } catch (e) {
+      // Process exited, safe to ignore
+      clearInterval(cpuMonitor);
+    }
+  }, 5000);
+
+  return metrics;
+}
+
+// Alert on suspicious patterns
+function auditPluginBehavior(pluginId, metrics) {
+  if (metrics.fileWrites > 1000) {
+    console.error(`SUSPICIOUS: Plugin ${pluginId} wrote files ${metrics.fileWrites}x in 1min`);
+    // Quarantine or kill plugin
+  }
+  if (metrics.networkBytesOut > 100 * 1024 * 1024) {
+    console.error(`SUSPICIOUS: Plugin ${pluginId} exfilled 100MB`);
+  }
+  if (metrics.rpcCallCount === 0 && Date.now() - metrics.lastActivity > 30000) {
+    console.warn(`Plugin ${pluginId}: inactive 30s, may be hung`);
+    // Restart or alert
+  }
+}
+```
+
+## Deployment Checklist
+
+- **Verify plugin source**: Code review or cryptographic signature before loading.
+- **Run as unprivileged user**: Never run plugin processes as root.
+- **Use container orchestration**: Deploy plugins in Kubernetes pods with strict network policies and CPU/memory limits.
+- **Regular restarts**: Kill and reload plugins every N hours to clear state and prevent long-term exploits.
+- **Audit logging**: Log all RPC calls, network requests, and resource violations for forensics.
+- **Deny by default**: Assume plugins are hostile. Only allow explicit capabilities.
+
+Sandboxing is not a silver bullet—it's defense in depth. Combine process isolation, capability-based RPC, network filtering, and monitoring to build a security posture where untrusted plugins can't compromise your infrastructure.
