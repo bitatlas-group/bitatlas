@@ -3,6 +3,7 @@ import { paymentMiddleware, x402ResourceServer } from '@x402/express';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { HTTPFacilitatorClient } from '@x402/core/server';
 import type { FacilitatorConfig } from '@x402/core/server';
+import { generateJwt } from '@coinbase/cdp-sdk/auth';
 import { x402Config, x402Routes } from '../config/x402';
 import { logger } from '../services/logger';
 
@@ -13,14 +14,6 @@ let x402Middleware: ((req: Request, res: Response, next: NextFunction) => Promis
  * Uses @coinbase/cdp-sdk to sign requests with Ed25519 keys.
  */
 function buildCdpAuthHeaders(apiKeyId: string, apiKeySecret: string, facilitatorUrl: string): FacilitatorConfig['createAuthHeaders'] {
-  let generateJwt: any;
-  try {
-    generateJwt = require('@coinbase/cdp-sdk/auth').generateJwt;
-  } catch {
-    logger.error('[x402] @coinbase/cdp-sdk not installed — cannot use CDP facilitator');
-    return undefined;
-  }
-
   const url = new URL(facilitatorUrl);
   const requestHost = url.host;
 

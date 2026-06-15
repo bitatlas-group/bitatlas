@@ -38,55 +38,15 @@ export const x402Config = {
  * Since authOrPay is mounted at /vault in app.ts, paths here
  * should NOT include the /vault prefix.
  */
+const priced = (price: string, maxTimeoutSeconds: number, description: string) => ({
+  accepts: { scheme: 'exact', price, network: NETWORK as any, payTo: PAY_TO, maxTimeoutSeconds },
+  description,
+});
+
 export const x402Routes: RoutesConfig = {
-  'POST /files/upload-url': {
-    accepts: {
-      scheme: 'exact',
-      price: PRICE_UPLOAD,
-      network: NETWORK as any,
-      payTo: PAY_TO,
-      maxTimeoutSeconds: 120,
-    },
-    description: 'Generate a presigned upload URL for encrypted file storage',
-  },
-  'POST /files': {
-    accepts: {
-      scheme: 'exact',
-      price: PRICE_UPLOAD,
-      network: NETWORK as any,
-      payTo: PAY_TO,
-      maxTimeoutSeconds: 120,
-    },
-    description: 'Register an uploaded file in the BitAtlas vault',
-  },
-  'GET /files': {
-    accepts: {
-      scheme: 'exact',
-      price: PRICE_LIST,
-      network: NETWORK as any,
-      payTo: PAY_TO,
-      maxTimeoutSeconds: 60,
-    },
-    description: 'List files in the BitAtlas vault',
-  },
-  'GET /files/*/download-url': {
-    accepts: {
-      scheme: 'exact',
-      price: PRICE_DOWNLOAD,
-      network: NETWORK as any,
-      payTo: PAY_TO,
-      maxTimeoutSeconds: 60,
-    },
-    description: 'Get a presigned download URL for an encrypted file',
-  },
-  'POST /files/*/renew': {
-    accepts: {
-      scheme: 'exact',
-      price: PRICE_DOWNLOAD,
-      network: NETWORK as any,
-      payTo: PAY_TO,
-      maxTimeoutSeconds: 60,
-    },
-    description: 'Renew the storage expiry of an x402 anonymous file by 30 days',
-  },
+  'POST /files/upload-url': priced(PRICE_UPLOAD, 120, 'Generate a presigned upload URL for encrypted file storage'),
+  'POST /files': priced(PRICE_UPLOAD, 120, 'Register an uploaded file in the BitAtlas vault'),
+  'GET /files': priced(PRICE_LIST, 60, 'List files in the BitAtlas vault'),
+  'GET /files/*/download-url': priced(PRICE_DOWNLOAD, 60, 'Get a presigned download URL for an encrypted file'),
+  'POST /files/*/renew': priced(PRICE_DOWNLOAD, 60, 'Renew the storage expiry of an x402 anonymous file by 30 days'),
 };

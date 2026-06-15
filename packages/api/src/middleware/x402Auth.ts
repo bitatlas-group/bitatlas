@@ -52,7 +52,6 @@ export function x402AnonymousContext(req: Request, res: Response, next: NextFunc
 
   // Mark as x402 paid request for downstream handlers
   (req as any).x402Paid = true;
-  (req as any).x402RequestId = requestId;
 
   next();
 }
