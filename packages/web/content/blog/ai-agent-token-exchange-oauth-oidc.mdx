@@ -1,0 +1,230 @@
+---
+title: "OAuth Token Exchange for AI Agents: Secure Service-to-Service Authentication"
+description: "Learn how to use OAuth 2.0 token exchange (RFC 8693) to implement secure agent-to-service authentication without embedding credentials."
+date: 2026-06-21
+author: "BitAtlas"
+slug: "ai-agent-token-exchange-oauth-oidc"
+keywords:
+  - "OAuth 2.0"
+  - "token exchange"
+  - "agent authentication"
+  - "RFC 8693"
+  - "service-to-service"
+  - "OIDC"
+  - "agent delegation"
+readingTime: 6
+---
+
+AI agents increasingly need to authenticate to downstream services—databases, APIs, cloud platforms—while maintaining security and auditability. The challenge: agents aren't human users, and embedding long-lived secrets in agent configurations violates zero-trust principles.
+
+OAuth 2.0 token exchange, standardized in RFC 8693, solves this by enabling agents to request short-lived access tokens scoped to specific services and capabilities. Unlike static API keys, token exchange provides fine-grained permission delegation, automatic token rotation, and full audit trails.
+
+## The Problem with Static Credentials
+
+Traditional agent deployment embeds service credentials directly:
+
+```python
+# Dangerous: hardcoded secrets, no rotation, no audit trail
+agent = Agent(
+    database_url="postgresql://user:password@db.example.com/prod",
+    api_key="sk_live_abcd1234...",
+    aws_access_key="AKIA123456789ABC"
+)
+```
+
+This approach has several weaknesses:
+- **No expiration**: Compromise is catastrophic until discovered
+- **No audit trail**: Can't track which agent accessed what
+- **No revocation**: Rotating one secret may break multiple agents
+- **Over-privileged**: Agent gets all permissions regardless of actual need
+
+OAuth token exchange replaces this with a request model: agents request tokens at runtime for exactly what they need.
+
+## How RFC 8693 Token Exchange Works
+
+The agent authenticates to an identity provider (IdP) using a subject token (typically a JWT) and requests an access token scoped to a specific resource:
+
+```bash
+curl -X POST https://auth.example.com/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+  -d "subject_token=eyJhbGc..." \
+  -d "subject_token_type=urn:ietf:params:oauth:token-type:jwt" \
+  -d "resource=https://api.example.com" \
+  -d "scope=database:read secrets:get"
+```
+
+The IdP responds with a short-lived token (typically 15 minutes to 1 hour):
+
+```json
+{
+  "access_token": "eyJhbGc...",
+  "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "database:read secrets:get"
+}
+```
+
+The agent uses this token to authenticate to the resource. When it expires, the agent requests a fresh token.
+
+## Subject Token Types: Proving Agent Identity
+
+Agents need a subject token to prove their identity to the IdP. Common sources:
+
+**1. Self-Issued JWT**
+The agent signs a JWT with a private key provisioned during initialization:
+
+```python
+import jwt
+import time
+
+subject_token = jwt.encode(
+    {
+        "iss": "agent://my-org/agent-01",
+        "sub": "agent://my-org/agent-01",
+        "aud": "https://auth.example.com/token",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 300,
+    },
+    private_key,
+    algorithm="RS256"
+)
+```
+
+This requires secure key provisioning—typically from HashiCorp Vault or a cloud provider's keystore (AWS Secrets Manager, GCP Secret Manager).
+
+**2. OIDC Provider Token**
+If the agent environment supports OIDC (Kubernetes, AWS, GCP), use the platform's native token:
+
+```python
+# Kubernetes OIDC
+token = open('/var/run/secrets/kubernetes.io/serviceaccount/token').read()
+
+# AWS SigV4
+import boto3
+sts = boto3.client('sts')
+token = sts.get_caller_identity()  # Used as subject token
+```
+
+**3. Workload Identity**
+Cloud-native environments (Google Workload Identity, AWS IAM Roles for Service Accounts) automatically handle credential exchange at the platform level.
+
+## Practical Implementation: Multi-Service Agent
+
+Here's an agent that requests tokens for multiple services:
+
+```python
+from agent_sdk import Agent
+from token_exchange import TokenExchangeClient
+
+class SecureAgent(Agent):
+    def __init__(self, subject_token: str, auth_endpoint: str):
+        self.subject_token = subject_token
+        self.token_client = TokenExchangeClient(auth_endpoint)
+        self.token_cache = {}
+    
+    def get_db_connection(self):
+        # Request token for database
+        token = self.token_client.exchange(
+            subject_token=self.subject_token,
+            resource="postgresql://db.example.com",
+            scope="database:read database:write"
+        )
+        return PostgreSQL(
+            host="db.example.com",
+            access_token=token.access_token
+        )
+    
+    def call_downstream_api(self, endpoint: str):
+        # Request token for specific API
+        token = self.token_client.exchange(
+            subject_token=self.subject_token,
+            resource=endpoint,
+            scope="api:invoke"
+        )
+        return requests.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {token.access_token}"}
+        )
+```
+
+## Fine-Grained Permissions: Scopes and Resource Constraints
+
+Token exchange shines when combined with scope-based permissions. Instead of "agent has database admin access," declare:
+
+```
+scope: "database:read tables:users,orders database:write tables:orders"
+```
+
+The IdP validates:
+- Is this agent allowed database:read? (yes, verified via subject token)
+- Is it allowed these tables specifically? (yes, policy permits)
+- Is it allowed database:write? (only to orders table)
+
+Resources can be further constrained:
+
+```
+resource: "postgresql://db.example.com"
+resource: "https://api.example.com/v1/users"
+resource: "arn:aws:s3:::my-bucket/agent-data/*"
+```
+
+This maps to your authorization system: services receive the token and validate it against their own policies.
+
+## Audit and Compliance
+
+Token exchange provides compliance benefits that static secrets cannot:
+
+**Request Audit**
+Every token request is logged with context:
+```json
+{
+  "timestamp": "2026-06-21T14:30:00Z",
+  "agent_id": "agent://org/llm-coordinator-prod",
+  "resource": "postgresql://db.example.com",
+  "scope": "database:read",
+  "decision": "APPROVED"
+}
+```
+
+**Token Rotation**
+Tokens expire after a short window (default 1 hour). Compromise is limited to that window. No manual rotation ceremonies.
+
+**Selective Revocation**
+Revoke permissions for a specific resource without rotating all secrets:
+```bash
+# Revoke database access for all agents in staging
+vault policy delete agent/staging/database-read
+```
+
+Existing tokens remain valid (a grace period), but new token exchanges fail.
+
+## Integration with Secrets Management
+
+Combine token exchange with HashiCorp Vault or similar:
+
+1. Agent stores private key in Vault
+2. Agent retrieves key: `vault kv get secret/agent-01/private-key`
+3. Agent generates subject token signed with key
+4. Agent exchanges subject token for access token
+5. Agent uses access token to access downstream services
+6. Vault logs all operations
+
+This eliminates long-lived secrets from agent memory—only the subject token (short-lived JWT) and access tokens (OAuth) circulate at runtime.
+
+## When to Use Token Exchange
+
+Token exchange is ideal when:
+- **Multiple downstream services**: Agent calls databases, APIs, cloud services
+- **Regulatory requirements**: Audit trails and rotation are compliance requirements
+- **Microservices**: Service-to-service authentication needs governance
+- **Cloud-native**: Kubernetes, AWS, GCP provide native token exchange support
+
+Simpler scenarios (single service, internal-only agent) may not justify the complexity.
+
+## Conclusion
+
+OAuth 2.0 token exchange transforms agent authentication from a static-credential problem into a dynamic, auditable, fine-grained delegation system. Combined with subject tokens from Vault or cloud platforms, it enables secure multi-service agents that follow zero-trust principles: agents get only the access they need, only for as long as they need it, with full visibility into what they're doing.
+
+For production agents accessing regulated systems, token exchange should be your default, not an afterthought.
