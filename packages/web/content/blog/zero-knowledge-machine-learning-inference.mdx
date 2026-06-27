@@ -1,74 +1,130 @@
 ---
-title: "Zero-Knowledge Machine Learning Inference: Proving a Prediction Without Revealing the Data"
-description: A developer's guide to privacy-preserving ML inference using zero-knowledge proofs and homomorphic encryption—how zkML and FHE work, where each fits, and the real-world performance tradeoffs.
-date: 2026-06-27
-author: BitAtlas
-slug: zero-knowledge-machine-learning-inference
-keywords: ["zero-knowledge", "machine learning", "inference", "privacy", "neural networks", "zkML", "homomorphic encryption", "zk-SNARK"]
-readingTime: 9
+title: "Privacy-Preserving Machine Learning: ZK Inference with Homomorphic Encryption"
+description: "Exploring zero-knowledge proofs and homomorphic encryption for private ML inference—techniques to prove ML predictions without exposing the model or input data."
+date: "2026-06-27"
+author: "BitAtlas"
+slug: "zero-knowledge-machine-learning-inference"
+keywords: ["zero-knowledge", "machine learning", "inference", "privacy", "neural networks"]
+readingTime: "6 min"
 ---
 
-Most machine learning deployments force an uncomfortable trade: to get a prediction, you hand your raw data to whoever runs the model—or, if you run the model yourself, you trust that the operator computed honestly. Zero-knowledge machine learning (zkML) and homomorphic encryption (FHE) break that trade. They let one party prove a model produced a specific output, or compute on data it never sees in the clear, without revealing the inputs, the weights, or both.
+Machine learning models are valuable assets, but deploying them raises a critical tension: how do you let users benefit from your model without exposing it to reverse engineering? Conversely, how do users trust that their sensitive data—medical records, financial information, personal preferences—won't leak during inference?
 
-For anyone building privacy-first infrastructure, these are the primitives that turn "trust us" into "verify it." This post covers how they work, where each one fits, and what they actually cost in production.
+Traditional solutions fall short. Keeping the model server-side exposes model parameters to motivated attackers. Shipping the model to clients reveals intellectual property. Privacy-preserving techniques like differential privacy add noise that degrades accuracy. Zero-knowledge proofs and homomorphic encryption offer a different path: let the model owner prove correct inference *without revealing the model or the input*.
 
-## Two Different Problems
+## The Core Problem
 
-"Private inference" is really two separate guarantees, and conflating them is the most common mistake engineers make when they start:
+When you invoke a machine learning API, three things are at stake:
 
-- **Integrity**: prove that `output = model(input)` was computed correctly, without re-running it. This is what zero-knowledge proofs give you.
-- **Confidentiality**: compute `model(input)` without the compute party ever seeing `input` (or the data owner seeing the weights). This is what homomorphic encryption gives you.
+1. **Model confidentiality**: Your model is your competitive advantage. Competitors want to extract it.
+2. **Input privacy**: The user's data is sensitive. You don't want it on your servers, and they don't trust you with it.
+3. **Correctness**: The user needs assurance the inference was actually computed correctly—not faked or stolen from a cache.
 
-You sometimes want one, sometimes the other, occasionally both. Picking the wrong primitive for your threat model means paying enormous cost for a property you did not need.
+Homomorphic encryption and zero-knowledge proofs address these by allowing computation on encrypted data and proving results without revealing either the computation or the data.
 
-## Zero-Knowledge Proofs for Inference (zkML)
+## Homomorphic Encryption for Inference
 
-With zkML, the party running the model generates a succinct cryptographic proof that it executed a specific computation on some input and got a specific result. A verifier checks the proof in milliseconds without learning the input and without redoing the work.
+Homomorphic encryption (HE) is encryption that preserves algebraic structure. You can add and multiply encrypted values without decrypting them. The result, when decrypted, equals what you'd get if you'd added or multiplied the plaintext.
 
-The mechanics: you express the forward pass of the network as an arithmetic circuit, then prove satisfiability of that circuit with a zk-SNARK or zk-STARK. Every multiply-accumulate, every activation, becomes a set of constraints the prover must satisfy.
-
-Where this shines:
-
-- **Verifiable off-chain compute**: an oracle or rollup proves it ran the agreed model, so a smart contract can trust the result without trusting the operator.
-- **Auditable agent decisions**: an AI agent proves a flagged transaction really came from the published fraud model, not a quietly swapped one.
-- **Selective disclosure**: prove "this medical image was scored above the threshold by model v3" without revealing the image.
-
-The hard part is cost. Proving is expensive and grows with model size. A small model proves in seconds; a transformer with hundreds of millions of parameters can take minutes to hours and a lot of memory. The standard mitigations are quantizing weights to small integers, proving only the decision-relevant layers, and batching many inferences into one proof. Verification, by contrast, stays cheap—often under a few milliseconds regardless of model size, which is exactly why the asymmetry is useful.
-
-## Homomorphic Encryption for Inference (FHE)
-
-Fully homomorphic encryption lets you run computations directly on ciphertext. The data owner encrypts the input, the server runs the model on the encrypted values, and the encrypted result comes back—decryptable only by the owner. The server learns nothing about the input or the output.
-
-```python
-# Conceptual shape of an FHE inference call
-ctx = fhe.context(scheme="CKKS")
-enc_input = ctx.encrypt(features)        # client side
-enc_output = model.forward(enc_input)    # server runs on ciphertext only
-prediction = ctx.decrypt(enc_output)     # client side
+```
+Encrypt(a) + Encrypt(b) = Encrypt(a + b)
+Encrypt(a) × Encrypt(b) = Encrypt(a × b)
 ```
 
-The CKKS scheme is the workhorse for ML because it supports approximate arithmetic on real numbers, which is what neural networks need. The catches are concrete:
+For ML inference, this means:
 
-- **Nonlinearities are painful.** ReLU, softmax, and argmax are not natively homomorphic. You approximate them with low-degree polynomials, which changes accuracy and constrains architecture.
-- **Multiplicative depth is budgeted.** Each multiplication adds noise. Go past your budget and you must bootstrap—a costly refresh step—or the result decrypts to garbage.
-- **It is slow.** Encrypted inference can run three to six orders of magnitude slower than plaintext. A model that scores in under a millisecond in the clear may take seconds per encrypted query.
+1. The user encrypts their input data with their own key.
+2. You run the model's matrix multiplications and activations directly on the encrypted vectors.
+3. You return the encrypted result.
+4. The user decrypts to get the prediction.
 
-FHE fits best when confidentiality is non-negotiable and latency is forgiving: a clinician scoring an encrypted genomic profile against a proprietary model where neither side may see the other's asset, or a bank scoring encrypted customer features on a third-party risk model.
+**Advantages:**
+- Your model parameters are never exposed.
+- User input never exists unencrypted on the server.
+- The computation is deterministic and verifiable.
 
-## Choosing Between Them
+**Challenges:**
+- Encryption overhead is substantial. A single matrix multiplication might become 100–1,000× slower. A deep neural network can take hours on homomorphic evaluation.
+- Only certain operations are efficient. Sigmoid and ReLU activations require approximation or specific lattice-based schemes.
+- Encrypted arithmetic has precision constraints. You're working with fixed-point numbers in rings, not floating-point.
 
-A quick decision guide:
+**Practical example:** A healthcare startup wants to offer a diagnostic model. Hospitals encrypt their patient data with BFV (Brakerski–Fan–Vercauteren) encryption, send it to the model server, and get an encrypted prediction back. The hospital decrypts and sees the diagnosis—without the startup ever seeing the raw medical data, and the hospital never learning the model structure.
 
-- Need to prove a result was computed honestly, and the input can be revealed to its owner but not the verifier? Reach for **zkML**.
-- Need the compute party to never see the input at all? Reach for **FHE**.
-- Need both verifiability and confidentiality? Compose them—run FHE inference, then prove correctness of the encrypted computation—and budget accordingly, because you pay both bills.
+## Zero-Knowledge Proofs for Model Verification
 
-For most application developers the honest answer in 2026 is that full-network private inference is still reserved for high-value, low-throughput cases. The pragmatic middle ground is to keep the heavy model on infrastructure you control with strong encryption at rest and in transit, and apply zkML or FHE only to the narrow, sensitive step that truly needs it.
+Homomorphic encryption solves privacy but not trust-in-correctness. How do you know the server actually computed your inference and didn't hallucinate the result?
 
-## Where This Meets Real Infrastructure
+Zero-knowledge proofs provide a cryptographic proof that a computation was done correctly, without revealing the computation itself.
 
-Cryptographic private inference protects the computation. It does not, by itself, protect the data before and after—the features you collected, the predictions you stored, the audit log of who asked what. That is a storage and access problem, and it is where most real leaks happen.
+**The ZK angle:** The model owner generates a proof π that shows:
+- The output is the correct result of running the model on the input
+- *Without revealing* the model weights, the input, or intermediate values
 
-BitAtlas takes the same zero-knowledge stance one layer down: data is encrypted client-side with AES-256-GCM before it ever reaches our servers, so the inputs you feed a model and the outputs you keep are never readable by the infrastructure holding them. Whether you are experimenting with zkML proofs or just storing the sensitive features behind an inference API, the principle is identical—the system that holds your data should not be able to read it.
+A verifier checks π in milliseconds. The proof itself is tiny (hundreds of bytes).
 
-If you are building agents or ML services that touch private data, start by making the storage layer zero-knowledge. [Create a free BitAtlas vault](/register) and give your inference pipeline a place to keep data that even the host cannot read.
+**Building blocks:**
+
+- **Arithmetic circuits:** Express the ML model as a circuit of additions and multiplications. Modern frameworks (Circom, Leo, Arkworks) compile neural networks to rank-1 constraint systems (R1CS).
+- **Proof systems:** Use ZK-SNARK variants (Groth16, PlonK) or ZK-STARK (Scalable Transparent ARguments of Knowledge), which are quantum-resistant but produce larger proofs.
+- **Quantization:** Neural networks for ZK must be quantized to small integer fields. Float32 becomes int8 or similar. This degrades accuracy and requires careful calibration.
+
+**Trade-offs:**
+- Proof generation time: A modest ResNet might take seconds to minutes to prove on consumer hardware.
+- Proof size: SNARKs are compact (`<`1 KB). STARKs are larger (`~`100 KB).
+- Verifier time: Under 100 ms for SNARKs; a few seconds for STARKs.
+- Accuracy loss: Quantization to int8 typically reduces top-1 accuracy by 1–5%.
+
+**Real-world sketch:** An insurance underwriter wants to offer credit scoring. A applicant submits encrypted personal data. The model is evaluated on the encrypted input using HE, and the server issues a ZK-SNARK proving the score is correct. The underwriter verifies the proof without ever seeing the applicant's data or the model.
+
+## Combining HE + ZK
+
+Neither technique alone is a full solution:
+
+- **HE alone:** Privacy for input and model, but verifier must trust the server didn't introduce bugs.
+- **ZK alone:** Proof of correctness, but you still need to hide the model—either keep it server-side (exposing it) or use HE anyway.
+
+Together, they form a powerful primitive:
+
+1. Client encrypts input with HE.
+2. Server evaluates model on encrypted data.
+3. Server generates a ZK proof that the evaluation is correct.
+4. Client receives encrypted result + proof.
+5. Client verifies proof (proof time: milliseconds; doesn't require knowing model or plaintext).
+6. Client decrypts to get the trusted result.
+
+The proof is compact, verification is fast, and neither the model nor the data is exposed.
+
+## Practical Challenges Today
+
+**Performance:** Even quantized models are slow. A 100-layer ResNet might take 10–100 seconds to prove. HE evaluation of the same network might take 1–10 minutes depending on scheme. Real-time inference is still out of reach for complex models.
+
+**Accuracy:** Quantization to small fields (int8) and approximating activations cost accuracy. Medical-grade models may not tolerate 2–5% accuracy loss.
+
+**Ecosystem maturity:** Libraries like ZKLLMs, ezkl, and Modulus are maturing, but ZK ML tooling is still new. Documentation and community support lag behind conventional ML.
+
+**Hardware acceleration:** GPU-friendly schemes (like BGV with GPU evaluation) exist but aren't standard. Most deployments still run on CPU.
+
+## What's on the Horizon
+
+- **Faster proving:** New proof systems (HyperPlonK, Lasso) reduce prover time and proof size.
+- **Batching:** Proving multiple inferences in one transaction amortizes cost.
+- **Specialized hardware:** FPGA and ASIC designs for HE and ZK are emerging.
+- **Approximate schemes:** Relaxing some constraints (e.g., approximate HE for recommendation systems) trades perfect security for speed.
+
+## When to Consider ZK + HE
+
+Use zero-knowledge ML inference when:
+
+- The model is high-value (worth protecting).
+- User input is sensitive (medical, financial, personal).
+- Regulatory requirements demand strong privacy (GDPR, HIPAA).
+- Latency tolerance is `>` 10 seconds (non-realtime).
+- Accuracy loss of a few percentage points is acceptable.
+
+For real-time, high-accuracy use cases (autonomous vehicles, fraud detection requiring `<`50 ms response), you'll need to compromise: maybe use HE for one sensitive field and plaintext for others, or accept model exposure.
+
+## Conclusion
+
+Zero-knowledge proofs and homomorphic encryption are reshaping how we think about model security and user privacy. They're not a universal fit—performance and accuracy constraints are real. But for use cases where privacy is paramount and latency is flexible, they unlock a model-as-a-service paradigm that today's architectures cannot: servers that can't see the data, clients that can't reverse the model, and proofs that make both trust the result anyway.
+
+The tooling is maturing. If you're building privacy-critical ML products, now is the time to experiment with these primitives.
