@@ -2,6 +2,8 @@
 
 **Zero Knowledge Cloud Drive for Humans and Agents**
 
+[![smithery badge](https://smithery.ai/badge/bitatlas/bitatlas)](https://smithery.ai/servers/bitatlas/bitatlas)
+
 BitAtlas is a next-generation cloud storage platform designed with privacy and AI agents in mind. It provides a secure, zero-knowledge environment where your most sensitive documents are encrypted client-side and accessible only to you and the agents you authorize.
 
 ## 🚀 Vision
