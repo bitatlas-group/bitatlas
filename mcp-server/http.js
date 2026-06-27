@@ -43,16 +43,25 @@ function credsFromRequest(req) {
 }
 
 const httpServer = http.createServer(async (req, res) => {
-  if (req.url === '/health') {
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+
+  if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end('{"status":"ok"}');
     return;
   }
 
-  if (req.method !== 'POST' || !req.url.startsWith('/mcp')) {
+  if (pathname !== '/mcp') {
     res.writeHead(404).end();
     return;
   }
+
+  // Route every method on /mcp to the transport — POST (messages), GET (SSE
+  // stream), DELETE (teardown). The transport returns spec-correct responses,
+  // e.g. 405 for GET in stateless mode, rather than a bare 404 that stalls
+  // gateways probing for a server->client stream (Smithery does this).
+  // Log method + path only — never req.url, which carries creds in the query.
+  console.error(`[http] ${req.method} ${pathname}`);
 
   // Stateless: a fresh server + transport per request, no session reuse.
   const server = buildServer(credsFromRequest(req));
@@ -61,7 +70,7 @@ const httpServer = http.createServer(async (req, res) => {
 
   try {
     await server.connect(transport);
-    const body = await readBody(req);
+    const body = req.method === 'POST' ? await readBody(req) : '';
     await transport.handleRequest(req, res, body ? JSON.parse(body) : undefined);
   } catch (err) {
     console.error('[http] request error:', err.message);
