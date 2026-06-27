@@ -26,14 +26,19 @@ async function readBody(req) {
   return body;
 }
 
-// Smithery passes per-connection config as headers (x-<config-key>).
-function credsFromHeaders(req) {
+// Smithery's gateway passes per-connection config through transparently as
+// BOTH query params and headers. Read each field from either location (header
+// first) so the server works regardless of how the config schema is declared
+// or whether a client strips custom headers.
+function credsFromRequest(req) {
+  const q = new URL(req.url, 'http://localhost').searchParams;
+  const pick = (header, query) => req.headers[header] || q.get(query) || undefined;
   return {
-    apiKey: req.headers['x-bitatlas-api-key'],
-    masterKey: req.headers['x-bitatlas-master-key'],
-    apiUrl: req.headers['x-bitatlas-api-url'],
-    webUrl: req.headers['x-bitatlas-web-url'],
-    walletKey: req.headers['x-bitatlas-wallet-key'],
+    apiKey: pick('x-bitatlas-api-key', 'bitatlasApiKey'),
+    masterKey: pick('x-bitatlas-master-key', 'bitatlasMasterKey'),
+    apiUrl: pick('x-bitatlas-api-url', 'bitatlasApiUrl'),
+    webUrl: pick('x-bitatlas-web-url', 'bitatlasWebUrl'),
+    walletKey: pick('x-bitatlas-wallet-key', 'bitatlasWalletKey'),
   };
 }
 
@@ -50,7 +55,7 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   // Stateless: a fresh server + transport per request, no session reuse.
-  const server = buildServer(credsFromHeaders(req));
+  const server = buildServer(credsFromRequest(req));
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { transport.close(); server.close(); });
 

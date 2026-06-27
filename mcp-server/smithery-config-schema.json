@@ -1,0 +1,33 @@
+{
+  "_comment": "Config schema for the Smithery listing of the BitAtlas remote MCP server (https://mcp.bitatlas.com/mcp). Paste/declare this when publishing on Smithery. 'x-from' tells the Smithery gateway which header to put each value in; the server (mcp-server/http.js) also accepts the same values as query params (bitatlasApiKey, etc.) as a fallback.",
+  "type": "object",
+  "required": ["bitatlasApiKey"],
+  "properties": {
+    "bitatlasApiKey": {
+      "type": "string",
+      "title": "BitAtlas API Key",
+      "description": "Your BitAtlas API key (starts with ba_). Generate one at https://bitatlas.com/vault/settings",
+      "x-from": { "header": "x-bitatlas-api-key" }
+    },
+    "bitatlasMasterKey": {
+      "type": "string",
+      "title": "Master Encryption Key",
+      "description": "Hex-encoded 256-bit master key (64 hex chars). Required for file upload and download. Derived from your password client-side — never sent to BitAtlas servers.",
+      "x-from": { "header": "x-bitatlas-master-key" }
+    },
+    "bitatlasApiUrl": {
+      "type": "string",
+      "title": "API Base URL",
+      "default": "https://api.bitatlas.com",
+      "description": "Override only for self-hosted or staging.",
+      "x-from": { "header": "x-bitatlas-api-url" }
+    },
+    "bitatlasWebUrl": {
+      "type": "string",
+      "title": "Web Origin",
+      "default": "https://www.bitatlas.com",
+      "description": "Web origin used to build zero-knowledge share links.",
+      "x-from": { "header": "x-bitatlas-web-url" }
+    }
+  }
+}
