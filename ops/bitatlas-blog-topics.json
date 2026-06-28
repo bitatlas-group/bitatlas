@@ -1,5 +1,5 @@
 {
-  "nextIndex": 53,
+  "nextIndex": 54,
   "topics": [
     {
       "slug": "zero-knowledge-encryption-fundamentals",
@@ -621,6 +621,170 @@
         "encryption"
       ],
       "brief": "Designing secure key backup and recovery protocols for client-side encryption"
+    },
+    {
+      "slug": "mcp-server-encryption-middleware-architecture",
+      "keywords": [
+        "MCP",
+        "encryption middleware",
+        "protocol composition",
+        "streaming",
+        "infrastructure"
+      ],
+      "brief": "Designing middleware layers for MCP servers to enforce encryption at protocol level"
+    },
+    {
+      "slug": "zero-knowledge-proofs-agent-authorization-policies",
+      "keywords": [
+        "zero-knowledge",
+        "ZK proofs",
+        "agent authorization",
+        "policy enforcement",
+        "privacy"
+      ],
+      "brief": "Using ZK proofs to authorize agent actions without revealing underlying credentials"
+    },
+    {
+      "slug": "eu-gdpr-data-residency-agent-infrastructure",
+      "keywords": [
+        "GDPR",
+        "data residency",
+        "EU compliance",
+        "agent deployment",
+        "regulatory"
+      ],
+      "brief": "Building agent infrastructure that respects EU data sovereignty and residency requirements"
+    },
+    {
+      "slug": "client-side-encryption-agent-state-management",
+      "keywords": [
+        "client-side encryption",
+        "state management",
+        "agent memory",
+        "end-to-end",
+        "cryptography"
+      ],
+      "brief": "Implementing client-side encryption patterns for persistent agent state without server-side visibility"
+    },
+    {
+      "slug": "trusted-execution-environments-agent-sandboxing",
+      "keywords": [
+        "TEE",
+        "trusted execution",
+        "sandboxing",
+        "agent isolation",
+        "security"
+      ],
+      "brief": "Leveraging TEEs like Intel SGX for secure agent computation and data protection"
+    },
+    {
+      "slug": "cryptographic-commitments-agent-audit-trails",
+      "keywords": [
+        "commitments",
+        "cryptography",
+        "audit trails",
+        "immutable",
+        "accountability"
+      ],
+      "brief": "Building tamper-proof agent audit logs using cryptographic commitments"
+    },
+    {
+      "slug": "homomorphic-encryption-agent-compute-delegated",
+      "keywords": [
+        "homomorphic encryption",
+        "FHE",
+        "computation delegation",
+        "privacy-preserving",
+        "agent"
+      ],
+      "brief": "Enabling agents to perform computations on encrypted data without decryption"
+    },
+    {
+      "slug": "agent-key-rotation-secrets-lifecycle-management",
+      "keywords": [
+        "key rotation",
+        "secrets lifecycle",
+        "key management",
+        "agent security",
+        "operations"
+      ],
+      "brief": "Automating cryptographic key rotation and secrets lifecycle for agent infrastructure"
+    },
+    {
+      "slug": "threshold-cryptography-distributed-agent-control",
+      "keywords": [
+        "threshold cryptography",
+        "distributed",
+        "key sharing",
+        "multi-party",
+        "agent control"
+      ],
+      "brief": "Using threshold schemes to distribute agent control across multiple parties"
+    },
+    {
+      "slug": "privacy-preserving-agent-logging-telemetry",
+      "keywords": [
+        "privacy",
+        "logging",
+        "telemetry",
+        "data minimization",
+        "agent observability"
+      ],
+      "brief": "Collecting agent telemetry and logs while minimizing personally identifiable information"
+    },
+    {
+      "slug": "mcp-transport-encryption-tls-alternatives",
+      "keywords": [
+        "MCP",
+        "transport security",
+        "TLS",
+        "encryption",
+        "protocol"
+      ],
+      "brief": "Securing MCP server communications with modern encryption and authentication protocols"
+    },
+    {
+      "slug": "zero-knowledge-ml-agent-model-privacy",
+      "keywords": [
+        "zero-knowledge",
+        "machine learning",
+        "model privacy",
+        "intellectual property",
+        "agents"
+      ],
+      "brief": "Protecting proprietary agent models and weights using cryptographic privacy techniques"
+    },
+    {
+      "slug": "secure-multi-party-computation-agent-collaboration",
+      "keywords": [
+        "SMC",
+        "secure computation",
+        "agent collaboration",
+        "privacy-preserving",
+        "protocol"
+      ],
+      "brief": "Enabling multiple agents to collaborate securely without sharing sensitive internal state"
+    },
+    {
+      "slug": "agent-key-derivation-hierarchical-cryptography",
+      "keywords": [
+        "key derivation",
+        "hierarchical encryption",
+        "agent identities",
+        "key management"
+      ],
+      "brief": "Designing hierarchical key derivation schemes for agent identity and authorization"
+    },
+    {
+      "slug": "verifiable-agent-computation-cryptographic-proofs",
+      "keywords": [
+        "verifiable computation",
+        "proofs",
+        "agent trustworthiness",
+        "cryptography",
+        "verification"
+      ],
+      "brief": "Making agent computations verifiable through cryptographic proofs of correct execution"
     }
   ]
 }
