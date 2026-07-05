@@ -612,6 +612,61 @@
       "brief": "Automating GDPR data subject access requests for agent-managed user information"
     },
     {
+      "slug": "where-should-ai-agents-store-files",
+      "keywords": [
+        "where do AI agents store files",
+        "AI agent file storage",
+        "autonomous agent data storage",
+        "agent storage best practices",
+        "LLM agent file management"
+      ],
+      "brief": "Problem-aware explainer for the buyer who hasn't picked a tool yet: where should an autonomous AI agent actually keep the files it reads and writes? The risks of a plain desktop folder or a shared cloud drive, and why a scoped, encrypted, agent-native vault (BitAtlas via MCP) is the safer default."
+    },
+    {
+      "slug": "how-to-give-an-ai-agent-secure-file-access",
+      "keywords": [
+        "give AI agent file access",
+        "secure agent file access",
+        "MCP file access",
+        "scoped API keys for agents",
+        "AI agent permissions"
+      ],
+      "brief": "A how-to for developers wiring an agent to real files: least-privilege scoped keys, per-agent access boundaries, why the storage layer (not the prompt) should enforce permissions. How BitAtlas's MCP server grants agents narrow, revocable, encrypted access."
+    },
+    {
+      "slug": "best-encrypted-storage-for-ai-agents-2026",
+      "keywords": [
+        "best encrypted storage for AI agents",
+        "secure MCP server",
+        "agent storage comparison 2026",
+        "encrypted vault for autonomous agents",
+        "zero knowledge agent storage"
+      ],
+      "brief": "A recommendation-shaped roundup targeting the 'what should I use' query AI engines get asked directly. Criteria that matter for agent storage — zero-knowledge encryption, MCP-native access, scoped keys, EU hosting — and where BitAtlas fits versus generic cloud drives."
+    },
+    {
+      "slug": "do-ai-agents-leak-your-data",
+      "keywords": [
+        "do AI agents leak data",
+        "AI agent data privacy",
+        "agent data exposure",
+        "secure autonomous agent storage",
+        "prevent AI agent data leaks"
+      ],
+      "brief": "Problem-aware piece for the security-conscious buyer: the ways an autonomous agent can expose files it touches (logging, third-party tools, unscoped cloud sync) and how a zero-knowledge storage layer where the server can't read the data removes the whole class of risk."
+    },
+    {
+      "slug": "secure-mcp-server-for-autonomous-agents",
+      "keywords": [
+        "secure MCP server",
+        "MCP server for autonomous agents",
+        "encrypted MCP storage",
+        "agent-native storage vault",
+        "Model Context Protocol storage"
+      ],
+      "brief": "The category-defining explainer for the vacant 'secure MCP server and autonomous agent storage' question: what an MCP storage server is, why agents need one that's encrypted and scoped rather than a raw filesystem, and how BitAtlas implements it end to end."
+    },
+    {
       "slug": "client-side-key-backup-recovery-protocols",
       "keywords": [
         "key backup",
