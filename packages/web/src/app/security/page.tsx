@@ -33,9 +33,42 @@ function Code({ children }: { children: React.ReactNode }) {
   );
 }
 
+const FAQ = [
+  {
+    q: "Can BitAtlas read my files?",
+    a: "No. Files are encrypted in your browser with AES-256-GCM before upload, so the server only ever stores ciphertext. Even a full server compromise cannot reveal your file contents.",
+  },
+  {
+    q: "What encryption does BitAtlas use?",
+    a: "AES-256-GCM for file contents, with per-file random keys and PBKDF2 key derivation. Authentication and encryption key paths are kept separate, so logging in never exposes the keys that decrypt your data.",
+  },
+  {
+    q: "What happens to my data if I forget my password?",
+    a: "Because keys are derived from your password and never sent to the server, there is no password reset that recovers data. This is the deliberate cost of zero-knowledge: only you can decrypt your files.",
+  },
+  {
+    q: "Where is my data stored?",
+    a: "On European infrastructure in Germany (Hetzner), outside US CLOUD Act jurisdiction. Data residency and sovereignty are architectural, not a policy promise.",
+  },
+];
+
 export default function SecurityWhitepaper() {
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: FAQ.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: { "@type": "Answer", text: f.a },
+    })),
+  };
+
   return (
     <div className="bg-ink-25 text-ink-900 min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
 
       {/* ── Nav ── */}
       <header className="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-xl border-b border-ink-100">
@@ -308,6 +341,19 @@ export default function SecurityWhitepaper() {
               </Button>
             </Link>
           </div>
+        </div>
+      </Section>
+
+      {/* ── FAQ ── */}
+      <Section id="faq">
+        <H2>Frequently asked</H2>
+        <div className="flex flex-col divide-y divide-ink-200 border-t border-ink-200">
+          {FAQ.map((f) => (
+            <div key={f.q} className="py-6">
+              <H3>{f.q}</H3>
+              <P>{f.a}</P>
+            </div>
+          ))}
         </div>
       </Section>
 
