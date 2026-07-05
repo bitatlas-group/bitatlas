@@ -17,6 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://bitatlas.com"),
   title: "BitAtlas — Encrypted Cloud for Humans & Agents",
   description:
     "Zero-knowledge AES-256-GCM encrypted storage. Built for teams and AI agents that need private, sovereign file infrastructure.",
@@ -35,9 +36,45 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Site-wide entity schema so AI engines know what BitAtlas *is*.
+  const orgSchema = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://bitatlas.com/#org",
+        name: "BitAtlas",
+        url: "https://bitatlas.com",
+        logo: "https://bitatlas.com/icon-192.png",
+        description:
+          "Zero-knowledge, end-to-end encrypted cloud storage for humans and AI agents.",
+        sameAs: ["https://github.com/bitatlas-group"],
+      },
+      {
+        "@type": "SoftwareApplication",
+        name: "BitAtlas",
+        url: "https://bitatlas.com",
+        applicationCategory: "SecurityApplication",
+        operatingSystem: "Web",
+        publisher: { "@id": "https://bitatlas.com/#org" },
+        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        featureList: [
+          "Zero-knowledge AES-256-GCM client-side encryption",
+          "MCP server for AI agents",
+          "Scoped, revocable agent API keys",
+          "EU (Germany) hosting, no US CLOUD Act jurisdiction",
+        ],
+      },
+    ],
+  };
+
   return (
     <html lang="en">
       <body className={`${poppins.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(orgSchema) }}
+        />
         <Providers>{children}</Providers>
       </body>
     </html>
