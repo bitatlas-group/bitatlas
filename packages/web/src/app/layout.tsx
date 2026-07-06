@@ -30,14 +30,14 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "BitAtlas",
     url: "https://bitatlas.com",
-    images: [{ url: "/icon-192.png", width: 192, height: 192, alt: "BitAtlas" }],
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "BitAtlas — Zero-Knowledge Encrypted Cloud for Humans & AI Agents" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: TITLE,
     description: DESCRIPTION,
     site: "@bitatlas",
-    images: ["/icon-192.png"],
+    images: ["/og.png"],
   },
   icons: {
     icon: [

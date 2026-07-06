@@ -38,6 +38,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       publishedTime: post.date,
       siteName: 'BitAtlas',
       url: `https://bitatlas.com/blog/${slug}`,
+      images: ['/og.png'],
     },
   };
 }
@@ -75,7 +76,7 @@ export default async function BlogPostPage({ params }: Props) {
         dateModified: post.date,
         wordCount,
         keywords: post.keywords.join(', '),
-        image: 'https://bitatlas.com/icon-192.png',
+        image: 'https://bitatlas.com/og.png',
         author: { '@type': 'Person', name: post.author },
         publisher: {
           '@type': 'Organization',
