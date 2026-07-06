@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ComponentPropsWithoutRef } from 'react';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { MDXRemote } from 'next-mdx-remote/rsc';
@@ -60,20 +61,39 @@ export default async function BlogPostPage({ params }: Props) {
   const post = getPostBySlug(slug);
   if (!post) notFound();
 
+  const url = `https://bitatlas.com/blog/${slug}`;
+  const wordCount = post.content.trim().split(/\s+/).length;
   const jsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'Article',
-    headline: post.title,
-    description: post.description,
-    datePublished: post.date,
-    author: { '@type': 'Person', name: post.author },
-    publisher: {
-      '@type': 'Organization',
-      name: 'BitAtlas',
-      url: 'https://bitatlas.com',
-    },
-    mainEntityOfPage: `https://bitatlas.com/blog/${slug}`,
-    keywords: post.keywords.join(', '),
+    '@graph': [
+      {
+        '@type': 'BlogPosting',
+        '@id': `${url}#post`,
+        headline: post.title,
+        description: post.description,
+        datePublished: post.date,
+        dateModified: post.date,
+        wordCount,
+        keywords: post.keywords.join(', '),
+        image: 'https://bitatlas.com/icon-192.png',
+        author: { '@type': 'Person', name: post.author },
+        publisher: {
+          '@type': 'Organization',
+          name: 'BitAtlas',
+          url: 'https://bitatlas.com',
+          logo: { '@type': 'ImageObject', url: 'https://bitatlas.com/icon-192.png' },
+        },
+        mainEntityOfPage: { '@type': 'WebPage', '@id': url },
+      },
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://bitatlas.com' },
+          { '@type': 'ListItem', position: 2, name: 'Blog', item: 'https://bitatlas.com/blog' },
+          { '@type': 'ListItem', position: 3, name: post.title, item: url },
+        ],
+      },
+    ],
   };
 
   return (
@@ -146,9 +166,14 @@ export default async function BlogPostPage({ params }: Props) {
 
           <div className="my-10 h-px w-full bg-ink-100" />
 
-          {/* MDX Content */}
+          {/* MDX Content — demote any in-body H1 to H2 so the post title stays
+              the page's single H1 (AI extractors rely on one H1 per page). */}
           <div className="blog-prose">
-            <MDXRemote source={post.content} options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }} />
+            <MDXRemote
+              source={post.content}
+              components={{ h1: (props: ComponentPropsWithoutRef<'h2'>) => <h2 {...props} /> }}
+              options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
+            />
           </div>
 
           {/* CTA */}
