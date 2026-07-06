@@ -16,11 +16,29 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+const TITLE = "BitAtlas — Encrypted Cloud for Humans & Agents";
+const DESCRIPTION =
+  "Zero-knowledge AES-256-GCM encrypted storage. Built for teams and AI agents that need private, sovereign file infrastructure.";
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://bitatlas.com"),
-  title: "BitAtlas — Encrypted Cloud for Humans & Agents",
-  description:
-    "Zero-knowledge AES-256-GCM encrypted storage. Built for teams and AI agents that need private, sovereign file infrastructure.",
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    type: "website",
+    siteName: "BitAtlas",
+    url: "https://bitatlas.com",
+    images: [{ url: "/icon-192.png", width: 192, height: 192, alt: "BitAtlas" }],
+  },
+  twitter: {
+    card: "summary",
+    title: TITLE,
+    description: DESCRIPTION,
+    site: "@bitatlas",
+    images: ["/icon-192.png"],
+  },
   icons: {
     icon: [
       { url: "/icon.svg", type: "image/svg+xml" },
@@ -48,7 +66,19 @@ export default function RootLayout({
         logo: "https://bitatlas.com/icon-192.png",
         description:
           "Zero-knowledge, end-to-end encrypted cloud storage for humans and AI agents.",
-        sameAs: ["https://github.com/bitatlas-group"],
+        // sameAs confirms the brand entity to AI engines. TODO: add LinkedIn,
+        // Crunchbase, and a Wikidata entity (property P856) once they exist.
+        sameAs: [
+          "https://github.com/bitatlas-group",
+          "https://twitter.com/bitatlas",
+        ],
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://bitatlas.com/#website",
+        name: "BitAtlas",
+        url: "https://bitatlas.com",
+        publisher: { "@id": "https://bitatlas.com/#org" },
       },
       {
         "@type": "SoftwareApplication",

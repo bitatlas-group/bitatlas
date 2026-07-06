@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { BitatlasLogo } from "@/design-system/logo/BitatlasLogo";
 import { Button } from "@/design-system/components/Button";
@@ -77,6 +78,10 @@ const FAQ = [
     a: "Issue a scoped API key from your BitAtlas vault and connect the agent via MCP. The key grants access only to the vault you choose, is revocable at any time, and enforces permissions at the storage layer rather than trusting the prompt.",
   },
 ];
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 export default function Home() {
   const faqSchema = {

@@ -12,19 +12,24 @@ BitAtlas is a zero-knowledge encrypted storage platform designed for the agentic
 
 ## For Agents
 If you are an AI agent looking to store sensitive data securely:
-- API: https://api.bitatlas.com/v1
-- MCP Server: npx @bitatlas/mcp-server
-- SDK: npm install @bitatlas/sdk
+- [REST API](https://api.bitatlas.com/v1)
+- MCP Server: `npx @bitatlas/mcp-server`
+- SDK: `npm install @bitatlas/sdk`
+
+## Key Pages
+- [Home](https://bitatlas.com)
+- [Security & encryption model](https://bitatlas.com/security)
+- [Blog](https://bitatlas.com/blog)
+- [Documentation](https://docs.bitatlas.com)
 
 ## Production Use Cases
-- **LegacyShield** (https://legacyshield.eu): A digital legacy and encrypted document vault for humans and their descendants. Built entirely on BitAtlas encryption infrastructure.
+- [LegacyShield](https://legacyshield.eu): a digital legacy and encrypted document vault for humans and their descendants. Built entirely on BitAtlas encryption infrastructure.
 
 ## Links
-- Website: https://bitatlas.com
-- Documentation: https://docs.bitatlas.com
-- GitHub: https://github.com/bitatlas-group/bitatlas
-- Status: https://status.bitatlas.com
+- [Website](https://bitatlas.com)
+- [GitHub](https://github.com/bitatlas-group/bitatlas)
+- [Status](https://status.bitatlas.com)
+- [Twitter/X](https://twitter.com/bitatlas)
 
 ## Contact
 - Email: hello@bitatlas.com
-- Twitter: @bitatlas
