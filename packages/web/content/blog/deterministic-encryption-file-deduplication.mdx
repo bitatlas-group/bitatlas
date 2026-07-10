@@ -1,0 +1,137 @@
+---
+title: "Deterministic Encryption for Secure File Deduplication"
+description: "How convergent and message-locked encryption let you deduplicate encrypted files without ever decrypting them — and the subtle security tradeoffs every developer needs to understand."
+date: "2026-07-10"
+author: "BitAtlas Team"
+slug: "deterministic-encryption-file-deduplication"
+keywords: ["deterministic encryption", "deduplication", "storage efficiency", "security", "convergent encryption", "message-locked encryption", "cryptography"]
+readingTime: "6 min read"
+---
+
+Standard encryption randomizes ciphertext — the same plaintext encrypted twice produces different output. That property is fundamental to semantic security, but it kills storage-layer deduplication dead. When you can't compare two ciphertexts to know whether they came from the same source file, you have to store every copy, even if they're identical. For a zero-knowledge storage system serving thousands of users, that overhead compounds fast.
+
+Deterministic encryption breaks this impasse. Used carefully, it lets a storage backend identify duplicate blocks or files without ever seeing the underlying plaintext. This post walks through how it works, the real attacks it exposes, and the mitigation patterns that make it safe to deploy.
+
+## Why Normal Encryption Breaks Deduplication
+
+Modern authenticated encryption schemes — AES-GCM, ChaCha20-Poly1305 — use a randomly generated nonce (number used once) for every encryption operation. The nonce is combined with the key during the cipher's counter or keystream phase, ensuring that two encryptions of the same plaintext with the same key still produce different ciphertext.
+
+This is intentional. It prevents an attacker who observes multiple ciphertexts from learning whether two messages are identical, which would leak information. In security terminology, the scheme achieves IND-CPA (indistinguishability under chosen-plaintext attack).
+
+The downside for storage: the ciphertext for `report.pdf` you uploaded Tuesday is byte-for-byte different from the ciphertext for the same `report.pdf` your colleague uploaded Wednesday, even if the underlying files are identical. The deduplication logic has no way to know they match.
+
+## The Convergent Encryption Approach
+
+Convergent encryption (also called content-hash encryption or message-locked encryption) solves this by deriving the encryption key deterministically from the content itself:
+
+```typescript
+async function convergentKey(data: Uint8Array): Promise<CryptoKey> {
+  // SHA-256 of the content becomes the 256-bit AES key
+  const keyMaterial = await crypto.subtle.digest("SHA-256", data);
+  return crypto.subtle.importKey(
+    "raw",
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function convergentEncrypt(data: Uint8Array): Promise<{ ciphertext: Uint8Array; tag: string }> {
+  const key = await convergentKey(data);
+  // Use a fixed or content-derived nonce — same data always yields same ciphertext
+  const nonce = new Uint8Array(12); // all-zero or hash-derived
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    key,
+    data
+  );
+  // The dedup tag is the hash of the plaintext (or ciphertext)
+  const tag = btoa(String.fromCharCode(...new Uint8Array(keyMaterial)));
+  return { ciphertext: new Uint8Array(ciphertext), tag };
+}
+```
+
+Now two uploads of the same file produce the same ciphertext. The storage backend can detect the duplicate by comparing tags and store only one copy, saving space without needing decryption capability.
+
+## Block-Level vs. File-Level Deduplication
+
+File-level convergent encryption handles exact duplicates, but storage systems often benefit from block-level dedup — finding identical 4 MB or 16 MB chunks across different files.
+
+Block-level dedup applies the same convergent pattern at chunk granularity:
+
+```typescript
+const BLOCK_SIZE = 4 * 1024 * 1024; // 4 MB blocks
+
+async function encryptBlocks(file: Uint8Array) {
+  const blocks = [];
+  for (let offset = 0; offset < file.length; offset += BLOCK_SIZE) {
+    const block = file.slice(offset, offset + BLOCK_SIZE);
+    const encrypted = await convergentEncrypt(block);
+    blocks.push(encrypted);
+  }
+  return blocks;
+}
+```
+
+This means a 500 MB video file and a 600 MB video file that share the first 400 MB (same intro sequence, different edit) share storage for those matching blocks. The manifest stored alongside the file describes which block references to assemble for reconstruction, and only novel blocks consume new storage capacity.
+
+Content-defined chunking (CDC) — using a rolling hash to pick chunk boundaries based on content rather than fixed offsets — extends this further by aligning chunk boundaries to semantic content, so that inserting 10 bytes into a file doesn't invalidate every subsequent fixed-offset chunk.
+
+## The Confirmation-of-a-File Attack
+
+Convergent encryption is not without serious caveats. The most important is the **confirmation-of-a-file attack** (sometimes called the learn-whether-you-have-file attack).
+
+Here is the attack: suppose an adversary suspects you uploaded a specific file — a leaked document, a known software binary, an incriminating image. They take that file, compute its convergent key and tag using the same public algorithm, then query the storage system: "Do you have a block with this tag?" If the system answers yes, the adversary has confirmed you uploaded that file without ever obtaining a decryption key.
+
+This is a genuine threat for sensitive content. It means convergent encryption alone is not suitable as the sole layer of protection when your threat model includes a curious or compromised storage provider, or an attacker with query access to the deduplication index.
+
+## Mitigations and Safer Patterns
+
+Several mitigation strategies exist, each with different tradeoffs.
+
+**Per-user salting.** Instead of deriving the key purely from `H(content)`, derive it from `H(user_secret || content)`. This prevents cross-user deduplication (two users uploading the same file will get different ciphertexts) but eliminates storage savings between users. Deduplication still works within a single user's uploads across time, which is often the dominant savings source.
+
+```typescript
+async function userScopedKey(userSecret: Uint8Array, data: Uint8Array): Promise<CryptoKey> {
+  const combined = new Uint8Array(userSecret.length + data.length);
+  combined.set(userSecret);
+  combined.set(data, userSecret.length);
+  const keyMaterial = await crypto.subtle.digest("SHA-256", combined);
+  return crypto.subtle.importKey("raw", keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+```
+
+**Separate dedup and access control.** Rather than letting the storage backend answer open queries about block presence, route dedup lookups through an authenticated API that checks whether the requesting user has permission to learn about that block's existence. This doesn't eliminate the attack for authorized parties but closes it for external adversaries.
+
+**Server-aided MLE (message-locked encryption).** A more cryptographically rigorous approach uses a server-generated, file-specific pepper that is stored alongside the block reference but never revealed in full — the client proves it can derive the correct key without exposing the file content directly. Schemes like DupLESS (Bellare et al.) formalize this, though they add a round trip to a blinding server.
+
+**Two-layer hybrid.** Encrypt with convergent encryption for the dedup layer, then wrap the convergent key with a standard randomized per-user encryption layer before storing the key reference. The outer layer restores IND-CPA for the key material itself. The inner convergent ciphertext is still deduplicable.
+
+## Security Properties Summary
+
+| Scheme | Cross-user dedup | Resists COAF | IND-CPA |
+|---|---|---|---|
+| Standard random-nonce encryption | No | Yes | Yes |
+| Convergent (content-keyed) | Yes | No | No |
+| Per-user salted convergent | No | Partial | No |
+| Server-aided MLE (DupLESS) | Yes | Yes | Yes |
+
+For most zero-knowledge storage deployments serving enterprise users, **per-user salted convergent encryption** is the practical sweet spot: it delivers meaningful within-account deduplication, eliminates the cross-user confirmation attack entirely, and imposes no server-side protocol complexity beyond what you already have.
+
+## How BitAtlas Handles This
+
+BitAtlas uses block-level encryption with per-user key material derived on the client before upload. Blocks with the same content within a single account's storage are deduplicated at rest, while the server stores only encrypted block manifests and ciphertext — never plaintext or plaintext-derived keys. Because deduplication operates within an account boundary rather than across all users, the confirmation-of-a-file attack surface is limited to scenarios where an attacker already has access to that account.
+
+For teams with strict isolation requirements, BitAtlas supports disabling intra-account deduplication entirely — each version of every file occupies its own storage allocation — at the cost of increased storage consumption.
+
+## Putting It Together
+
+Deterministic encryption unlocks storage efficiency that would be impossible with standard randomized schemes, but it trades away IND-CPA security at the deduplication granularity. For most practical systems:
+
+- Use **per-user salting** to scope dedup within account boundaries and eliminate cross-user leakage.
+- Route **dedup queries through authenticated endpoints** so external parties cannot probe block presence.
+- Apply **content-defined chunking** to maximize partial-file deduplication savings across versions.
+- Fall back to **fully randomized encryption** for content you consider especially sensitive, accepting the storage overhead.
+
+The best deduplication strategy for a zero-knowledge system is the one that accurately reflects your actual threat model — not the one that maximizes savings in the abstract.
