@@ -1,0 +1,164 @@
+---
+title: "Cost Attribution in Shared AI Agent Infrastructure"
+description: "How to fairly track and allocate compute, API, and storage costs across multiple tenants and agents sharing the same infrastructure."
+date: "2026-07-11"
+author: "BitAtlas Team"
+slug: "agent-cost-attribution-shared-resources"
+keywords: ["cost attribution", "billing", "resource sharing", "multi-tenant", "chargeback"]
+readingTime: "7 min read"
+---
+
+Running AI agents at scale in a shared infrastructure is a cost problem as much as a technical one. When a dozen teams or products share the same LLM gateway, vector store, storage vault, and queue, each producing hundreds of agent runs per day, the monthly bill arrives as a single number with no breakdown. Someone in finance asks which team drove last month's $40,000 overage, and the answer is usually a shrug.
+
+This post walks through the architecture for agent cost attribution — tagging every resource consumption event at the source, aggregating it into per-tenant ledgers, and surfacing it as actionable chargeback data for internal teams or per-seat billing for external customers.
+
+## The Core Problem: Shared Resources Have No Natural Labels
+
+Cloud infrastructure is designed around accounts, projects, and resource groups. But AI agent workloads routinely cross those boundaries. A single agent run might:
+
+1. Invoke a model through a shared LLM proxy that pools keys from multiple providers
+2. Read and write files through a multi-tenant encrypted vault
+3. Execute web searches via a shared crawler quota
+4. Enqueue tasks in a common job scheduler
+5. Write logs to a centralized observability stack
+
+Each hop consumes budget. None of them naturally knows who initiated the agent run or which product feature triggered it.
+
+The fix is not reorganizing your AWS accounts (though that helps at the boundary). The fix is **propagating attribution context** through every system call from the moment an agent run starts until every associated cost has been recorded.
+
+## Design Pattern: The Attribution Header
+
+The simplest mechanism is a propagated header — a structured string your agent runtime attaches to every outbound call and every downstream service reads and records.
+
+```typescript
+interface AttributionContext {
+  tenantId: string;
+  agentId: string;
+  runId: string;
+  featureTag: string;   // e.g. "chat", "background-sync", "scheduled-export"
+  costCenter: string;   // maps to a billing entity
+}
+```
+
+In HTTP services this travels as a request header. In queue messages it is a top-level envelope field. In SQL it is a session variable or a `SET LOCAL` at the start of each transaction. In gRPC it rides metadata. The name does not matter; consistency does.
+
+Your LLM proxy, your storage layer, your crawler, and your telemetry pipeline all read this context and tag every usage record they emit with the same `tenantId + runId` pair. Without this, all you have is timestamps and resource IDs — not enough to answer "which tenant."
+
+## Metering at Each Resource Layer
+
+### LLM token usage
+
+Token costs are the largest line item for most agent deployments. Proxy every model call through a gateway (LiteLLM, custom middleware, or a managed service) that:
+
+- Extracts the attribution context from the incoming request
+- Calls the upstream provider
+- Records `{tenantId, agentId, runId, model, inputTokens, outputTokens, costUsd}` to an append-only ledger before returning the response
+
+The cost-per-token for each model is a config table the gateway consults at record time. Do not try to reconcile costs after the fact using provider invoices — the exchange rates between your internal pricing and provider billing shift across tiers and discounts, making reconciliation unreliable.
+
+### Storage I/O
+
+For an encrypted vault like BitAtlas, every read and write carries a measurable cost: storage-hours consumed, egress bandwidth, and — at a finer granularity — the cryptographic operations that back zero-knowledge guarantees. Meter these at the vault API layer:
+
+```typescript
+// Example vault middleware (pseudocode)
+async function handleUpload(req: Request): Promise<Response> {
+  const ctx = extractAttribution(req.headers);
+  const result = await storageBackend.put(req.body);
+
+  await ledger.record({
+    ...ctx,
+    event: "storage.write",
+    bytes: req.body.byteLength,
+    storageDeltaBytes: result.storedBytes,
+    costUsd: computeStorageCost(result.storedBytes),
+  });
+
+  return result.response;
+}
+```
+
+Track storage-hours by running a periodic job that reads current usage per tenant and records an increment. Flat per-GB-month pricing is easy to compute; usage-based pricing over time requires a time-series accumulator.
+
+### External API calls
+
+Web search quotas, geocoding calls, email sends — these all have per-call costs your agent may trigger. Wrap each external client in a decorator that records usage before returning:
+
+```typescript
+function withAttribution<T>(
+  fn: (ctx: AttributionContext, ...args: unknown[]) => Promise<T>,
+  eventName: string,
+  costFn: (result: T) => number,
+) {
+  return async (ctx: AttributionContext, ...args: unknown[]) => {
+    const result = await fn(ctx, ...args);
+    await ledger.record({ ...ctx, event: eventName, costUsd: costFn(result) });
+    return result;
+  };
+}
+```
+
+This pattern keeps attribution logic out of your business code and makes it trivial to add new resource types to your cost model.
+
+## The Ledger: Append-Only, Queryable, Immutable
+
+Every metering event should land in an append-only store. The requirements are:
+
+- **Append-only writes** — no updates, no deletes. Cost events are facts.
+- **Indexed by `(tenantId, timestamp)`** for efficient aggregation.
+- **Immutable checksums** if you expose this data to customers or regulators. A Merkle tree or content-addressed hash chain is enough; you do not need a blockchain.
+
+PostgreSQL with a partial trigger that rejects `UPDATE` and `DELETE` on the cost table works well at moderate scale. For high-frequency agent fleets, a time-series database like TimescaleDB or ClickHouse handles the write volume more gracefully.
+
+A simple schema:
+
+```sql
+CREATE TABLE cost_events (
+  id          BIGSERIAL PRIMARY KEY,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  tenant_id   TEXT NOT NULL,
+  agent_id    TEXT NOT NULL,
+  run_id      TEXT NOT NULL,
+  feature_tag TEXT,
+  event_type  TEXT NOT NULL,
+  quantity    NUMERIC,
+  unit        TEXT,
+  cost_usd    NUMERIC(12, 8) NOT NULL
+);
+
+CREATE INDEX ON cost_events (tenant_id, recorded_at DESC);
+```
+
+Aggregate on read, not on write. Keep the raw events; compute period summaries in a materialized view or a scheduled rollup job.
+
+## Chargeback vs. Show-Back
+
+There are two ways to use cost attribution data:
+
+**Show-back** exposes usage to teams or tenants so they can see what they are consuming, without enforcing a hard limit. This is the first step — it changes behavior simply by making costs visible.
+
+**Chargeback** deducts costs from internal budgets or generates external invoices. It requires two additional components:
+
+1. **Budget enforcement**: a quota service that the agent runtime queries before starting expensive operations. If a tenant's monthly budget is exhausted, the run either fails fast or downgrades to a cheaper model.
+
+2. **Invoice generation**: a periodic job that aggregates the ledger for a billing period, applies any volume discounts or committed-use credits, and produces a payable invoice or an internal transfer.
+
+Start with show-back. The visibility alone usually halves costs within a quarter as teams self-police expensive patterns.
+
+## Handling Multi-Step Agent Runs
+
+An agent that runs a 20-step workflow accumulates costs across many resources in a single `runId`. Some steps may fan out to sub-agents, each with their own attribution context. The cleanest model:
+
+- The parent run's `runId` becomes the `parentRunId` on child contexts.
+- The ledger records both, so you can aggregate at the run level or drill down to individual sub-agent costs.
+- Total cost of a workflow = sum of all events sharing a common root `runId`.
+
+This is the same parent-child pattern used in distributed tracing (OpenTelemetry spans), and if you are already propagating trace IDs, you can reuse the same propagation mechanism for cost context.
+
+## Putting It Together
+
+The end state is a pipeline where every agent action — from a token generation to a file write — leaves a cost record tagged with who initiated it. Finance gets a live dashboard. Teams get per-feature breakdowns. Customers on usage-based plans get accurate invoices. And when the $40,000 overage arrives next quarter, the answer is a two-second query, not a three-week investigation.
+
+The investment is mostly in instrumentation — wrapping your resource clients, propagating the attribution header, and standing up the ledger. None of it requires exotic infrastructure. What it requires is doing it early, before the shared resources accumulate enough history to make retrofitting painful.
+
+Cost attribution is boring. Unexplained six-figure cloud bills are not.
