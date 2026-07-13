@@ -1,0 +1,222 @@
+---
+title: "Encrypting and Compressing Agent Context Windows for Token Efficiency"
+description: "How to reduce token costs and protect sensitive data in AI agent context windows using semantic compression, encrypted memory stores, and structured summarization."
+date: 2026-07-13
+author: "BitAtlas Team"
+slug: agent-context-window-encryption-compression
+keywords:
+  - context window
+  - encryption
+  - compression
+  - token efficiency
+  - agents
+readingTime: 8
+---
+
+Every AI agent is constrained by its context window—the bounded space of tokens the model can attend to at once. As agents tackle longer tasks, their context fills with tool outputs, retrieved documents, prior reasoning, and accumulated state. Left unmanaged, this ballooning context inflates latency, burns token budget, and—critically—exposes sensitive data to unnecessary retention.
+
+The solution is a two-part strategy: **semantic compression** to eliminate redundant tokens without losing meaning, and **encrypted context stores** to ensure that whatever escapes the active window does so safely.
+
+## Why Context Grows Faster Than You Expect
+
+A naive agent accumulates context linearly. Each tool call appends its full output. Each retrieved document sits verbatim in the window. After a dozen steps, the context looks like:
+
+- 2,000 tokens of system prompt
+- 800 tokens per tool response × 10 calls = 8,000 tokens
+- 3 × 1,500-token retrieved chunks = 4,500 tokens
+- 600 tokens of intermediate reasoning
+
+That's 15,100 tokens per agent turn—and the model hasn't even started its reply. On a 128k-token model this seems comfortable, but at scale (hundreds of parallel agents, extended tasks) the cost becomes meaningful. More importantly, those tool outputs often contain user PII, API keys printed in debug output, database rows, or confidential file contents.
+
+## Semantic Compression: Summary over Verbatim
+
+The core technique is replacing verbatim context with summaries at predefined thresholds. Rather than retaining every token of a tool's response, the agent extracts what it actually needs.
+
+```python
+class ContextWindow:
+    def __init__(self, model_client, max_tokens=8000, compression_ratio=0.3):
+        self.segments = []
+        self.total_tokens = 0
+        self.max_tokens = max_tokens
+        self.compression_ratio = compression_ratio
+        self.model = model_client
+
+    def add_segment(self, role, content, token_count):
+        self.segments.append({"role": role, "content": content, "tokens": token_count})
+        self.total_tokens += token_count
+        if self.total_tokens > self.max_tokens:
+            self._compress()
+
+    def _compress(self):
+        # Keep the most recent 20% of segments verbatim; summarize the rest
+        keep_recent = max(1, len(self.segments) // 5)
+        to_compress = self.segments[:-keep_recent]
+        recent = self.segments[-keep_recent:]
+
+        combined = "\n\n".join(
+            f"[{s['role']}]: {s['content']}" for s in to_compress
+        )
+        summary = self.model.complete(
+            f"Summarize the key facts and decisions from this agent conversation. "
+            f"Preserve all actionable state, file paths, identifiers, and conclusions:\n\n{combined}",
+            max_tokens=int(self.total_tokens * self.compression_ratio)
+        )
+
+        self.segments = [{"role": "system", "content": f"[SUMMARY] {summary}", "tokens": len(summary.split())}] + recent
+        self.total_tokens = sum(s["tokens"] for s in self.segments)
+```
+
+The compression pass is itself a model call, so it costs tokens—but typically far fewer than the segments it replaces. A 3,000-token tool output that compresses to 200 tokens of summary nets 2,800 tokens of headroom.
+
+## Structured Fact Extraction vs. Free-Form Summary
+
+Free-form summaries are lossy in unpredictable ways. A better pattern is **structured fact extraction**: after each tool call, the agent writes the result into a typed key-value store rather than retaining the raw output.
+
+```typescript
+interface AgentFact {
+  key: string;
+  value: string;
+  source: "tool" | "retrieved" | "inferred";
+  ttl?: number; // evict after N turns
+}
+
+class FactStore {
+  private facts: Map<string, AgentFact> = new Map();
+
+  upsert(fact: AgentFact) {
+    this.facts.set(fact.key, fact);
+  }
+
+  toContextSlice(maxTokenBudget: number): string {
+    // Sort by recency; truncate to budget
+    const entries = [...this.facts.values()]
+      .map(f => `${f.key}: ${f.value}`)
+      .join("\n");
+    // Cheap token estimate: characters divided by 4
+    if (entries.length / 4 > maxTokenBudget) {
+      return entries.slice(0, maxTokenBudget * 4);
+    }
+    return entries;
+  }
+
+  evictExpired(currentTurn: number) {
+    for (const [key, fact] of this.facts) {
+      if (fact.ttl !== undefined && currentTurn > fact.ttl) {
+        this.facts.delete(key);
+      }
+    }
+  }
+}
+```
+
+The agent's context prompt now includes a compact fact table (a few hundred tokens) rather than raw outputs. The model still has the information it needs; it just doesn't have the verbose wrapper.
+
+## Encrypting What Leaves the Active Window
+
+Compressed segments and evicted facts don't disappear—they go into long-term memory stores. If those stores persist to disk, object storage, or a database, they need encryption.
+
+The right primitive is authenticated encryption: AES-256-GCM, which combines confidentiality with integrity checking. An agent that reads corrupted memory should surface an authentication error, not silently process tampered content.
+
+```python
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import os, base64, json
+
+class EncryptedMemoryStore:
+    def __init__(self, key_bytes: bytes):
+        # key_bytes must be 32 bytes for AES-256
+        self.aead = AESGCM(key_bytes)
+
+    def write(self, turn_id: str, data: dict) -> str:
+        nonce = os.urandom(12)  # 96-bit nonce for GCM
+        plaintext = json.dumps(data).encode()
+        ciphertext = self.aead.encrypt(nonce, plaintext, turn_id.encode())
+        blob = base64.b64encode(nonce + ciphertext).decode()
+        return blob
+
+    def read(self, turn_id: str, blob: str) -> dict:
+        raw = base64.b64decode(blob)
+        nonce, ciphertext = raw[:12], raw[12:]
+        plaintext = self.aead.decrypt(nonce, ciphertext, turn_id.encode())
+        return json.loads(plaintext)
+```
+
+The `turn_id` acts as **additional authenticated data (AAD)**—the ciphertext cannot be decrypted in a different context, preventing replay attacks where an adversary substitutes one agent's memory for another's.
+
+## Key Derivation for Agent Instances
+
+A fleet of agents sharing one encryption key is a single point of failure. Instead, derive per-agent keys from a root key using HKDF:
+
+```python
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+
+def derive_agent_key(root_key: bytes, agent_id: str) -> bytes:
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=f"agent-memory/{agent_id}".encode()
+    )
+    return hkdf.derive(root_key)
+```
+
+Each agent gets a unique 32-byte key derived deterministically from its ID. Compromising one agent's memory does not expose another's. The root key lives in a secrets manager (Vault, AWS Secrets Manager, or similar); the derived key exists only in the agent process memory during its lifetime.
+
+## Compression Beyond Semantics: Token-Level Tricks
+
+A few low-effort wins reduce context size before semantic compression is even needed:
+
+**Trim whitespace and boilerplate.** Tool APIs often return verbose JSON with consistent structure. Strip fields the agent never reads.
+
+```python
+def trim_api_response(response: dict, keep_keys: list[str]) -> dict:
+    return {k: v for k, v in response.items() if k in keep_keys}
+```
+
+**Deduplicate repeated context.** If a system prompt and a retrieved chunk share 50 identical lines, inject the shared content once and reference it symbolically elsewhere.
+
+**Evict low-salience segments.** A segment that hasn't influenced any generation in the last N turns is a candidate for compression or eviction. Track which facts the model actually cites (via chain-of-thought parsing or attention proxies) and prioritize keeping high-citation content.
+
+## Rolling Windows with Pinned Anchors
+
+A rolling context window evicts the oldest segments as new content arrives—but some content must never evict. User instructions, task objectives, and security constraints belong in a **pinned zone** that sits outside the rolling window.
+
+```python
+class RollingContextWindow:
+    def __init__(self, rolling_budget: int, pinned_budget: int):
+        self.pinned: list[dict] = []       # never evicted
+        self.rolling: list[dict] = []      # FIFO eviction
+        self.rolling_budget = rolling_budget
+        self.pinned_budget = pinned_budget
+
+    def pin(self, segment: dict):
+        self.pinned.append(segment)
+
+    def add(self, segment: dict):
+        self.rolling.append(segment)
+        while self._rolling_tokens() > self.rolling_budget:
+            self.rolling.pop(0)  # evict oldest
+
+    def to_messages(self) -> list[dict]:
+        return self.pinned + self.rolling
+
+    def _rolling_tokens(self) -> int:
+        return sum(len(s["content"]) // 4 for s in self.rolling)
+```
+
+Pinned anchors ensure the model never forgets the task it's solving, even when context pressure forces aggressive eviction of intermediate steps.
+
+## Putting It Together
+
+A production agent combines these techniques in layers:
+
+1. **Pinned zone**: task objective, security policy, critical tool schemas (never evicted)
+2. **Rolling window**: recent tool outputs and reasoning, FIFO with structured fact extraction on eviction
+3. **Encrypted memory store**: evicted segments compressed and encrypted, retrievable on demand
+4. **Key derivation**: per-agent keys from a root secret, so memory stores are isolated
+
+With this architecture, an agent can run extended tasks—hundreds of turns, thousands of tool calls—without the context window becoming either a performance bottleneck or a data liability.
+
+The encrypted memory store means evicted content can be audited later, satisfying compliance requirements while keeping active context lean. And the structural separation between pinned, rolling, and archived segments gives you explicit control over what the model sees at any moment—rather than hoping the attention mechanism will figure it out.
+
+Start with the rolling window and structured fact extraction; both provide immediate token savings with minimal infrastructure. Add the encrypted store when agent tasks cross compliance boundaries or when evicted context needs to be durable.
