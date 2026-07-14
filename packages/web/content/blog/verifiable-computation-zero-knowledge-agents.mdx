@@ -1,0 +1,185 @@
+---
+title: "Verifiable Computation with Zero-Knowledge Proofs in Untrusted Agent Environments"
+description: "How SNARKs and STARKs let you prove an AI agent ran the right code on the right data—without revealing either. A practical guide to verifiable computation for agent deployments you can't fully trust."
+date: "2026-07-14"
+author: "BitAtlas Team"
+slug: "verifiable-computation-zero-knowledge-agents"
+keywords:
+  - "verifiable computation"
+  - "zero-knowledge"
+  - "SNARKs"
+  - "STARKs"
+  - "proof systems"
+  - "AI agents"
+  - "cryptography"
+readingTime: "7 min read"
+---
+
+Autonomous agents make decisions, transform data, and call APIs on your behalf—often on infrastructure you don't control. How do you know the agent actually ran your code, on the inputs you gave it, and produced an honest result? A signed response from a cloud function doesn't answer that question. A screenshot of logs doesn't either.
+
+Zero-knowledge proof systems do. This post walks through how SNARKs and STARKs work in the context of agent computation, when they're worth the overhead, and what a practical integration looks like today.
+
+## The Trust Problem in Agent Infrastructure
+
+When you deploy an agent to a managed runtime—whether that's a hosted MCP server, a cloud function, or a third-party orchestration platform—you're extending trust to that runtime. The platform:
+
+- Sees the agent's inputs (often sensitive data)
+- Controls which version of your code actually runs
+- Can modify outputs before returning them
+- Decides what gets logged and what doesn't
+
+For many workloads this is fine. For anything involving regulated data, financial decisions, or security-critical operations, it's a gap. You need a way to verify computation happened correctly without needing to trust the executor.
+
+This is the core problem verifiable computation solves.
+
+## What Zero-Knowledge Proof Systems Actually Prove
+
+A zero-knowledge proof (ZKP) lets a **prover** convince a **verifier** that a statement is true without revealing the underlying witness (the secret data that makes the statement true).
+
+In a computation context:
+
+```
+Statement: "I ran function F on input X and got output Y"
+Witness: The actual execution trace of F
+```
+
+The prover generates a proof that the execution trace is valid—without the verifier needing to re-execute F or see the trace. Verification is typically orders of magnitude cheaper than re-running the computation.
+
+Two proof system families dominate practical deployments:
+
+**SNARKs** (Succinct Non-interactive ARguments of Knowledge) produce tiny proofs (often under 300 bytes) that verify in milliseconds. The tradeoff: setup requires a trusted ceremony to generate circuit parameters, and most constructions rely on elliptic curve pairings with a hardness assumption that breaks under quantum computing.
+
+**STARKs** (Scalable Transparent ARguments of Knowledge) require no trusted setup and rely only on hash functions (quantum-resistant). Proofs are larger (tens to hundreds of kilobytes) but verification remains fast, and proving time scales well.
+
+For agent workloads, STARKs are often preferable when you need long-term security guarantees or can't run a trusted setup ceremony. SNARKs win when proof size and verification gas cost matter most (e.g., on-chain verification).
+
+## Mapping Agent Operations to Circuits
+
+The hard part isn't the cryptography—it's expressing agent logic as an arithmetic circuit, the representation ZKP systems operate over.
+
+Everything compiles down to additions and multiplications over a finite field. Conditionals, loops, and function calls all need to be unrolled into a fixed-size circuit. This creates constraints:
+
+- **Dynamic loops** must have a statically bounded iteration count
+- **String operations** become expensive field arithmetic
+- **Floating-point** doesn't exist natively; use fixed-point or integer arithmetic
+
+For agent workloads, the sweet spot is operations that are:
+
+1. **Deterministic given inputs** — the agent doesn't make network calls mid-computation
+2. **Bounded in size** — processing a fixed-length document, not an unbounded stream
+3. **High-value per proof** — the cost of proof generation is justified by what's at stake
+
+Good candidates: document classification, threshold-based access decisions, cryptographic key derivation, merkle proof verification, data transformation pipelines with known schemas.
+
+Poor candidates: open-ended LLM inference (non-deterministic, unbounded), real-time streaming, operations that depend on external state fetched during execution.
+
+## A Practical Architecture: Proved Agent Steps
+
+Rather than trying to prove an entire agent run end-to-end, prove individual steps that require trust guarantees.
+
+```
+Agent orchestrator
+    |
+    ├── Step 1: Fetch data (no proof needed)
+    ├── Step 2: Classify document → STARK proof emitted
+    ├── Step 3: Route to API (no proof needed)
+    └── Step 4: Log audit entry with proof hash committed
+```
+
+Each proved step produces a proof that can be:
+- Stored alongside the agent's output
+- Verified independently by an auditor
+- Committed to an append-only log for compliance
+
+For Step 2 above, the circuit would encode the classification logic. The prover (the agent runtime) runs the circuit on the document and emits a proof. Any verifier—the orchestrator, a compliance system, a downstream consumer—can verify the proof offline without re-running the classification.
+
+## Using Existing Toolchains
+
+You don't need to write circuits from scratch. Several toolchains let you write logic in higher-level languages:
+
+**Noir** (by Aztec) lets you write circuits in a Rust-like syntax. It compiles to ACIR, which backends like Barretenberg can prove and verify. If you're integrating with TypeScript agents, `@noir-lang/noir_js` and `@noir-lang/backend_barretenberg` give you proof generation in the browser or Node.js:
+
+```typescript
+import { Noir } from "@noir-lang/noir_js";
+import { BarretenbergBackend } from "@noir-lang/backend_barretenberg";
+import circuit from "./target/classify_document.json";
+
+const backend = new BarretenbergBackend(circuit);
+const noir = new Noir(circuit, backend);
+
+// inputs match circuit's main() parameters
+const { witness } = await noir.execute({ document_hash: docHash, threshold: 80 });
+const { proof } = await backend.generateProof(witness);
+
+// proof is a Uint8Array you can store or transmit
+```
+
+**RISC Zero** takes a different approach: write your proved logic in Rust, compile it to RISC-V, and the zkVM proves arbitrary Rust execution. This removes the circuit-writing constraint at the cost of larger proofs and longer proving times. For agents running in server environments where proving time isn't critical-path, it's worth the tradeoff.
+
+**Cairo** (StarkWare) is purpose-built for STARKs and has a growing ecosystem. If you're already working in the StarkNet ecosystem or need on-chain verification, it's the natural fit.
+
+## Verification Without Re-Execution
+
+Once you have a proof, verification is cheap. A SNARK proof verifies in under 10ms on commodity hardware. A STARK proof typically verifies in under 100ms even for complex computations.
+
+This asymmetry is the key property for agent systems: **the agent runtime bears the proving cost once; every downstream verifier pays a fraction of that cost to check correctness**.
+
+For a compliance workflow:
+
+```
+Agent runs document review (proves each classification)
+    ↓
+Proofs stored in append-only log alongside outputs
+    ↓
+Compliance audit: verifier checks proofs in batch
+    ↓
+No need to re-run agent, no need to trust agent runtime logs
+```
+
+The audit is now cryptographic, not procedural. You don't need to trust the agent runtime's word that it did the right thing—the math proves it.
+
+## Integrating with Encrypted Storage
+
+Proofs become more powerful when combined with encrypted storage. The standard pattern:
+
+1. Agent encrypts its output with the user's public key (zero-knowledge storage—server never sees plaintext)
+2. Agent generates a proof that the encrypted output was produced by the correct computation on the stated inputs
+3. The ciphertext and proof are stored together
+
+The verifier can check that:
+- The computation was performed correctly (proof verification)
+- The output is encrypted to the right recipient (from the encryption scheme)
+
+Neither step requires the verifier to decrypt the output or see the inputs. This is the combination that makes agent audit trails meaningful: not just that the agent ran, but that it ran correctly, on the stated data, and the result is sealed to the authorized party.
+
+## What This Costs
+
+Proof generation is expensive by typical compute standards. Rough numbers for a moderately complex circuit (1M constraints, equivalent to something like a document classifier or a Merkle tree update):
+
+| System | Prove time | Proof size | Verify time |
+|--------|-----------|------------|-------------|
+| Groth16 SNARK | 2–5s | under 300 bytes | under 10ms |
+| PLONK SNARK | 5–15s | 1–3 KB | under 10ms |
+| STARK (Stone) | 10–30s | 50–200 KB | 20–80ms |
+| RISC Zero | 30–120s | 200 KB | under 100ms |
+
+Proving times drop significantly with parallelism and GPU acceleration. For agent workloads where a step runs once and the proof is checked many times, the economics work as long as the proved step has enough value at stake to justify the overhead.
+
+Not every agent step needs a proof. Focus on steps where:
+- The output influences access control, money movement, or compliance decisions
+- The computation runs on sensitive input data you don't want to expose to verifiers
+- You need an auditable record that doesn't depend on log integrity
+
+## Getting Started
+
+The fastest path to a working prototype:
+
+1. Pick a step in your agent that's deterministic and bounded
+2. Write it in Noir (or Rust for RISC Zero)
+3. Generate a proof for a sample input, verify it separately
+4. Integrate the prover call into your agent's execution path
+5. Store proofs alongside outputs in your agent's storage layer
+
+The ecosystem is moving fast—circuit development tooling, proof aggregation (combining many proofs into one), and recursive proofs (proving the verifier itself ran correctly) are all maturing quickly. The building blocks for production-grade verifiable agent computation exist today; the main work is identifying which steps in your specific agent benefit from proof overhead.
+
+For agent systems that touch regulated data or make high-stakes decisions, the answer to "how do you know the agent did the right thing?" should eventually be a cryptographic proof, not an audit log on infrastructure you don't control.
