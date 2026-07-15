@@ -1,0 +1,154 @@
+---
+title: "Client-Side Encryption in Browser Storage: IndexedDB Quotas and What to Do About Them"
+description: "How to manage client-side encryption in browser storage without hitting IndexedDB quota limits — with practical patterns for key management, chunked writes, and graceful eviction."
+date: "2026-07-15"
+author: "BitAtlas Team"
+slug: "client-side-encryption-browser-storage-quota"
+keywords:
+  - "browser storage"
+  - "IndexedDB"
+  - "encryption"
+  - "quota management"
+  - "performance"
+  - "client-side encryption"
+  - "Web Crypto API"
+readingTime: "7 min read"
+---
+
+Browser storage was an afterthought for encryption. IndexedDB was designed for caching app data, not for holding ciphertexts and key material. When you layer client-side encryption on top of it, you inherit every quota decision the browser made years before zero-knowledge storage was a mainstream concern. The mismatch matters more than most developers expect.
+
+This post covers the practical realities: how much storage you actually get, why encrypted data is bigger than the plaintext you started with, where key material should live versus ciphertext, and how to build quota-aware patterns that don't surprise users.
+
+## How Much Storage Does a Browser Give You?
+
+The honest answer is "it depends, and the browser can take it back."
+
+Most Chromium-based browsers allocate a per-origin quota from a global storage pool. The global pool is typically 60–80% of available disk. Your origin gets a fraction of that — usually capped somewhere between 1 GB and 80% of the global pool, depending on the browser and how much free disk is left. Firefox uses similar heuristics. Safari is the outlier: storage in Safari is limited to around 1 GB per origin and can be silently evicted after seven days of inactivity unless the user grants persistent storage.
+
+The key point: **none of these numbers are guaranteed, and the browser can evict non-persistent storage under pressure without warning.** A user running low on disk space may suddenly find that an encrypted local store has been cleared.
+
+## Why Encryption Makes Quota Problems Worse
+
+Every time you encrypt a value, you add overhead the raw plaintext didn't have:
+
+- **Nonce/IV**: AES-GCM needs a 12-byte nonce per encryption operation. If you encrypt each record individually, every record carries a nonce.
+- **Authentication tag**: AES-GCM appends a 16-byte tag to authenticate each ciphertext. This can't be stripped without breaking the security guarantee.
+- **Key metadata**: If you store key identifiers, algorithm parameters, or versioning info alongside ciphertexts (which you should, for key rotation), that's additional overhead per record.
+- **Base64 encoding**: If you serialize ciphertexts as strings rather than binary, you add roughly 33% overhead on top of everything else.
+
+For a dataset of 10,000 small records averaging 200 bytes each, you're looking at roughly 2 MB of plaintext growing to somewhere between 3.5 MB and 5 MB of encrypted storage — before you factor in IndexedDB's own internal storage overhead, which can be another 2–3x in some implementations.
+
+The practical implication: **if you're building an application that stores meaningful amounts of user data client-side, plan for encrypted storage to consume 3–5x more space than the raw data.**
+
+## Where Key Material Should Live
+
+The worst place to store encryption keys is IndexedDB. Keys stored in IndexedDB are accessible to any JavaScript that runs in your origin — including injected third-party scripts, browser extensions with broad permissions, and XSS payloads.
+
+Prefer the following hierarchy:
+
+1. **`sessionStorage`** for short-lived session keys that should not survive a tab close. These keys are tab-scoped and cleared when the session ends.
+
+2. **The Web Crypto API's non-extractable key handles** for symmetric keys that only need to exist in memory for the current session. Use `CryptoKey` objects with `extractable: false` — the key material never appears as bytes in JavaScript.
+
+3. **A separate high-trust origin** (e.g., `keys.yourapp.com`) for persistent key material, communicating via `postMessage` with strict origin checks. This isolates keys from the main origin's attack surface.
+
+4. **IndexedDB in a separate dedicated origin** as a last resort for persistent keys, with the understanding that this is meaningfully weaker than the options above.
+
+What you're almost certainly doing wrong: storing both the key and the ciphertext in the same IndexedDB database on the same origin, then calling it "encrypted."
+
+## Chunked Writes for Large Files
+
+IndexedDB has no per-object size limit in the spec, but browsers impose practical limits. Chromium has historically had issues with objects larger than about 120 MB. More importantly, writing a large ciphertext as a single object blocks the IndexedDB transaction for the entire duration of the write, which blocks all other reads and writes to the database.
+
+The pattern that works:
+
+```typescript
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB chunks
+
+async function encryptAndStore(
+  db: IDBDatabase,
+  fileId: string,
+  data: ArrayBuffer,
+  key: CryptoKey
+): Promise<void> {
+  const chunks = Math.ceil(data.byteLength / CHUNK_SIZE);
+  
+  for (let i = 0; i < chunks; i++) {
+    const slice = data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: nonce },
+      key,
+      slice
+    );
+    
+    await idbPut(db, 'chunks', {
+      id: `${fileId}:${i}`,
+      nonce: Array.from(nonce),
+      ciphertext: new Uint8Array(ciphertext),
+      index: i,
+    });
+  }
+  
+  await idbPut(db, 'files', { id: fileId, chunks, size: data.byteLength });
+}
+```
+
+Chunking keeps individual transactions short. It also makes partial reads cheaper — if you only need the first 4 MB of a 100 MB file, you can decrypt just the first two chunks.
+
+## Quota-Aware Patterns: Ask Before You're Denied
+
+The Storage API provides a way to check how much quota you're using before a write fails:
+
+```typescript
+async function checkQuotaBeforeWrite(estimatedBytes: number): Promise<boolean> {
+  if (!navigator.storage?.estimate) return true; // optimistic fallback
+  
+  const { quota = 0, usage = 0 } = await navigator.storage.estimate();
+  const available = quota - usage;
+  const headroom = 0.15; // keep 15% free
+  
+  return estimatedBytes < available * (1 - headroom);
+}
+```
+
+Call this before any large write. When the check fails, surface a clear message to the user — "You're running low on local storage. Older encrypted files may need to be removed." — rather than letting an `IDBRequest` error bubble up silently.
+
+## Requesting Persistent Storage
+
+By default, browser storage is "best-effort" — the browser can evict it under disk pressure without asking the user. Persistent storage requires an explicit grant:
+
+```typescript
+async function requestPersistentStorage(): Promise<boolean> {
+  if (!navigator.storage?.persist) return false;
+  return navigator.storage.persist();
+}
+```
+
+In Chromium, this grant is more likely to be given if the user has added your site to their home screen, visits it regularly, or has granted notification permissions. In Firefox, the user is prompted. In Safari, it's not supported — which is the most important reason to also sync key material and encrypted data to a server-side store for Safari users.
+
+Call `requestPersistentStorage()` at a moment that makes sense in context — after the user has first stored something meaningful, not on page load. A grant that's relevant to the action is more likely to be approved.
+
+## Eviction Strategy: What Gets Deleted First?
+
+When storage pressure forces you to delete something, the right order is:
+
+1. **Cached read data** (data you fetched from a server and stored locally for performance). This is safe to evict — it can be re-fetched.
+2. **Old versions** of files, if you keep revision history locally.
+3. **Large files the user hasn't accessed recently**, surfaced with a clear UI asking them to confirm deletion.
+
+Never silently delete data the user hasn't explicitly said they're okay losing. Even if a file is encrypted and backed up remotely, users need to trust that your application doesn't delete local data without telling them.
+
+## Putting It Together
+
+The shape of a quota-safe client-side encryption architecture:
+
+- Keys live in non-extractable `CryptoKey` handles for session use, and in a separate origin or a remote vault for persistence.
+- Ciphertexts are chunked at write time, with per-chunk nonces. Chunks are stored as binary (`Uint8Array`), not base64.
+- Before large writes, quota is checked. Users see actionable feedback when space is low.
+- The application requests persistent storage after a meaningful first action.
+- Eviction is user-visible and follows a safe priority order.
+
+Browser storage is not a secure vault out of the box. With attention to where key material lives, how ciphertexts are structured, and how quota pressure is handled, you can build a local encrypted store that is both trustworthy and practical.
+
+For applications that need to move beyond what the browser can provide — persistent, cross-device encrypted storage that the server cannot read — agent-native vaults like [BitAtlas](https://bitatlas.com) provide an MCP-accessible encrypted layer that works alongside local browser storage rather than replacing it.
