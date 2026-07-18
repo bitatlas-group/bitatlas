@@ -1,0 +1,149 @@
+---
+title: "How to Give an AI Agent Secure File Access"
+description: "A practical guide for developers wiring autonomous agents to real files: scoped keys, per-agent access boundaries, and why your storage layer—not your prompt—should enforce permissions."
+date: "2026-07-18"
+author: "BitAtlas Team"
+slug: "how-to-give-an-ai-agent-secure-file-access"
+keywords:
+  - "give AI agent file access"
+  - "secure agent file access"
+  - "MCP file access"
+  - "scoped API keys for agents"
+  - "AI agent permissions"
+readingTime: "7 min read"
+---
+
+When you hand an AI agent access to real files, you're making a security decision—whether you think about it that way or not. Most developers reach for the path of least resistance: share a folder, pass a broad API key, or mount a cloud drive. The agent gets what it needs, everything works, and you ship.
+
+Until it doesn't. A misconfigured tool call reads a directory it shouldn't. A leaked key ends up in a log. An agent running in production has the same credentials as one you're testing locally. These aren't hypothetical risks—they're the natural outcome of giving agents permissions designed for humans.
+
+This guide is for developers who want to do it right from the start: scoped, revocable, encrypted access where the storage layer enforces boundaries instead of relying on prompts.
+
+## The Problem With "Just Give It a Key"
+
+API keys designed for user-facing apps are a poor fit for agents. Human users interact with narrow surfaces: they open one file at a time, they're authenticated as themselves, and they can be asked to re-verify. Agents operate differently:
+
+- They may run unattended for hours or days
+- They call tools in bulk, often without a human reviewing each action
+- The same agent framework may run multiple agents simultaneously
+- Credentials passed in a system prompt can leak into logs, traces, and model outputs
+
+Broad API keys compound this. If your agent's storage key can read `*`, write `*`, and delete `*`, then any bug, prompt injection, or compromised dependency gets that same access. The blast radius of any incident equals the scope of the key.
+
+The fix isn't prompting your agent to "only touch files in `/workspace/project-a`." It's making that constraint physically enforced at the storage layer.
+
+## Principle 1: One Agent, One Key
+
+Issue a separate API key for each agent (or each agent instance, if you run them in parallel). This sounds like overhead, but it pays dividends immediately:
+
+**Auditability.** Every file operation is attributable. When something goes wrong, you can query "what did key `agent-7f3a` access between 14:00 and 15:30?" instead of sifting through a shared log for one user's actions mixed with another's.
+
+**Revocation without collateral damage.** If an agent behaves unexpectedly, you revoke its key. Other agents keep running. You don't have to rotate a shared credential and redeploy everything that uses it.
+
+**Blast radius containment.** A compromised single-agent key has access to that agent's scope only. A shared key is a single point of failure for every agent using it.
+
+With [BitAtlas](https://bitatlas.com), you create a key per agent in the dashboard or via API, attach it to a specific vault, and set read/write/delete permissions at creation time. The key never has more access than you granted when you issued it.
+
+## Principle 2: Scope Keys to Paths, Not Whole Vaults
+
+Even a per-agent key should be limited to the paths the agent actually needs. An agent processing invoice attachments doesn't need access to your company's engineering specs. An agent summarizing customer support tickets doesn't need write access anywhere.
+
+BitAtlas keys support path-scoped permissions. You can issue a key that can:
+
+- Read from `/invoices/2026/`
+- Write to `/invoices/processed/`
+- List the contents of `/invoices/`
+- Do nothing else
+
+This is the principle of least privilege applied to agent storage. When you scope a key to a path, the storage layer rejects requests outside that scope—even if the agent's tool call tries to reach elsewhere. You're not trusting the agent to stay in bounds; you're making out-of-bounds physically impossible.
+
+```typescript
+// Example: creating a path-scoped key via the BitAtlas API
+const key = await bitatlas.keys.create({
+  vault: "customer-data",
+  permissions: {
+    read: ["/invoices/2026/"],
+    write: ["/invoices/processed/"],
+    list: ["/invoices/"]
+  },
+  expires_at: "2026-08-01T00:00:00Z"
+});
+
+// Pass only this key to the agent's environment
+agent.env.STORAGE_KEY = key.secret;
+```
+
+The key is scoped. The agent cannot access anything outside those three paths regardless of what tool calls it makes.
+
+## Principle 3: Use Expiring, Rotatable Keys
+
+Static long-lived keys are operational debt. Agents running in CI/CD pipelines, serverless functions, or scheduled jobs should use short-lived keys that expire automatically.
+
+Short-lived keys reduce the window of exposure if a key leaks. A key that expires in 24 hours is far less valuable to an attacker than one with no expiration. Combined with automated rotation, you get continuous credential hygiene without manual ops overhead.
+
+BitAtlas keys support explicit `expires_at` timestamps and can be rotated via API. A common pattern is to issue a key at the start of each agent run and expire it at the end:
+
+```typescript
+async function runAgent(task: Task) {
+  // Issue a key valid for this run only
+  const key = await bitatlas.keys.create({
+    vault: task.vaultId,
+    permissions: task.permissions,
+    expires_at: new Date(Date.now() + 3600_000).toISOString() // 1 hour
+  });
+
+  try {
+    await executeAgent(task, key.secret);
+  } finally {
+    // Revoke immediately on completion, don't wait for expiry
+    await bitatlas.keys.revoke(key.id);
+  }
+}
+```
+
+The key is live only while the agent is running. As soon as the job finishes—successfully or not—the key is revoked.
+
+## Principle 4: Let the Storage Layer Enforce Encryption
+
+If your agent's storage isn't zero-knowledge, the platform operator can read everything the agent writes. For many use cases that's an acceptable trade-off. For anything involving customer data, legal documents, health records, or proprietary intellectual property, it isn't.
+
+Zero-knowledge encryption means the server holds only ciphertext. Your keys—derived client-side—never leave your control. Even a full breach of the storage platform exposes nothing useful.
+
+BitAtlas uses zero-knowledge encryption by default. Files are encrypted before they leave the client, using keys derived from credentials you hold. The BitAtlas servers never have access to plaintext. Agents using the MCP server write encrypted files without any additional configuration—the encryption happens transparently in the client library.
+
+This matters for agent architectures specifically because agents often have broad autonomous access. If that access is over plaintext storage and the storage platform is compromised, every file the agent has ever touched is exposed. If the agent works over zero-knowledge encrypted storage, a storage breach yields ciphertext that's useless without your keys.
+
+## Wiring an Agent via MCP
+
+The Model Context Protocol (MCP) is the emerging standard for giving agents structured tool access. BitAtlas ships a first-party MCP server that wraps vault operations as tools: `read_file`, `write_file`, `list_directory`, `delete_file`.
+
+To give an agent scoped, encrypted file access via MCP:
+
+1. Create a scoped API key for the agent (as above)
+2. Launch the BitAtlas MCP server with that key
+3. Register the MCP server with your agent framework
+
+```bash
+# Launch the BitAtlas MCP server for this agent
+bitatlas-mcp-server \
+  --key "$AGENT_STORAGE_KEY" \
+  --vault "project-vault" \
+  --transport stdio
+```
+
+The agent sees only the tools the MCP server exposes, and those tools operate only within the scope of the key. You haven't changed the agent's code or its system prompt—you've changed what it's physically capable of accessing.
+
+## Summary
+
+Giving an agent file access is a security decision. The defaults—shared keys, broad permissions, plaintext storage—create risks that grow with every agent you add and every hour they run.
+
+The better path is:
+
+- **One key per agent**, so access is attributable and revocable
+- **Path-scoped keys**, so the storage layer enforces boundaries instead of your prompts
+- **Short-lived, rotatable keys**, so leaked credentials have minimal exposure windows
+- **Zero-knowledge encrypted storage**, so a platform breach doesn't become a data breach
+
+BitAtlas is built around these principles. The MCP server, the key scoping API, and the zero-knowledge encryption layer are designed for exactly this use case: autonomous agents that need real file access without the security debt that usually comes with it.
+
+If you're building agent infrastructure now, [start with a free vault](https://bitatlas.com) and wire your first scoped key in under five minutes.
