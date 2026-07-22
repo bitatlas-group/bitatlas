@@ -1,0 +1,178 @@
+---
+title: "Client-Side Key Backup and Recovery: Building Resilient Encryption Without Compromise"
+description: "A practical guide to designing secure key backup and recovery protocols for client-side encryption — keeping users in control while preventing permanent data loss."
+date: "2026-07-22"
+author: "BitAtlas Team"
+slug: "client-side-key-backup-recovery-protocols"
+keywords: ["key backup", "recovery", "client-side", "disaster recovery", "encryption", "zero-knowledge", "secret sharing", "PBKDF2", "WebCrypto"]
+readingTime: "7 min read"
+---
+
+Client-side encryption puts users in control of their data. But it also hands them a loaded gun: lose the key, lose everything. For developers building zero-knowledge storage systems, key backup and recovery is one of the hardest design problems — you need to prevent permanent data loss without ever letting a server see the key.
+
+This post walks through the concrete protocol options, their tradeoffs, and what a production-grade implementation looks like in 2026.
+
+## Why Key Recovery Is Hard
+
+In a traditional cloud app, password resets are trivial: the server holds your data, so it can re-encrypt it with a new key derived from your new password. In a zero-knowledge system, the server holds only ciphertext it can never read. If the user's key is gone, so is their data.
+
+The naive workaround — "just escrow the key on the server" — defeats the entire purpose. A server that can produce your key on demand is a server that can read your data.
+
+The challenge is building recovery paths that work for users without giving servers the power to read plaintext.
+
+## The Core Approaches
+
+### 1. Password-Derived Keys with Strong KDF
+
+The simplest approach: derive the encryption key from the user's password using a memory-hard key derivation function like Argon2id or PBKDF2-SHA256 with a high iteration count.
+
+```typescript
+const keyMaterial = await crypto.subtle.importKey(
+  "raw",
+  new TextEncoder().encode(password),
+  "PBKDF2",
+  false,
+  ["deriveKey"]
+);
+
+const encryptionKey = await crypto.subtle.deriveKey(
+  {
+    name: "PBKDF2",
+    salt: userSalt, // stored server-side, not secret
+    iterations: 600_000,
+    hash: "SHA-256",
+  },
+  keyMaterial,
+  { name: "AES-GCM", length: 256 },
+  false,
+  ["encrypt", "decrypt"]
+);
+```
+
+**Recovery path:** Change password → re-derive key → re-encrypt all data. Simple, but requires a full re-encryption pass and breaks if the user has forgotten their password entirely.
+
+**The problem:** Password resets without server-side recovery require re-encryption, which is expensive for large datasets. And if the password is truly forgotten, data is gone.
+
+### 2. Encrypted Key Export with Recovery Phrase
+
+The standard approach used by most serious zero-knowledge apps: generate a random master key, then protect it with both a password and a separately-stored recovery phrase (sometimes called a paper key or mnemonic).
+
+```typescript
+// Generate master key — never leaves the device unencrypted
+const masterKey = await crypto.subtle.generateKey(
+  { name: "AES-GCM", length: 256 },
+  true, // extractable only for backup
+  ["encrypt", "decrypt"]
+);
+
+// Export and encrypt with password-derived key
+const passwordKey = await deriveKeyFromPassword(password, salt);
+const wrappedWithPassword = await crypto.subtle.wrapKey(
+  "raw",
+  masterKey,
+  passwordKey,
+  { name: "AES-GCM", iv: passwordIV }
+);
+
+// Export and encrypt with recovery phrase-derived key
+const recoveryKey = await deriveKeyFromPhrase(recoveryPhrase, recoverySalt);
+const wrappedWithRecovery = await crypto.subtle.wrapKey(
+  "raw",
+  masterKey,
+  recoveryKey,
+  { name: "AES-GCM", iv: recoveryIV }
+);
+
+// Both wrapped versions go to the server — neither reveals the master key
+```
+
+The server stores two blobs: the password-wrapped key and the recovery-phrase-wrapped key. It never sees either the master key or the plaintext recovery phrase. Password reset requires re-wrapping the master key with a new password-derived key — no re-encryption of data.
+
+**Recovery path:** User enters recovery phrase → unwrap master key → set new password → re-wrap master key with new password key. Data never needs re-encryption.
+
+**The problem:** If both the password and the recovery phrase are lost, data is unrecoverable. Users must be strongly prompted to store the phrase securely.
+
+### 3. Shamir's Secret Sharing
+
+For high-value or enterprise scenarios, you can split the master key using [Shamir's Secret Sharing](https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing) — a cryptographic scheme where the key is split into N shares, and any K of them can reconstruct it.
+
+A typical 3-of-5 scheme might distribute shares to:
+- The user's primary device (local storage)
+- The user's secondary device (phone or tablet)
+- A trusted contact's device
+- The service provider (encrypted with a key the provider can't use alone)
+- A hardware security key
+
+No single party has enough shares to reconstruct the key. Recovery requires any 3 of the 5 parties to cooperate.
+
+Libraries like [secrets.js-grempe](https://github.com/grempe/secrets.js) or [sss-wasm](https://github.com/dsprenkels/sss-wasm) implement this in JavaScript/WASM.
+
+**Best for:** Enterprises, high-value accounts, compliance scenarios requiring multiple-party authorization for recovery.
+
+**The problem:** More complex UX. Coordinating share holders adds friction. Inappropriate for consumer apps.
+
+### 4. Social Recovery
+
+A variation on Shamir: instead of splitting shares across devices, you distribute them to trusted contacts — a pattern popularized by smart contract wallets.
+
+The user designates 5 guardians. Any 3 can cooperate to reset the user's key. The guardians' clients run a threshold protocol over an authenticated channel; no guardian ever sees a share from any other guardian.
+
+This is cryptographically sound but operationally complex: guardians need accounts, must be online simultaneously, and must understand their role.
+
+## What Production Systems Do
+
+Most production zero-knowledge apps use a layered approach:
+
+**Layer 1 — Primary access:** Password-derived key wrapping (or passkey-derived, increasingly). The user authenticates with their password; the client decrypts the master key wrapper and loads the master key into memory.
+
+**Layer 2 — Recovery:** A randomly generated recovery phrase (BIP-39 mnemonic is common) stored in a second encrypted wrapper on the server. Shown once at registration, never shown again.
+
+**Layer 3 — Device-bound backup:** An optional hardware-backed key (WebAuthn resident credential, Secure Enclave) that can unwrap the master key without a password. Users who opt into this get seamless device-specific access.
+
+**Layer 4 — Emergency contacts:** Optional Shamir shares distributed to trusted contacts or enterprise key custodians.
+
+## Common Implementation Mistakes
+
+**Using the same salt for password and recovery key derivation.** If an attacker gets the server-side blobs, they can mount an offline dictionary attack. The password KDF salt and recovery KDF salt should be independent random values.
+
+**Storing the recovery phrase in browser storage.** The phrase is only useful if the user has written it down somewhere secure. Apps that cache it locally defeat its purpose as a backup.
+
+**Skipping the KDF for the recovery phrase.** A BIP-39 mnemonic has around 128 bits of entropy — strong enough to use directly as key material if you're careful, but still worth running through a KDF to add domain separation and allow iteration count tuning.
+
+**Making re-encryption synchronous.** If a user changes their password and triggers a full data re-encryption, that needs to be a background job with progress feedback. Blocking the UI for large vaults loses users.
+
+**No key versioning.** When you rotate or recover keys, you need to know which key version encrypted which data. Store a key ID or version tag alongside every encrypted blob.
+
+## Testing Your Recovery Flows
+
+Recovery protocols are the kind of thing that gets skipped in development and breaks in production. Build an explicit test matrix:
+
+- Password change (known password → new password, all data still accessible)
+- Password recovery via recovery phrase (forgotten password, phrase known)
+- Device loss (recovery phrase only path)
+- Recovery phrase loss (what happens? Is there an enterprise admin path?)
+- Concurrent sessions during key rotation (devices with old key wrappers)
+
+The last one is subtle: if a user changes their password on one device while another device is active, the second device's cached key wrapper is now stale. Design for this from the start.
+
+## WebCrypto API Considerations
+
+The Web Crypto API makes the cryptographic primitives available in the browser, but has some rough edges for key backup scenarios:
+
+- `extractable: true` must be set on keys you intend to wrap for export. For keys that never leave the device, use `extractable: false`.
+- `wrapKey` and `unwrapKey` are the right primitives for key export — don't manually `exportKey` and then encrypt the bytes, as you lose type information and can introduce mistakes.
+- Key material in `CryptoKey` objects is protected from JavaScript inspection, but it's still in process memory. For very high-security scenarios, consider offloading to a service worker or using a WASM-based cryptography library that zeroes memory explicitly.
+
+## Looking Ahead: Passkeys and Key Recovery
+
+Passkeys (WebAuthn resident credentials) are increasingly used as the primary authentication factor for zero-knowledge apps. They offer a cleaner UX and stronger phishing resistance than passwords.
+
+But they complicate key backup: a passkey is device-bound by design, which means the key material derived from a passkey attestation is also device-specific. Multi-device sync (Apple Keychain, Google Password Manager) helps, but enterprise and cross-platform scenarios still require explicit key export protocols.
+
+The emerging pattern: use a passkey for authentication, but derive the encryption master key from a separate password or recovery phrase that the user stores independently. The two concerns — "proving who you are" and "unlocking your data" — stay separate.
+
+---
+
+Getting key backup right is unglamorous work, but it's what separates a zero-knowledge product users can trust with real data from one they treat as a toy. The cryptography is well-understood; the hard part is the UX design that gets users to actually store their recovery phrase somewhere safe.
+
+If you're building on top of BitAtlas and want to discuss how our encrypted storage layer interacts with your key management strategy, [reach out](mailto:hello@bitatlas.com) — this is exactly the kind of problem we help teams think through.
