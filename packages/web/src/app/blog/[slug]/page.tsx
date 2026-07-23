@@ -18,14 +18,24 @@ export async function generateStaticParams() {
   return getAllSlugs();
 }
 
+// ponytail: clamps the meta tags only — the visible <h1> keeps the full title.
+// Word-boundary cut, falling back to a hard cut if the last word is very long.
+function clamp(s: string, max: number) {
+  if (s.length <= max) return s;
+  const cut = s.lastIndexOf(' ', max - 1);
+  return s.slice(0, cut > max * 0.6 ? cut : max - 1) + '…';
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const post = getPostBySlug(slug);
   if (!post) return {};
 
+  const branded = `${post.title} — BitAtlas Blog`;
+
   return {
-    title: `${post.title} — BitAtlas Blog`,
-    description: post.description,
+    title: clamp(branded.length <= 60 ? branded : post.title, 60),
+    description: clamp(post.description, 160),
     keywords: post.keywords.join(', '),
     authors: [{ name: post.author }],
     alternates: {
