@@ -1,5 +1,5 @@
 {
-  "nextIndex": 57,
+  "nextIndex": 63,
   "topics": [
     {
       "slug": "zero-knowledge-encryption-fundamentals",
@@ -687,6 +687,17 @@
         "infrastructure"
       ],
       "brief": "Designing middleware layers for MCP servers to enforce encryption at protocol level"
+    },
+    {
+      "slug": "cloud-act-vs-eu-data-sovereignty",
+      "keywords": [
+        "CLOUD Act EU data sovereignty",
+        "US cloud provider EU clients",
+        "CLOUD Act GDPR conflict",
+        "data sovereignty encrypted storage",
+        "escape US cloud jurisdiction"
+      ],
+      "brief": "The direct answer to the question EU buyers actually ask: our provider is US-based and subject to the CLOUD Act, but our clients demand absolute data sovereignty. Explains why data residency alone does not solve it (a US parent can be compelled regardless of where bytes sit), and why client-side zero-knowledge encryption is the only structural fix — the provider cannot hand over plaintext it never holds. Covers Schrems II, the CLOUD Act reach, and how BitAtlas keeps keys with the customer."
     },
     {
       "slug": "zero-knowledge-proofs-agent-authorization-policies",
