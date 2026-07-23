@@ -1,0 +1,206 @@
+---
+title: "Designing Encryption Middleware for MCP Servers"
+description: "How to add a transparent encryption layer to Model Context Protocol servers so every tool call, resource read, and sampling request is cryptographically protected at the protocol level — without touching your tool handlers."
+date: "2026-07-23"
+author: "BitAtlas Team"
+slug: "mcp-server-encryption-middleware-architecture"
+keywords: ["MCP", "encryption middleware", "protocol composition", "streaming", "infrastructure"]
+readingTime: "7 min"
+---
+
+MCP servers are becoming the connective tissue of modern AI agent stacks. They expose files, databases, APIs, and business logic to agents in a uniform way — but the protocol itself makes no guarantees about the confidentiality of what flows across that connection. TLS protects data in transit between client and server, but the moment a message lands inside your process, everything is plaintext: tool arguments, resource contents, sampling prompts, and the responses your handlers return.
+
+Adding encryption at the protocol layer — before your tool handlers ever see a message, and after they return a response — is a cleaner architectural choice than bolting crypto onto each individual handler. This post walks through how to design that middleware layer for an MCP server in TypeScript, what the tradeoffs are, and where the pattern breaks down.
+
+## Why Protocol-Level Encryption?
+
+The naive approach is to encrypt within each handler:
+
+```typescript
+server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  const raw = await storage.get(req.params.uri);
+  return { contents: [{ text: decrypt(raw), uri: req.params.uri }] };
+});
+```
+
+This works, but it scatters crypto calls everywhere. When you add a new tool, you have to remember to encrypt its outputs. When you rotate keys, you hunt through a dozen handlers. And there is no guarantee that a log statement somewhere in the middle doesn't capture plaintext before you encrypt it.
+
+The middleware approach inverts the model: encryption is enforced at the transport boundary, and your handlers never handle ciphertext at all. They receive plaintext, return plaintext, and a single middleware wraps the whole server.
+
+## The MCP Message Flow
+
+MCP uses JSON-RPC 2.0 under the hood. A simplified request lifecycle looks like:
+
+1. Client sends a JSON-RPC request over stdio or HTTP/SSE
+2. Your server deserializes the message
+3. The appropriate handler runs
+4. The server serializes the response and writes it back
+
+Middleware can intercept at step 2 (inbound) and step 4 (outbound). For encryption, you want to:
+
+- **Inbound**: decrypt the params or the entire payload before the handler sees it
+- **Outbound**: encrypt the result or the entire payload before it leaves the process
+
+## Implementing the Middleware
+
+The MCP TypeScript SDK exposes transport objects you can wrap. Here is a minimal pattern using a `EncryptingTransport` class that wraps any underlying transport:
+
+```typescript
+import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { encryptMessage, decryptMessage } from "./crypto.js";
+
+export class EncryptingTransport implements Transport {
+  constructor(
+    private inner: Transport,
+    private keyId: string
+  ) {}
+
+  async start(): Promise<void> {
+    return this.inner.start();
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    const encrypted = await encryptMessage(message, this.keyId);
+    return this.inner.send(encrypted as JSONRPCMessage);
+  }
+
+  async close(): Promise<void> {
+    return this.inner.close();
+  }
+
+  set onmessage(handler: ((message: JSONRPCMessage) => void) | undefined) {
+    if (!handler) {
+      this.inner.onmessage = undefined;
+      return;
+    }
+    this.inner.onmessage = async (raw) => {
+      const decrypted = await decryptMessage(raw, this.keyId);
+      handler(decrypted);
+    };
+  }
+
+  get onmessage() {
+    return this.inner.onmessage;
+  }
+
+  set onerror(handler: ((error: Error) => void) | undefined) {
+    this.inner.onerror = handler;
+  }
+
+  get onerror() {
+    return this.inner.onerror;
+  }
+
+  set onclose(handler: (() => void) | undefined) {
+    this.inner.onclose = handler;
+  }
+
+  get onclose() {
+    return this.inner.onclose;
+  }
+}
+```
+
+You wire it in when you start the server:
+
+```typescript
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+
+const inner = new StdioServerTransport();
+const transport = new EncryptingTransport(inner, process.env.KEY_ID!);
+
+const server = new Server({ name: "my-server", version: "1.0.0" }, {
+  capabilities: { tools: {}, resources: {} }
+});
+
+// register your handlers normally — they see plaintext
+server.setRequestHandler(/* ... */);
+
+await server.connect(transport);
+```
+
+The handlers are completely unaware of the encryption layer. When you add a new tool, it is automatically covered.
+
+## Encryption Scheme Choices
+
+For the `encryptMessage` / `decryptMessage` implementations, you have two broad options depending on what you want to protect:
+
+**Field-level encryption** encrypts only sensitive fields (like `params` or `result`) while leaving the method name and request ID in plaintext. This makes debugging easier and works with logging infrastructure that needs to route by method name.
+
+**Payload-level encryption** wraps the entire JSON-RPC message in an envelope. The wire format becomes something like:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "__encrypted__",
+  "params": {
+    "ciphertext": "...",
+    "iv": "...",
+    "keyId": "key-2026-07"
+  }
+}
+```
+
+The middleware unwraps this before the SDK parses the method, so the server's request router never sees the method name in the outer envelope. This is stronger but breaks any middleware that routes by method.
+
+For most MCP deployments, **field-level encryption of the params and result** is the right default: it is transparent to monitoring, compatible with the SDK's routing logic, and still prevents a compromised process from reading business data in tool arguments or file contents in resource responses.
+
+## Key Management at the Transport Layer
+
+Because the middleware controls all key operations, you can implement key rotation without touching handler code. A practical pattern:
+
+1. Maintain a keyset with a `current` key ID and retired key IDs
+2. Always encrypt with the current key
+3. On decrypt, look up the key by the `keyId` embedded in the ciphertext envelope
+4. Retire old keys on a schedule after confirming no in-flight messages use them
+
+```typescript
+const keyId = envelope.keyId;
+const key = await keystore.get(keyId); // throws if key is retired and purged
+return aesGcmDecrypt(envelope.ciphertext, envelope.iv, key);
+```
+
+This gives you forward secrecy at the application layer: a leaked current key does not expose data encrypted under a retired key (which may already be purged from the keystore), and a leaked retired key does not expose current traffic.
+
+## Streaming Responses
+
+MCP supports streaming tool results via `notifications/message` and SSE. The middleware pattern still applies, but you need to handle each chunk individually. A streaming tool might emit:
+
+```typescript
+server.setRequestHandler(LongRunningToolSchema, async (req, extra) => {
+  for await (const chunk of generateResults(req.params)) {
+    await extra.sendNotification({
+      method: "notifications/progress",
+      params: { progress: chunk }
+    });
+  }
+  return { result: "done" };
+});
+```
+
+The transport's `send` method is called for each notification, so the `EncryptingTransport` encrypts every chunk automatically. No changes to the handler are required.
+
+## What This Pattern Does Not Solve
+
+Protocol-level encryption at the transport layer is not a complete security story:
+
+- **It does not protect data at rest.** Once a tool handler writes something to a database, the middleware is not involved. Storage encryption is a separate concern.
+- **It does not protect against a compromised handler.** If a tool handler is malicious, it reads plaintext before the outbound middleware encrypts it. Defense-in-depth means you also need process isolation between handlers (see our post on MCP plugin sandboxing).
+- **It does not authenticate the client.** Encryption is not authentication. You still need mTLS, API keys, or signed tokens on the transport to verify who is sending requests.
+- **It adds latency.** AES-GCM on a modern CPU is fast — typically under 1ms for payloads under 100KB — but it is not zero. Measure the impact in your environment before enabling it on every message type.
+
+## When to Use This Pattern
+
+Protocol-level encryption middleware is worth the complexity when:
+
+- Your MCP server handles sensitive business data (PII, financial records, medical information) and you need defense in depth beyond TLS
+- You operate in a regulatory environment (GDPR, HIPAA, SOC 2) that requires demonstrable encryption of data in processing, not just at rest and in transit
+- Your logging or monitoring infrastructure captures raw messages and you cannot guarantee those logs are access-controlled
+- You are building a multi-tenant MCP server where different tenants should have cryptographically isolated message spaces with separate key IDs
+
+If none of these apply — if TLS between the agent and the server is sufficient for your threat model — skip the middleware and keep the implementation simpler. Encryption has a cost in code complexity and operational overhead. Pay it only when the threat model demands it.
+
+The architecture described here is the same approach BitAtlas uses internally for its MCP storage server: a single encryption layer at the transport boundary, per-tenant key IDs, and tool handlers that operate entirely on plaintext. The result is a server codebase where the business logic is clean and the security guarantees are enforced once, in one place.
