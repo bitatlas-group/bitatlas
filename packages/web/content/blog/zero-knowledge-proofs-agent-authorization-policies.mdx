@@ -1,0 +1,171 @@
+---
+title: "Zero-Knowledge Proofs for Agent Authorization Policies"
+description: "How AI agents can prove they're authorized to act without revealing the credentials or identity behind those permissions — a practical guide to ZK-based policy enforcement."
+date: "2026-07-25"
+author: "BitAtlas Team"
+slug: "zero-knowledge-proofs-agent-authorization-policies"
+keywords:
+  - zero-knowledge proofs
+  - ZK proofs
+  - agent authorization
+  - policy enforcement
+  - privacy
+  - AI agents
+  - cryptography
+readingTime: "7 min read"
+---
+
+When an AI agent calls your API, you face a subtle trust problem. The agent presents a token, you validate it, and you let it through — but what do you actually know? You know *that* someone authorized this action. You don't necessarily know *who*, under *what conditions*, or whether the agent has stayed within its original mandate.
+
+Traditional authorization models weren't designed for autonomous agents. OAuth was built for humans delegating to apps. Role-based access control assumes a human is deciding, action by action. But agents operate at machine speed, across dozens of services, often without a human in the loop. The authorization layer needs to catch up.
+
+Zero-knowledge proofs offer a fundamentally different approach: an agent can prove it satisfies an authorization policy — "I have permission to read files in this folder", "my user is in the EU", "this action is within my cost budget" — without revealing the underlying credential, the identity behind it, or any information beyond the proof itself.
+
+## What a ZK-Based Authorization Proof Actually Does
+
+A standard JWT says "the bearer of this token is Alice, with role `storage:read`." The token *is* the credential; presenting it reveals it.
+
+A ZK authorization proof says something different: "I know a secret that, combined with this public policy, produces a valid proof — and you can verify that proof without seeing my secret." The agent never presents Alice's identity, her role assignments, or the raw token. It presents a proof that it satisfies the policy.
+
+This shifts authorization from *credential presentation* to *policy satisfaction*. For agents, that's a meaningful upgrade:
+
+- **Scoped proofs**: the agent proves it can perform *this specific action* rather than presenting a broad token that an interceptor could replay elsewhere
+- **Policy without identity**: downstream services can enforce access rules without needing to know *which* user's agent is calling them
+- **Audit without deanonymization**: logs can record that "an authorized agent performed this action at this time" without logging which user it was acting for
+
+## The Components: Circuit, Witness, Proof, Verifier
+
+To implement ZK authorization you need four things:
+
+**The circuit** defines the policy as a mathematical constraint. A circuit for "can write to folder X" might encode: (1) the agent holds a key that derives to a known public commitment, (2) that commitment appears in the folder's access list, (3) the operation type is one of the allowed operations. The circuit is public — anyone can inspect what the policy checks.
+
+**The witness** is the agent's private input: its actual key, its role membership proof, its timestamp. This never leaves the agent. The witness is used to satisfy the circuit, but it isn't part of the output.
+
+**The proof** is a small cryptographic object — typically under 1KB for a SNARK — that the circuit's constraints are satisfied for some witness. The proof is what gets sent to the API.
+
+**The verifier** is a small function (or contract) that checks the proof against the circuit and a set of public inputs. Verification is fast — usually under 10ms. The verifier learns nothing about the witness.
+
+## A Practical Pattern: Policy-Bound Proofs
+
+Here is a concrete pattern for agent authorization using SNARKs (specifically Groth16 or PLONK, both supported by the `snarkjs` library):
+
+```typescript
+// Agent-side: generate proof at request time
+import { groth16 } from "snarkjs";
+
+async function generateAuthProof(
+  agentKey: Uint8Array,
+  policyId: string,
+  action: string,
+  resourceHash: string
+): Promise<{ proof: object; publicSignals: string[] }> {
+  const witness = {
+    agentKeyHash: hashToField(agentKey),
+    policyCommitment: await fetchPolicyCommitment(policyId),
+    actionCode: actionToField(action),
+    resourceHash: resourceHash,
+    timestamp: Math.floor(Date.now() / 1000),
+  };
+
+  return groth16.fullProve(
+    witness,
+    "policy_auth.wasm",   // compiled circuit
+    "policy_auth.zkey"    // proving key
+  );
+}
+```
+
+```typescript
+// API server-side: verify the proof, no credentials needed
+import { groth16 } from "snarkjs";
+import verificationKey from "./policy_auth_vk.json";
+
+async function verifyAgentRequest(
+  proof: object,
+  publicSignals: string[],
+  expectedPolicyId: string
+): Promise<boolean> {
+  const policyCommitment = publicSignals[1]; // from the circuit's public outputs
+  if (policyCommitment !== await fetchPolicyCommitment(expectedPolicyId)) {
+    return false;
+  }
+  return groth16.verify(verificationKey, publicSignals, proof);
+}
+```
+
+The server never sees the agent's key. It verifies the proof against the known policy commitment and the public signals the circuit emits (action type, resource hash, timestamp bounds). If the proof is valid, the action is authorized.
+
+## Building Authorization Circuits with Circom
+
+Writing circuits from scratch requires learning Circom's constraint syntax, but many primitives already exist in the [`circomlib`](https://github.com/iden3/circomlib) library: Poseidon hashing, Merkle inclusion proofs, comparison operators.
+
+A minimal authorization circuit for "agent is in the access set for this resource" looks like this:
+
+```circom
+pragma circom 2.0.0;
+include "circomlib/circuits/poseidon.circom";
+include "circomlib/circuits/merkleproof.circom";
+
+template AgentAccessProof(levels) {
+    // Private inputs — never exposed
+    signal input agentSecret;
+    signal input pathElements[levels];
+    signal input pathIndices[levels];
+
+    // Public inputs — visible to verifier
+    signal input merkleRoot;
+    signal input resourceId;
+
+    // Derive the agent's public commitment
+    component hasher = Poseidon(2);
+    hasher.inputs[0] <== agentSecret;
+    hasher.inputs[1] <== resourceId;
+
+    // Prove the commitment exists in the access tree
+    component merkle = MerkleProof(levels);
+    merkle.leaf <== hasher.out;
+    merkle.root <== merkleRoot;
+    for (var i = 0; i < levels; i++) {
+        merkle.pathElements[i] <== pathElements[i];
+        merkle.pathIndices[i] <== pathIndices[i];
+    }
+}
+
+component main = AgentAccessProof(20);
+```
+
+The circuit proves the agent's commitment (derived from a secret and the resource ID) exists in a Merkle tree of authorized agents. The Merkle root is public — the access list — but the agent's identity within it remains private.
+
+## Policy Enforcement Without Identity Exposure
+
+This pattern scales well across multi-tenant systems where you want to enforce policies without coupling them to user identity:
+
+**Storage access**: an agent proves it's in the authorized set for a specific encrypted vault, without revealing which user the vault belongs to. The storage server enforces access without needing user identity at all.
+
+**Spending limits**: an agent proves its cumulative spend is below a threshold using a ZK range proof. You can audit that limits were respected without logging exact amounts per user.
+
+**Data residency**: an agent proves its operating context satisfies EU data residency requirements — "this execution environment is in an EU region" — without exposing the specific infrastructure details.
+
+**Rate limiting**: agents can prove they haven't exceeded a call quota within a time window using a ZK accumulator, without exposing which calls were made.
+
+## The Tradeoffs to Know
+
+ZK-based authorization is more complex to implement and has real costs:
+
+**Proof generation is slow** on constrained hardware. A Groth16 proof for a moderate circuit takes roughly 200–800ms in a Node.js runtime, and significantly longer on resource-limited edge deployments. STARK proofs are faster to generate but produce larger proofs. For latency-sensitive paths, generate proofs out of the hot path and cache them with short TTLs.
+
+**Circuit upgrades require coordination**. When you update an authorization policy, both the circuit and all agents that hold the proving key must upgrade in sync. Version your circuits and run old and new circuits in parallel during rollouts.
+
+**Trusted setup for Groth16** requires a ceremony. If the proving key is compromised, forged proofs are possible. Consider PLONK-based schemes with transparent setups (no trusted ceremony) for internal authorization systems.
+
+## Where This Fits in Agent Storage
+
+Encrypted agent storage is the natural pairing for ZK authorization. When agents use a zero-knowledge vault — where the storage server never holds plaintext — you want the authorization layer to match: the server should be able to enforce access policies without needing to know *who* the agent is acting for.
+
+BitAtlas implements scoped, per-agent access keys against encrypted vaults. ZK proof-based authorization takes the next step: the server enforces policies using proof verification rather than identity lookup. The access control surface shrinks. The server learns only that a valid proof was presented — nothing about the user, the agent's history, or the scope of the broader system.
+
+That alignment — zero-knowledge encryption for data at rest, zero-knowledge proofs for access control — is what makes an authorization policy private by construction rather than private by policy configuration.
+
+---
+
+The code patterns above use `snarkjs` and `circomlib`, both actively maintained. The [Circom documentation](https://docs.circom.io) and [iden3's Poseidon examples](https://github.com/iden3/circomlib/tree/master/circuits) are the practical starting points. For production agent authorization, consider wrapping proof generation in a dedicated agent sidecar to isolate proving key access from the main agent process.
