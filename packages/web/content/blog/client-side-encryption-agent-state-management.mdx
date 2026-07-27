@@ -1,0 +1,185 @@
+---
+title: "Client-Side Encryption for Persistent Agent State"
+description: "How to implement client-side encryption patterns that keep persistent AI agent state opaque to the storage layer — design choices, key management trade-offs, and practical code."
+date: "2026-07-27"
+author: "BitAtlas Team"
+slug: "client-side-encryption-agent-state-management"
+keywords:
+  - "client-side encryption"
+  - "state management"
+  - "agent memory"
+  - "end-to-end encryption"
+  - "cryptography"
+readingTime: "7 min read"
+---
+
+Autonomous agents are stateful by nature. A research agent accumulates document summaries; a coding agent tracks which files it has reviewed; a personal assistant remembers preferences and past conversations. All of that state has to live somewhere between invocations — and wherever it lives, the encryption question follows.
+
+The naive answer is "encrypt at rest." Your cloud provider encrypts the disk. Done. But disk-level encryption only protects against someone physically stealing the hardware; the provider's key management service can decrypt on demand, which means the storage layer can read your agent's memory. For many use cases — healthcare agents, legal assistants, anything touching personal data — that is not acceptable.
+
+Client-side encryption (CSE) moves the line. The agent encrypts data *before* it leaves the process; the storage layer receives ciphertext it cannot interpret. This post covers the patterns that make that practical for agent state.
+
+## What Agent State Actually Looks Like
+
+Before picking a cipher, understand what you are encrypting:
+
+- **Short, frequent writes.** Tool call results, intermediate reasoning steps, and scratchpad entries can be written dozens of times per minute. Latency matters.
+- **Structured data.** Most agent memory is JSON or similar — conversation turns, task graphs, entity maps. You want to be able to query or update specific keys without decrypting everything.
+- **Long-lived secrets.** Some state — user preferences, cached credentials, accumulated knowledge — needs to persist for weeks or months. It outlives any individual agent run.
+- **Ephemeral context.** Working memory for the current session can be thrown away after the run. Short key lifetimes and forward secrecy are easier to achieve here.
+
+These four categories call for different encryption strategies.
+
+## Pattern 1: Envelope Encryption for Structured State
+
+For durable state you query by key, envelope encryption is the standard approach:
+
+1. Generate a **data encryption key (DEK)** — a random 256-bit AES-GCM key.
+2. Encrypt the DEK with a **key encryption key (KEK)** controlled by the user (or derived from their password/passphrase).
+3. Store the wrapped DEK alongside the ciphertext.
+
+```typescript
+import { createCipheriv, randomBytes } from "node:crypto";
+
+async function encryptStateEntry(
+  plaintext: string,
+  kek: CryptoKey
+): Promise<{ ciphertext: string; wrappedDek: string; iv: string }> {
+  // Generate a fresh DEK for this entry
+  const dek = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    dek,
+    encoded
+  );
+
+  // Wrap the DEK with the KEK (AES-KW)
+  const rawDek = await crypto.subtle.exportKey("raw", dek);
+  const wrappedDek = await crypto.subtle.wrapKey("raw", dek, kek, "AES-KW");
+
+  return {
+    ciphertext: Buffer.from(ciphertext).toString("base64"),
+    wrappedDek: Buffer.from(wrappedDek).toString("base64"),
+    iv: Buffer.from(iv).toString("base64"),
+  };
+}
+```
+
+The storage layer sees only base64-encoded blobs. The KEK never leaves the agent process (or the user's device, if you derive it there).
+
+The trade-off: each read requires two crypto operations (unwrap DEK, decrypt payload). For hot-path state that is read on every tool call, cache the unwrapped DEK in memory for the session lifetime.
+
+## Pattern 2: Deterministic Encryption for Indexable Fields
+
+Sometimes you need to query encrypted state — "find all entries where `userId = X`." Randomised encryption (different ciphertext each time) breaks equality lookups.
+
+The solution is deterministic (or "SIV") encryption for index fields. AES-SIV uses a synthetic IV derived from the plaintext itself, producing the same ciphertext for the same input under the same key. This enables equality queries without exposing the plaintext.
+
+```typescript
+// Pseudocode — use a library like node-aes-siv for production
+const indexCiphertext = aesSiv.encrypt(userId, indexKey);
+// Store indexCiphertext as the lookup key; compare by ciphertext equality
+```
+
+Keep the SIV key separate from the content DEKs. If the SIV key leaks, attackers learn which records share a value (confirmation attacks); they still cannot read the content.
+
+Only apply deterministic encryption to fields that genuinely need equality lookup. Timestamp ranges, numeric comparisons, and full-text search require different approaches (order-preserving encryption, private information retrieval, or simply decrypting client-side after a range prefetch).
+
+## Pattern 3: Session Keys for Ephemeral Working Memory
+
+Ephemeral agent context — the current task graph, scratch notes, intermediate tool results — does not need to survive past the current run. Lean into that.
+
+Generate a session key at agent startup from a random seed. Use it for all within-session writes. Discard it (overwrite with zeros, call `SecureZeroMemory` on platforms that expose it) when the session ends. Nothing written during that session is recoverable afterward, which is exactly what you want for sensitive working memory.
+
+For persistence that *does* span sessions, re-encrypt with a long-term DEK before flushing to durable storage. That two-tier approach keeps ephemeral state fast (a single symmetric key, no wrapping overhead) while maintaining a clean boundary.
+
+## Key Derivation: Where the Root Secret Lives
+
+The weakest link in any CSE scheme is where the root key comes from. Common options for agent infrastructure:
+
+**User-derived keys.** Derive the KEK from a user-supplied passphrase via Argon2id or PBKDF2. The agent never stores the passphrase; it prompts (or receives via a secure channel) at startup and holds the derived key in memory only. Works well for human-in-the-loop agents; awkward for fully autonomous ones.
+
+**Hardware-backed keys.** On managed infrastructure, the KEK lives in an HSM or a cloud KMS under a key policy that only the agent's service account can invoke. The agent calls the KMS to wrap/unwrap DEKs; the root key never appears in process memory. This shifts trust to the KMS operator.
+
+**Agent-native vaults.** A storage service like BitAtlas generates and manages the KEK on behalf of the agent, with zero-knowledge architecture so even the vault provider cannot decrypt. The agent authenticates with a scoped API key; all encryption happens client-side in the SDK before data leaves the agent process.
+
+Each option trades convenience against control. The right answer depends on whether the root secret must be recoverable by a third party (enterprise key escrow) or must be provably inaccessible to everyone except the agent owner.
+
+## Handling Key Rotation Without Downtime
+
+Long-lived agents accumulate state encrypted under old DEKs. When you rotate keys:
+
+1. Generate a new KEK (or new DEK for each record).
+2. Re-encrypt existing records in the background — read the old ciphertext, decrypt with the old key, encrypt with the new key, write back.
+3. Track which version encrypted each record (store a `keyVersion` field alongside the ciphertext).
+4. Keep old keys readable until all records have migrated; then retire them.
+
+Background re-encryption can race with active writes. Use a versioned write pattern: include the `keyVersion` in the condition of your storage update (optimistic locking). If the background job and the agent both try to write the same record, the one with the stale version loses and retries.
+
+For state that is append-only (conversation history, audit logs), you can avoid re-encryption entirely by encrypting new entries with the new key and tagging each entry with its key version. Readers unwrap the correct DEK for each entry.
+
+## What the Storage Layer Sees
+
+Under a well-implemented CSE scheme, every value stored is a ciphertext blob. The storage provider observes:
+
+- Record counts and sizes (timing and traffic analysis remain possible — worth noting in your threat model).
+- Encrypted index values if you use deterministic encryption (which reveals equality but not content).
+- Key version tags if you store them unencrypted (acceptable — key IDs are not secrets).
+
+The provider cannot read conversation history, tool results, user preferences, or any other plaintext content. This is the structural guarantee that disk-level encryption alone cannot provide.
+
+## Putting It Together
+
+A practical implementation for a TypeScript agent:
+
+```typescript
+class EncryptedStateStore {
+  private sessionKey: CryptoKey;
+  private kek: CryptoKey;
+
+  constructor(kek: CryptoKey) {
+    this.kek = kek;
+  }
+
+  async init() {
+    this.sessionKey = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false, // non-extractable — session-only
+      ["encrypt", "decrypt"]
+    );
+  }
+
+  async writeEphemeral(key: string, value: unknown): Promise<void> {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plaintext = new TextEncoder().encode(JSON.stringify(value));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      this.sessionKey,
+      plaintext
+    );
+    await this.storage.set(key, { ciphertext, iv, scope: "session" });
+  }
+
+  async flush(key: string, value: unknown): Promise<void> {
+    // Re-encrypt with a durable DEK before writing to persistent storage
+    const entry = await encryptStateEntry(JSON.stringify(value), this.kek);
+    await this.persistentStorage.set(key, { ...entry, scope: "durable" });
+  }
+}
+```
+
+The pattern is straightforward once the key hierarchy is clear: session keys for hot working memory, DEK-per-record wrapped under a KEK for durable state, and a root key that never crosses the trust boundary.
+
+## The Guarantee Worth Having
+
+The value of client-side encryption for agent state is not primarily about performance or cost — it is about the structural property that the storage layer cannot read what the agent has learned. That matters when agents handle sensitive documents, personal data, or proprietary business information. A storage provider that cannot decrypt your agent's memory cannot leak it, cannot be compelled to produce it in plaintext, and cannot be misconfigured to expose it.
+
+Encryption at the application layer is the only layer you fully control. For agent state that deserves genuine privacy, it is the right default.
