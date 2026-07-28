@@ -1,0 +1,129 @@
+---
+title: "Trusted Execution Environments: The Missing Layer in AI Agent Sandboxing"
+description: "How TEEs like Intel SGX and AMD SEV-SNP give AI agents a hardware-enforced isolation boundary that software sandboxes can never provide."
+date: "2026-07-28"
+author: "BitAtlas Team"
+slug: "trusted-execution-environments-agent-sandboxing"
+keywords: ["TEE", "trusted execution", "sandboxing", "agent isolation", "security", "Intel SGX", "AMD SEV", "confidential computing"]
+readingTime: "7 min read"
+---
+
+AI agents are executing code, reading files, calling APIs, and mutating state on behalf of users who can't see exactly what's happening inside the process. The standard answer to this is sandboxing: containers, namespaces, seccomp filters, or a restricted WASM runtime. These all operate at the software layer, which means the operating system and hypervisor can still observe everything. Trusted Execution Environments (TEEs) close that gap at the hardware level.
+
+## What a TEE Actually Is
+
+A TEE is a CPU-enforced isolated execution region. Code and data inside the enclave are encrypted in memory; even the kernel, the hypervisor, and the host OS cannot read plaintext enclave memory. The CPU decrypts data only inside the physical processor package, during execution.
+
+The two mature production TEE implementations you'll encounter are:
+
+- **Intel SGX** (Software Guard Extensions): Enclave-based model. You compile a portion of your application to run inside a protected region. The enclave has its own isolated memory, and page contents are hardware-encrypted (AES-128 via the Memory Encryption Engine). Remote attestation lets a third party verify the exact code hash running in the enclave before trusting it with secrets.
+
+- **AMD SEV-SNP** (Secure Encrypted Virtualization - Secure Nested Paging): VM-based model. Entire virtual machines get hardware memory encryption. Each VM has its own encryption key that the hypervisor cannot access. SNP adds memory integrity protection (prevents remapping and replay attacks). This is what AWS Nitro Enclaves and Azure Confidential VMs use under the hood.
+
+ARM TrustZone is a third option, common in embedded and mobile devices, but less relevant for cloud-hosted agent infrastructure.
+
+## Why Software Sandboxes Aren't Enough for Agents
+
+A container or a WASM sandbox prevents an agent from escaping into the host filesystem or network by default. That's useful. But it doesn't protect the agent's internal state from the platform it's running on.
+
+Consider what this means practically:
+
+1. **The cloud provider can read agent memory.** If your agent is processing customer documents, storing draft outputs, or holding API keys in RAM, the hypervisor — and by extension anyone with hypervisor access — can snapshot that memory. Software isolation provides zero protection here.
+
+2. **Side-channel attacks remain viable.** Cache timing attacks (Spectre, Flush+Reload variants) work across process boundaries in a shared-memory environment. Agents running in co-located VMs on multi-tenant infrastructure are exposed.
+
+3. **Secrets in environment variables are plaintext.** Passing API keys or encryption keys to an agent via environment variables means they're visible to the OS at rest. The agent's trust boundary doesn't extend to its own execution environment.
+
+TEEs change the threat model. The attacker (including a malicious cloud operator) sees only ciphertext in memory. The CPU enforces the isolation.
+
+## Remote Attestation: Proving the Enclave Is What It Claims
+
+The feature that makes TEEs genuinely useful for agent infrastructure is remote attestation. Before you send secrets into an enclave, you can verify:
+
+1. The code hash of what's actually running (matches the expected enclave binary)
+2. The CPU is a genuine Intel or AMD processor with TEE support enabled
+3. The enclave is in an uncompromised state (no debug mode, no known vulnerabilities in the signed firmware)
+
+The attestation flow looks like this:
+
+```
+Agent Client                    TEE Service                   Intel/AMD Attestation Service
+      |                              |                                     |
+      |-- Request attestation quote--|                                     |
+      |                              |-- Generate hardware-signed quote ----|
+      |                              |<-- Signed quote ------------------------|
+      |<-- Quote + enclave report ---|                                     |
+      |                              |                                     |
+      |-- Verify quote via DCAP/MAA -|------------------------------------>|
+      |<----- Verification result --------------------------------<--------|
+      |                              |                                     |
+      | [If verified, send secrets]  |                                     |
+```
+
+Intel calls their cloud-based attestation service DCAP (Data Center Attestation Primitives). Microsoft Azure provides a Managed Attestation Service. For agents built on AWS Nitro, the attestation document is signed by the Nitro hypervisor itself.
+
+The practical result: you can write code that refuses to release a secret key unless the receiving enclave passes attestation. This is how zero-knowledge systems can hand off keys to compute without trusting the compute platform.
+
+## Integrating TEEs into Agent Architecture
+
+For most teams, the entry point isn't writing SGX intrinsics directly — it's using a framework that handles the enclave lifecycle.
+
+**Gramine** (formerly Graphene-SGX) lets you run an unmodified Linux application inside SGX with a compatibility layer. You write a manifest file specifying allowed system calls, files, and network access, and Gramine handles the enclave setup. This is the fastest path for agents built on Python or Node.js.
+
+**SCONE** (Secure CONtainer Environment) wraps Docker containers to run inside SGX. Your Dockerfile stays largely unchanged; SCONE handles the enclave bootstrapping and transparent file encryption.
+
+**Enarx** targets AMD SEV and Intel SGX uniformly via a WASM-based runtime. You compile agent code to WASM, and Enarx runs it inside whichever TEE the host hardware provides — useful if you want portability across cloud providers.
+
+A minimal Gramine manifest for an agent process looks like this:
+
+```toml
+# agent.manifest.template
+
+[loader]
+entrypoint = "file:{{ gramine.runtimedir() }}/ld-linux-x86-64.so.2"
+argv = ["/usr/bin/python3", "agent.py"]
+log_level = "error"
+
+[fs]
+mounts = [
+  { path = "/lib", uri = "file:/lib" },
+  { path = "/usr/lib", uri = "file:/usr/lib" },
+  { path = "/usr/bin/python3", uri = "file:/usr/bin/python3" },
+  { path = "/agent", uri = "file:/agent" }
+]
+
+[sgx]
+debug = false
+edmm_enable = true
+max_threads = 4
+
+[sgx.trusted_files]
+python = "file:/usr/bin/python3"
+```
+
+The `trusted_files` section hashes the listed binaries at build time; any modification to the binary at runtime breaks the measurement and attestation fails.
+
+## What TEEs Don't Protect Against
+
+TEEs are powerful but not a complete security story.
+
+**Side channels within the enclave**: Data-dependent memory access patterns are observable through cache timing even with SGX active. Agents that branch on sensitive data (processing documents where the branch taken reveals document content) can leak information. Constant-time implementations matter.
+
+**Input and output boundaries**: Data flowing into or out of the enclave crosses a trust boundary. Network traffic, inter-process communication, and storage writes all need their own encryption. The enclave secures in-memory computation; it doesn't automatically secure the data pipeline around it.
+
+**The enclave code itself**: Remote attestation proves what binary is running, not that the binary is correct or free of vulnerabilities. A compromised agent binary running in an SGX enclave is still a compromised agent.
+
+**Denial of service**: Nothing in SGX prevents the host OS from simply not scheduling the enclave. A malicious platform can starve the agent of CPU time. TEEs provide confidentiality and integrity, not availability guarantees.
+
+## Practical Starting Point
+
+If you're building agent infrastructure and evaluating whether TEEs make sense, here's a reasonable decision tree:
+
+- **Processing customer data that must stay confidential from the platform provider** → TEEs are a strong fit. Start with Gramine or AWS Nitro Enclaves if you're already on AWS.
+- **Key management and secret derivation** → Use a TEE-backed key service (Azure Key Vault with confidential computing, or self-hosted with a Gramine-wrapped key derivation service).
+- **General-purpose agent compute with typical threat models** → Software sandboxing (containers, WASM runtimes) is probably sufficient. TEEs add operational complexity that needs to be justified.
+- **Agents operating in multi-tenant environments where co-tenants are adversarial** → TEEs plus strict network egress policies.
+
+The operational cost of TEEs is real: attestation adds latency to the startup path, enclave memory is limited (EPC page cache pressure is a genuine performance issue with SGX), and debugging inside an enclave is significantly harder than outside one. But for agents that handle regulated data, user secrets, or proprietary model state, that cost is increasingly worth paying.
+
+The direction of the industry is clear: every major cloud provider now has a confidential computing offering. Agents that need to earn user trust — and retain it across a breach of the underlying platform — have a path that didn't exist five years ago.
