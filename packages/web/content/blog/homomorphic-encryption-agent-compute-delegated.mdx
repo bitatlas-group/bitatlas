@@ -1,0 +1,157 @@
+---
+title: "Delegating Agent Computation Without Surrendering Your Data: A Practical Guide to FHE"
+description: "How fully homomorphic encryption lets AI agents perform computations on encrypted data—without the server ever seeing a plaintext byte."
+date: "2026-07-30"
+author: "BitAtlas Team"
+slug: "homomorphic-encryption-agent-compute-delegated"
+keywords:
+  - "homomorphic encryption"
+  - "FHE"
+  - "computation delegation"
+  - "privacy-preserving"
+  - "agent"
+readingTime: "8 min"
+---
+
+Autonomous AI agents are hungry for compute. They summarize documents, classify records, run inference pipelines, and crunch analytics — but the moment sensitive data enters that pipeline, most teams face an awkward tradeoff: either keep everything on-premises (slow, expensive), strip the sensitive fields before delegating (lossy), or hand the plaintext to a third-party worker (risky).
+
+Fully homomorphic encryption (FHE) cuts through that tradeoff. With FHE, an agent can ship encrypted ciphertext to an untrusted compute node, the node runs the requested function directly on the encrypted values, and returns an encrypted result — without ever learning what the data contained. The server is mathematically blind.
+
+This post walks through how that works, which FHE schemes are practical in 2026, and where the pattern fits into real agent architectures.
+
+## Why Agents Need Computation on Encrypted Data
+
+Standard encryption protects data *at rest* and *in transit*. The gap is *in computation*: the moment a remote worker needs to run even a simple aggregation, the data must be decrypted first. That exposes it.
+
+For agents, this matters in several concrete scenarios:
+
+- **Multi-tenant inference** — a shared model host should not see user prompts or documents fed into the model.
+- **Federated analytics** — agents aggregating metrics from multiple clients should not be able to reconstruct individual client records.
+- **Regulatory delegation** — EU-resident data classified under GDPR cannot be exported in plaintext to US-hosted compute, but delegating work to a domestic inference node under FHE sidesteps that constraint.
+- **Competitive sensitivity** — running proprietary scoring logic on a partner's encrypted dataset without either side exposing their data.
+
+FHE addresses all of these at the cryptographic layer, not the policy layer.
+
+## The Three FHE Families Worth Knowing
+
+Not all FHE is the same. Three families dominate practical deployments:
+
+### BFV / BGV (Batch Integer Arithmetic)
+
+Best for: aggregations, statistical summaries, linear models over integer-valued data.
+
+These schemes pack many integer values into a single ciphertext using SIMD-style batching (the Ring-LWE structure). A single encrypted operation can process thousands of values simultaneously. Microsoft SEAL and the OpenFHE library both implement BGV/BFV. Noise grows with each multiplication, so circuits must be kept shallow — typically under 20-30 multiplicative depth for practical parameters.
+
+### CKKS (Approximate Arithmetic on Reals)
+
+Best for: machine learning inference, vector similarity, floating-point pipelines.
+
+CKKS trades exactness for efficiency: it operates on approximations of real numbers, which is exactly what neural network inference needs. It is the dominant scheme for encrypted ML today. OpenFHE and Zama's Concrete ML expose CKKS-backed inference pipelines. Batching means a single encrypted forward pass can handle an entire mini-batch.
+
+### TFHE / FHEW (Boolean / Lookup Tables)
+
+Best for: arbitrary functions, branching logic, comparison operations.
+
+TFHE bootstraps after every gate, which sounds expensive — but bootstrapping in TFHE takes under 0.1 seconds per gate on modern hardware, and gates compose freely. This makes TFHE the right choice when the function isn't known at encryption time, or when it involves comparisons and control flow that BFV/CKKS struggle with. Zama's `concrete` library and `tfhe-rs` (Rust) are the production-grade options.
+
+## A Delegation Pattern for Agents
+
+Here is the canonical pattern for offloading agent computation under FHE:
+
+```
+┌─────────────────────────────────────────────┐
+│  Agent (trusted)                            │
+│  1. Encrypt inputs with client key          │
+│  2. Send encrypted inputs + eval key        │
+│  3. Receive encrypted output                │
+│  4. Decrypt with secret key                 │
+└──────────────────┬──────────────────────────┘
+                   │  ciphertext only, never plaintext
+                   ▼
+┌─────────────────────────────────────────────┐
+│  Compute node (untrusted)                   │
+│  Receives: enc(input), evaluation key       │
+│  Runs: f(enc(input)) → enc(output)          │
+│  Returns: enc(output)                       │
+│  Learns: nothing about input or output      │
+└─────────────────────────────────────────────┘
+```
+
+The **evaluation key** (sometimes called the relinearization key or bootstrapping key) is the critical piece. It allows the compute node to operate on ciphertexts *without* being able to decrypt them. It is derived from the secret key but is safe to share with untrusted workers.
+
+In code with OpenFHE (Python bindings):
+
+```python
+import openfhe
+
+params = openfhe.CCParamsBFVRNS()
+params.SetPlaintextModulus(65537)
+params.SetMultiplicativeDepth(3)
+
+cc = openfhe.GenCryptoContext(params)
+cc.Enable(openfhe.PKESchemeFeature.PKE)
+cc.Enable(openfhe.PKESchemeFeature.KEYSWITCH)
+cc.Enable(openfhe.PKESchemeFeature.LEVELEDSHE)
+
+keys = cc.KeyGen()
+cc.EvalMultKeyGen(keys.secretKey)   # relinearization key — safe to ship to worker
+
+# Agent side: encrypt
+plaintext = cc.MakePackedPlaintext([42, 17, 99])
+ciphertext = cc.Encrypt(keys.publicKey, plaintext)
+
+# Worker side: compute f(x) = x * x + x (no decryption)
+ct_sq = cc.EvalMult(ciphertext, ciphertext)
+ct_result = cc.EvalAdd(ct_sq, ciphertext)
+
+# Agent side: decrypt result
+result_pt = cc.Decrypt(ct_result, keys.secretKey)
+result_pt.SetLength(3)
+print(result_pt)  # [42*42+42, 17*17+17, 99*99+99] = [1806, 306, 9900]
+```
+
+The worker never touches the secret key. The computation happens entirely in ciphertext space.
+
+## Performance in 2026: What's Actually Feasible
+
+FHE is no longer purely academic. Benchmarks from early 2026 on commodity hardware:
+
+| Operation | Scheme | Latency |
+|-----------|--------|---------|
+| 8192-element dot product | CKKS | ~35 ms |
+| ResNet-20 inference (single image) | CKKS | ~8 s |
+| AES block (bitwise) | TFHE | ~200 ms |
+| SQL COUNT/SUM over 1 M rows | BFV (batched) | ~2 s |
+| Logistic regression predict | CKKS | ~12 ms |
+
+The key insight is that **batching amortizes cost**. An agent processing 8192 documents in a single batched BFV ciphertext pays roughly the same latency as processing one. Structuring workloads to maximize batch size is the primary performance lever.
+
+For latency-sensitive paths, TFHE with GPU acceleration (Zama's `concrete-cuda`) now achieves sub-10ms gate evaluation, putting real-time encrypted inference within reach for constrained models.
+
+## Where Encrypted Storage Fits
+
+FHE handles *computation*, but the data still needs to live somewhere between uses. This is where the storage layer matters.
+
+If an agent writes intermediate ciphertexts to a generic cloud bucket, the provider can observe access patterns, file sizes, and timing even if they cannot decrypt the contents. A zero-knowledge storage layer eliminates that leakage: ciphertexts are encrypted again at rest under client-controlled keys, and the storage provider sees only opaque blobs with no metadata correlation.
+
+BitAtlas's MCP server is designed for exactly this composition. An agent encrypts sensitive inputs under the FHE public key, stores the ciphertext in BitAtlas under a separate storage key, fetches it when delegation is needed, ships it to the compute worker along with the evaluation key, receives the result, and stores the encrypted output back — all without any intermediate party ever holding plaintext. The storage and compute layers are independently untrusted, which is a stronger security model than trusting either alone.
+
+## Practical Checklist for Agent Teams
+
+Before wiring FHE into an agent pipeline, work through these decision points:
+
+1. **What function needs to run on encrypted data?** Polynomial approximations (CKKS), integer arithmetic (BFV/BGV), or arbitrary logic (TFHE)?
+2. **What is the acceptable latency budget?** Batch workloads tolerate seconds; interactive paths need GPU acceleration or simpler circuits.
+3. **Who holds the secret key?** It must never leave the agent's trust boundary. Use a hardware security module or secure enclave if the agent runs in shared infrastructure.
+4. **How deep is the circuit?** Count multiplicative depth. Exceeding the scheme's noise budget produces garbage output, not errors.
+5. **Can the computation be reformulated as a polynomial?** CKKS performance is best when activation functions and comparisons are replaced with polynomial approximations.
+
+FHE is not the right tool for every agent computation — it adds latency and complexity. But for the cases where an untrusted compute node must see no plaintext, it is currently the only option that provides a cryptographic guarantee rather than a contractual one.
+
+## The Direction of Travel
+
+The gap between FHE and plaintext compute has narrowed from "100,000x slower" in 2015 to roughly "10–100x slower" today for well-batched workloads. DARPA's DPRIVE program and the NIST standardization track for homomorphic encryption are accelerating hardware and software co-design. Within a few years, encrypted inference for common model sizes will be indistinguishable from plaintext inference in terms of user-perceived latency.
+
+For agent architects, the right move now is to identify the one or two high-value delegation paths where FHE is justified — the compliance-critical, the contractually sensitive, the competitively valuable — and instrument those paths with the pattern above. The tooling is mature enough to deploy in production today.
+
+The rest of your pipeline can adopt FHE incrementally as the performance gap closes.
