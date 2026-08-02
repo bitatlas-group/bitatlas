@@ -1,0 +1,152 @@
+---
+title: "Privacy-Preserving Logging for AI Agents: Observability Without Surveillance"
+description: "How to collect the telemetry you need to debug and monitor AI agents without leaking sensitive user data into your log infrastructure."
+date: "2026-08-02"
+author: "BitAtlas Team"
+slug: "privacy-preserving-agent-logging-telemetry"
+keywords: ["privacy", "logging", "telemetry", "data minimization", "agent observability"]
+readingTime: "7 min read"
+---
+
+AI agents need observability. Without logs and telemetry, debugging a production failure means flying blind — you can't reconstruct what the agent did, why it made a particular tool call, or where the workflow went wrong.
+
+But agents also handle sensitive data. They read documents, execute database queries, call APIs with user credentials, and process inputs that may include personal information, health records, or financial details. Every log line that captures a prompt or tool argument is a potential data leak — stored in plaintext, replicated across log aggregators, retained for months or years, and queryable by anyone with log access.
+
+The tension between observability and privacy is real. This guide walks through practical patterns for collecting the telemetry you need while minimizing the sensitive data that ends up in your log infrastructure.
+
+## The Problem with Naive Agent Logging
+
+A typical agent log might look like this:
+
+```json
+{
+  "event": "tool_call",
+  "tool": "read_file",
+  "args": { "path": "/home/alice/tax_return_2025.pdf" },
+  "timestamp": "2026-08-02T10:32:11Z",
+  "user_id": "user_8821",
+  "session_id": "sess_abc123"
+}
+```
+
+On the surface this looks reasonable — it's structured, it's searchable, and it tells you what happened. The problem is that `args` contains a file path that reveals something about the user's identity and financial situation. If your log aggregator ships this to an external SIEM, or your on-call engineer exports a week of logs to debug something unrelated, that data leaks far beyond its intended scope.
+
+Now multiply this by hundreds of tool calls per session, across thousands of users, and you have a surveillance system you didn't mean to build.
+
+## Principle 1: Separate Behavioral Telemetry from Content
+
+The most important architectural decision is to log *what the agent did* separately from *what data it touched*.
+
+Behavioral telemetry — tool call counts, latencies, error rates, routing decisions, retry counts — carries almost no PII and is essential for monitoring. You want to know that the agent called `search_documents` 12 times in one session (unusual), took 4.2 seconds per call (a latency regression), and returned errors on 3 of them (a service problem).
+
+Content telemetry — actual arguments, return values, prompt snippets — carries all the PII and is rarely needed in the aggregated log system. When you genuinely need to inspect content, you want a targeted, audited mechanism, not passive bulk collection.
+
+Implement this split at the instrumentation layer:
+
+```python
+def log_tool_call(tool_name: str, args: dict, result: dict, duration_ms: float):
+    # Behavioral telemetry — safe to send everywhere
+    metrics.increment("agent.tool_calls", tags={"tool": tool_name})
+    metrics.histogram("agent.tool_latency_ms", duration_ms, tags={"tool": tool_name})
+    
+    # Structural log — shape of args, not values
+    logger.info("tool_call", extra={
+        "tool": tool_name,
+        "arg_keys": list(args.keys()),  # keys, not values
+        "result_type": type(result).__name__,
+        "duration_ms": duration_ms,
+        "has_error": "error" in result,
+    })
+```
+
+The `arg_keys` tells you the agent passed `path` and `encoding` to the file tool — enough to debug the integration — without capturing what those values were.
+
+## Principle 2: Hash or Tokenize Identifiers
+
+Session IDs, user IDs, and request IDs need to flow through your telemetry for correlation, but they shouldn't be the raw values that exist in your production database.
+
+Use HMAC-based pseudonymization with a rotating salt:
+
+```python
+import hmac, hashlib, os
+
+_TELEMETRY_SALT = os.environ["TELEMETRY_HMAC_SALT"]
+
+def pseudonymize(value: str) -> str:
+    return hmac.new(
+        _TELEMETRY_SALT.encode(),
+        value.encode(),
+        hashlib.sha256
+    ).hexdigest()[:16]
+```
+
+A pseudonymized user ID like `a3f7c2b1d4e8` is still correlatable within a log session (same user, same hash), but it can't be joined back to your user table without the salt, and rotating the salt periodically limits the window of re-identification.
+
+This approach is common in analytics but often skipped in agent logging because developers assume internal logs are safe. They aren't — internal logs regularly leave the organization through vendor integrations, security audits, and incident response.
+
+## Principle 3: Structured Scrubbing at the Boundary
+
+Some content does need to flow into logs: error messages, stack traces, LLM-generated text for debugging failed completions. The key is scrubbing before it leaves the agent process.
+
+A simple scrubbing pass catches the most common PII patterns:
+
+```python
+import re
+
+_SCRUB_PATTERNS = [
+    (re.compile(r'\b[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}\b'), '[EMAIL]'),
+    (re.compile(r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'), '[CARD]'),
+    (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), '[SSN]'),
+    (re.compile(r'Bearer\s+[A-Za-z0-9._\-]+'), 'Bearer [REDACTED]'),
+    (re.compile(r'(password|secret|token|key)\s*[:=]\s*\S+', re.I), r'\1=[REDACTED]'),
+]
+
+def scrub(text: str) -> str:
+    for pattern, replacement in _SCRUB_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+```
+
+Run this on any field before it goes to the log sink. It won't catch everything — PII can appear in unexpected formats — but it eliminates the most common accidental leaks.
+
+For higher-assurance environments, route sensitive log fields through an inline scrubbing service that applies ML-based entity detection before the data leaves your VPC.
+
+## Principle 4: Tiered Retention with Access Controls
+
+Not all log data should live equally long. A practical tiered approach:
+
+| Tier | Content | Retention | Access |
+|------|---------|-----------|--------|
+| Metrics | Counters, histograms, latencies | 13 months | All engineers |
+| Structural logs | Tool names, arg keys, durations | 90 days | All engineers |
+| Debug logs | Scrubbed content, error payloads | 14 days | On-call only |
+| Raw content | Unredacted prompts, tool args | 24 hours, encrypted | Security team + audit log |
+
+The raw content tier exists for serious incident investigation — it is not meant to be queried routinely. Access to it should require an explicit approval workflow and generate an audit event.
+
+BitAtlas encrypts raw content tier logs with per-user envelope keys, so even an unauthorized query against the log store returns ciphertext that can't be read without decrypting the user's key separately.
+
+## Principle 5: Consent and Transparency
+
+Users should know what telemetry their agent sessions generate. If your product collects debug logs that include even scrubbed content, say so in your privacy documentation, and offer a way to opt out of content-level logging while keeping behavioral metrics.
+
+Practically, this means:
+- A logging level setting per user or per workspace: `minimal` (metrics only), `standard` (structural logs), `debug` (scrubbed content, requires opt-in)
+- An audit log endpoint where users can see what telemetry was collected for their sessions
+- Clear data retention periods surfaced in the product
+
+This is increasingly a regulatory requirement under GDPR and similar frameworks, but more importantly it's what privacy-respecting products do.
+
+## Putting It Together
+
+The full pattern looks like this:
+
+1. **Instrument behaviorally** — log what the agent did, not what data it touched
+2. **Pseudonymize identifiers** — hash user/session IDs with a rotating HMAC salt before they leave the process
+3. **Scrub at the boundary** — apply PII detection before content reaches log sinks
+4. **Tier by sensitivity** — short retention and restricted access for content logs, long retention for metrics
+5. **Give users visibility** — expose audit logs and let users control their logging level
+
+None of this requires giving up the observability you need. Latency histograms, error rates, tool call patterns, and routing decisions all flow cleanly through behavioral telemetry without carrying PII. When you genuinely need to inspect what an agent did with specific data — a compliance investigation, a serious bug — the tiered approach gives you a controlled path to that data without making it the default.
+
+The agents you build should be trustworthy in both directions: they should do what users ask, and users should be able to trust that what they do isn't being silently recorded in a way that outlasts its purpose.
