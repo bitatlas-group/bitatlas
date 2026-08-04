@@ -1,0 +1,193 @@
+---
+title: "Zero-Knowledge ML: Keeping Your Agent Models Private"
+description: "How to protect proprietary model weights and agent logic using zero-knowledge cryptographic techniques—so your intellectual property never leaves your control, even during inference."
+date: "2026-08-04"
+author: "BitAtlas Team"
+slug: "zero-knowledge-ml-agent-model-privacy"
+keywords: ["zero-knowledge", "machine learning", "model privacy", "intellectual property", "agents"]
+readingTime: "7 min"
+---
+
+You've trained a custom model—fine-tuned on proprietary data, optimized for your domain, weeks of GPU time baked into the weights. Now you want to deploy it inside an AI agent workflow. The obvious approach (upload the weights to a cloud inference provider) hands your intellectual property to a third party the moment you push the files. There's a better path.
+
+This post covers practical zero-knowledge and cryptographic techniques for keeping model weights private while still running real inference. It's aimed at developers building agentic systems who need to reason seriously about IP protection.
+
+## Why Model Weights Are a Different Problem
+
+Most encryption guides for agents focus on user data—files, secrets, tokens. Model weights are different:
+
+1. **They're large.** A 7B parameter model in 16-bit precision is about 14GB. Cryptographic operations that are trivial on a 4KB secret become engineering problems at that scale.
+2. **They need to run.** You don't just want to store them encrypted—you want to execute inference on them without decrypting in a place you don't control.
+3. **They're IP, not just data.** A leaked weight file is a reproducible copy of your competitive advantage. You can rotate a key; you can't un-leak a model.
+
+The good news: there are several complementary techniques that address this, ranging from "good enough for most threats" to "cryptographically provable."
+
+## Technique 1: Trusted Execution Environments (TEEs)
+
+TEEs—Intel TDX, AMD SEV-SNP, AWS Nitro Enclaves—carve out a CPU enclave where memory is encrypted at the hardware level. The cloud provider's hypervisor, kernel, and operators cannot read enclave memory even with root access.
+
+For model inference inside a TEE:
+
+```python
+# Pseudocode for Nitro Enclave inference
+import subprocess, json
+
+def run_inference_in_enclave(encrypted_input: bytes) -> bytes:
+    # Payload is sealed; only the enclave's key can open it
+    payload = {"model": "weights_v2", "input": encrypted_input.hex()}
+    result = subprocess.run(
+        ["nitro-cli", "run-enclave", "--enclave-cid", "16", "--request", json.dumps(payload)],
+        capture_output=True
+    )
+    return bytes.fromhex(json.loads(result.stdout)["output"])
+```
+
+The workflow:
+
+1. Weights are sealed to the enclave's attestation key at rest.
+2. On boot the enclave verifies its own identity via remote attestation before unsealing.
+3. A client can cryptographically verify the attestation report before sending any input.
+
+**Threat model:** Protects against the cloud provider, other tenants, and anyone with OS-level access. Does *not* protect against a compromised firmware or a CPU microarchitecture vulnerability.
+
+## Technique 2: Split Inference Across Trust Boundaries
+
+If full TEE deployment is too heavyweight, you can partition the model so the sensitive layers stay on infrastructure you control.
+
+The idea: split a transformer at an intermediate layer. The public cloud handles the cheap embedding layers; your private server handles the final reasoning layers where the "secret sauce" lives.
+
+```text
+[Agent request]
+     ↓
+[Cloud: embedding layers 1-12]   ← can be open-sourced weights
+     ↓ (intermediate tensor, not plaintext)
+[Your private server: layers 13-32]  ← proprietary fine-tune
+     ↓
+[Agent: final output]
+```
+
+This is sometimes called a *model sandwich*. It degrades gracefully—if someone intercepts the intermediate tensor they get a representation that's hard to invert, not the weights themselves.
+
+Practical implementation uses ONNX Runtime for the cloud partition and a private FastAPI endpoint for the sensitive partition:
+
+```python
+# Private partition endpoint (runs on your infra)
+from fastapi import FastAPI, HTTPException
+import torch, base64
+
+app = FastAPI()
+private_model = load_private_layers("layers_13_32.pt")  # never leaves this server
+
+@app.post("/infer")
+async def infer(body: dict):
+    token = body.get("auth_token")
+    if not verify_agent_token(token):
+        raise HTTPException(status_code=403)
+    
+    tensor = torch.frombuffer(base64.b64decode(body["intermediate"]), dtype=torch.float16)
+    output = private_model(tensor.unsqueeze(0))
+    return {"logits": base64.b64encode(output.numpy().tobytes()).decode()}
+```
+
+The agent's MCP server calls the cloud partition first, then routes the intermediate to your endpoint. Total latency overhead: typically 20–80ms for a local private server, which is acceptable for most agentic use cases.
+
+## Technique 3: Homomorphic Encryption (HE) for Inference
+
+This is the cryptographically pure answer. With fully homomorphic encryption (FHE), you can run inference on encrypted inputs without ever decrypting them—the model never sees the plaintext.
+
+The catch: it's slow. A transformer attention operation that takes 1ms in plaintext takes 10–100 seconds in FHE. For 2026, FHE is viable for:
+
+- **Small models** (logistic regression, simple CNNs, under 10M parameters)
+- **High-value, low-frequency** inference (fraud scoring, medical diagnosis, contract analysis)
+- **Preprocessed pipelines** where you can batch and tolerate latency
+
+Libraries to know:
+
+- **Microsoft SEAL** — C++ library with Python bindings, good for CKKS scheme (real-valued arithmetic)
+- **OpenFHE** — actively maintained, supports BGV/BFV/CKKS/FHEW
+- **Concrete ML** from Zama — converts scikit-learn models to FHE circuits
+
+```python
+from concrete.ml.sklearn import LogisticRegression
+import numpy as np
+
+# Train on plaintext
+clf = LogisticRegression(n_bits=8)
+clf.fit(X_train, y_train)
+
+# Compile to FHE circuit
+clf.compile(X_train)
+
+# Client encrypts input
+X_encrypted = clf.quantize_encrypt_serialize(X_client)
+
+# Server runs encrypted inference - never sees X_client
+y_encrypted = clf.run_fhe(X_encrypted)
+
+# Client decrypts result
+y = clf.deserialize_decrypt_dequantize(y_encrypted)
+```
+
+For LLM-scale models, watch the **TFHE** and **CKKS bootstrapping** research—2025–2026 has seen roughly a 100x speedup in practical FHE, and the trajectory suggests transformer inference in under a minute within 2–3 years.
+
+## Technique 4: Zero-Knowledge Proofs for Model Integrity
+
+Even if you can't hide the weights, you can prove facts *about* your model without revealing its contents. ZKPs let you make statements like:
+
+- "My agent's output was produced by model version 2.1.4" (tamper-evidence)
+- "The model satisfies these safety constraints" (compliance without disclosure)
+- "This output was not generated by a model trained on data you haven't consented to" (provenance)
+
+Frameworks for ML ZKPs:
+
+- **EZKL** — generates SNARK proofs for ONNX models; works up to ~100M parameters today
+- **Giza** — Cairo-based, targets on-chain verifiability
+- **zkML** community** — growing collection of circuits for common ML ops
+
+A minimal EZKL workflow for an agent that wants to prove its outputs:
+
+```bash
+# Generate proof that output came from a specific model
+ezkl gen-settings --model agent_model.onnx
+ezkl compile-circuit --model agent_model.onnx --compiled-circuit model.compiled
+ezkl setup
+ezkl gen-witness --input input.json --compiled-circuit model.compiled
+ezkl prove
+ezkl verify  # Returns: PROOF VERIFIED
+```
+
+The output proof is a compact file (typically 50–200KB) that any verifier can check without seeing the weights.
+
+## Putting It Together: A Privacy-Layered Agent
+
+For a production agent with IP concerns, the recommendation is to layer these techniques:
+
+| Layer | Technique | Protects Against |
+|-------|-----------|-----------------|
+| Storage | Encrypted at rest (AES-256-GCM) | Unauthorized access to weight files |
+| Deployment | TEE-based inference | Cloud provider, OS-level attackers |
+| Architecture | Split inference | Interception of intermediate computation |
+| Compliance | ZK integrity proofs | Audit and provenance requirements |
+| High-assurance | FHE for sensitive sub-tasks | Full cryptographic privacy of inputs |
+
+No single technique is sufficient; each addresses a different part of the threat surface.
+
+## The Agent Storage Angle
+
+One underappreciated vector: model privacy leaks through *agent memory and logs*. An agent that records its reasoning traces, caches intermediate outputs, or syncs its context to a generic cloud storage bucket may inadvertently reveal information about the model structure through its outputs.
+
+Zero-knowledge encrypted storage—where the storage provider holds only ciphertext and cannot read agent state—closes this side channel. The agent's memory, its intermediate computation records, and any cached model outputs remain opaque to infrastructure operators.
+
+This matters especially for agents that run repeatedly on private data: even if the weights are secure, a series of outputs can reveal statistical structure about the underlying model.
+
+## Next Steps
+
+If you're building an agent with proprietary models today, start here:
+
+1. **Audit your weight storage.** Are weights at rest on encrypted volumes with key management you control?
+2. **Consider split inference.** It's the lowest-cost technique with meaningful IP protection.
+3. **Evaluate TEE providers** if you're running on a major cloud—AWS Nitro, Azure Confidential Computing, and GCP Confidential VMs all support production-grade enclaves.
+4. **Encrypt agent state** independently of your compute layer so memory and logs don't leak model information.
+5. **Watch FHE benchmarks.** The speedup curve means this transitions from niche to practical faster than most developers expect.
+
+Model privacy isn't a solved problem, but the cryptographic tools are maturing rapidly. The developers who understand these layers now will be the ones building the agentic infrastructure that's actually trustworthy at scale.
