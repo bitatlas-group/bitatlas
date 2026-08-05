@@ -1,0 +1,137 @@
+---
+title: "Secure Multi-Party Computation: How AI Agents Collaborate Without Leaking State"
+description: "A developer's guide to SMC protocols that let multiple agents compute together on shared tasks while keeping their internal state—API keys, user data, model parameters—completely private."
+date: "2026-08-05"
+author: "BitAtlas Team"
+slug: "secure-multi-party-computation-agent-collaboration"
+keywords:
+  - "SMC"
+  - "secure computation"
+  - "agent collaboration"
+  - "privacy-preserving"
+  - "protocol"
+  - "MPC"
+  - "multi-party computation"
+readingTime: "6 min read"
+---
+
+Multi-agent systems are becoming the backbone of serious AI infrastructure. A pipeline might have a retrieval agent, a reasoning agent, a tool-use agent, and a memory agent all cooperating on a single user task. The problem: cooperation requires communication, and communication leaks state.
+
+Secure Multi-Party Computation (SMC, also written MPC) is the cryptographic answer. It lets N parties jointly compute a function over their private inputs and learn only the output—nothing about each other's inputs. For agents, this means one agent can collaborate with another on a shared computation without either ever seeing the other's raw data.
+
+This post explains how SMC works, where it fits in agent architectures, and what the implementation tradeoffs look like in practice.
+
+## The Problem: Collaboration Requires Exposure
+
+Consider a scenario: Agent A holds a private user embedding (derived from sensitive personal documents). Agent B holds a proprietary model fine-tuned on confidential data. You want to produce a relevance score—something like `dot_product(embedding, model_weights)`—without either agent exposing its inputs to the other, to a coordinator, or to any intermediary.
+
+Without SMC, your options are bad: centralize both inputs (data leaves each agent's trust boundary), use a trusted third party (a single point of failure and compromise), or skip the computation (doesn't work).
+
+SMC gives you a fourth option: run the computation in a distributed fashion across agents, where each agent sees only cryptographic shares of the inputs, never the values themselves.
+
+## Core Protocols: A Developer-Level Overview
+
+### Secret Sharing (Shamir's or Additive)
+
+The simplest building block. A secret value `s` is split into `n` shares distributed across `n` parties. Any `t` of them can reconstruct `s`, but `t-1` shares reveal nothing.
+
+**Additive sharing** (threshold = n) works well for agents: to share secret `s` among 3 agents, generate random `r1`, `r2`, and set `r3 = s - r1 - r2 mod p`. Each agent gets one `ri`. To reconstruct: sum all shares mod p. Addition on shares equals addition on secrets:
+
+```
+share_A(x) + share_A(y) = share_A(x + y)
+```
+
+Multiplication is harder and requires interaction (see Beaver triples below), which is why SMC protocols are usually profiled by their multiplication circuit depth.
+
+### Garbled Circuits (Yao's Protocol)
+
+Garbled circuits are for two-party computation. One party (the "garbler") encrypts the circuit gate-by-gate with random labels. The other (the "evaluator") runs the circuit using 1-of-2 oblivious transfer to retrieve the correct labels for their inputs, then evaluates the garbled circuit without learning anything about the garbler's inputs.
+
+The garbler only learns the output. The evaluator learns nothing about the garbler's inputs.
+
+For agents: garbled circuits fit scenarios where computation is between exactly two agents and the circuit can be expressed as boolean gates. They're communication-heavy but round-efficient (constant rounds).
+
+### SPDZ and Arithmetic Circuits
+
+For multi-party (more than 2) settings, SPDZ is the dominant protocol family. It's split into two phases:
+
+**Offline (preprocessing)**: Agents generate correlated randomness—specifically Beaver multiplication triples `(a, b, c)` where `c = a * b`—without knowing each other's secret values. This is computationally expensive but can happen before any actual inputs are known.
+
+**Online**: Given actual shares of inputs, agents can compute arbitrary arithmetic circuits using the preprocessed triples. The online phase is fast and requires only a constant number of rounds per multiplication gate.
+
+This offline/online split is what makes SPDZ practical for agents: the preprocessing can be front-loaded during idle periods or at agent startup, and the actual computation latency is dominated by network round-trips, not cryptographic operations.
+
+## Agent Architecture Patterns
+
+### Coordinator-Free Computation
+
+In the simplest topology, agents compute peer-to-peer. Each agent broadcasts messages to peers during the online phase of SPDZ. This works for small agent clusters (under 10) but doesn't scale to fleet-level coordination.
+
+### Verifiable SMC with MACs
+
+If agents can be malicious (not just honest-but-curious), you need active security. SPDZ adds MACs to shares: each share carries an authentication tag, and agents verify consistency before revealing outputs. A cheating agent that modifies its share will produce an invalid MAC and be detected.
+
+For agents, active security is worth the overhead when inputs are high-value (user financial data, proprietary model weights) and the agent pool isn't fully trusted.
+
+### The Function Secret Sharing (FSS) Pattern
+
+For read-heavy patterns—where one agent wants to query another's data without revealing the query—Function Secret Sharing is more efficient. The querying agent splits its query into function shares distributed across data-holding agents. Each data agent evaluates its function share on its own data and returns a partial result. The querying agent reconstructs the result.
+
+This is particularly relevant for encrypted RAG pipelines: you can retrieve documents matching a private embedding without revealing the embedding or which documents matched.
+
+## What You Can and Can't Compute
+
+SMC can compute any function expressible as an arithmetic or boolean circuit. In practice:
+
+**Good fits:**
+- Dot products and similarity scores (linear in circuit depth)
+- Statistics over private datasets (sum, mean, variance)
+- Private set intersection (which documents do two agents both reference?)
+- Threshold checks (is agent A's confidence above agent B's threshold?)
+
+**Poor fits:**
+- Deep neural network inference (circuit depth proportional to layer count; latency becomes prohibitive)
+- Branching on private values (branching requires evaluating both branches and selecting)
+- String operations (high boolean circuit complexity)
+
+A practical heuristic: if your computation is linear algebra or set operations, SMC is tractable. If it requires multiple rounds of nonlinear activation functions on large tensors, look at TEEs (Trusted Execution Environments) or homomorphic encryption instead.
+
+## Implementation: Libraries Worth Knowing
+
+**MP-SPDZ** ([github.com/data61/MP-SPDZ](https://github.com/data61/MP-SPDZ)): The reference SPDZ implementation. Supports many protocol variants, has a Python-like DSL for specifying computations, and includes benchmarking tools. Good for research and production implementations.
+
+**SCALE-MAMBA**: Commercial-grade SPDZ implementation. Better documentation than MP-SPDZ, commercial support available.
+
+**CrypTen** (PyTorch extension by Meta): Implements SMC over PyTorch tensors. Designed for privacy-preserving ML inference. The API feels like PyTorch, which lowers the barrier for ML engineers.
+
+For agent-to-agent SMC, you'll typically wrap the library in a lightweight RPC layer. Each agent runs a party process that communicates over TLS with peers. The computation is specified as a circuit in the library's DSL or API.
+
+## Latency Expectations
+
+On a LAN with 3 parties:
+
+- **Preprocessing (SPDZ offline)**: 1–10 seconds for generating enough triples for a typical computation
+- **Online phase**: 10–100ms per multiplication gate, dominated by network round-trips
+- **Garbled circuits (2-party)**: Scales with circuit size; dot product of 1000-dimensional vectors takes roughly 50–200ms
+
+On agents communicating over the internet (100ms+ RTT), multiply these estimates by 2–5x. The online phase of SPDZ is round-efficient, so latency scales better with distance than protocols requiring many rounds.
+
+## When SMC Is the Right Tool
+
+SMC is worth the implementation complexity when:
+
+1. **Data can't leave its origin agent**: Regulatory constraints, contractual obligations, or security policy prevent raw data from being shared even with trusted coordinators.
+2. **The computation is well-defined and expressible as a circuit**: Ad-hoc reasoning doesn't fit SMC well. Specific functions (similarity, set intersection, threshold checks) do.
+3. **Latency budget allows it**: SMC adds 50ms–several seconds depending on protocol and network. If the overall pipeline tolerates this, the privacy guarantee is worth it.
+
+For many agent collaboration patterns—sharing summaries, passing structured outputs, calling tools—SMC is overkill. It earns its place when the input itself must remain private, not just the output.
+
+## Building Blocks for a Zero-Knowledge Agent Layer
+
+SMC is one piece of a broader privacy-preserving agent stack. Pair it with:
+
+- **Client-side encryption** for storage: agents encrypt their state before persisting it anywhere
+- **Threshold key management**: no single agent holds a master key; keys are reconstructed via Shamir sharing across a quorum
+- **Zero-knowledge proofs**: agents prove properties about their inputs (e.g., "my confidence is above 0.8") without revealing the confidence value itself
+
+Together these primitives let you build agent pipelines where collaboration doesn't require trust—only cryptographic guarantees.
