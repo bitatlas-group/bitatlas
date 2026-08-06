@@ -1,0 +1,119 @@
+---
+title: "Hierarchical Key Derivation for AI Agent Identity and Authorization"
+description: "How to design tree-structured key derivation schemes that give every agent in your fleet a unique, auditable cryptographic identity—without a centralized secret store."
+date: "2026-08-06"
+author: "BitAtlas Team"
+slug: "agent-key-derivation-hierarchical-cryptography"
+keywords: ["key derivation", "hierarchical encryption", "agent identities", "key management"]
+readingTime: "8 min read"
+---
+
+# Hierarchical Key Derivation for AI Agent Identity and Authorization
+
+Modern agent deployments are not a single process — they are fleets. A coordinator spins up a dozen sub-agents, each reading different files, calling different APIs, and writing to different stores. If every one of those agents shares the same API key or signing certificate, a single compromise blows the entire system open. And if each agent gets a completely independent key generated at runtime, you lose auditability: who did what, and can you prove it?
+
+Hierarchical key derivation solves both problems. The idea comes from HD wallets (BIP-32 in the Bitcoin world) but applies cleanly to any agent architecture: a single root secret can derive an unbounded tree of child keys, where each key is cryptographically unique yet provably descended from the root. No key database. No per-agent secret rotation ceremony. Just a tree.
+
+## The Core Primitive: HKDF
+
+The HMAC-based Key Derivation Function (HKDF, RFC 5869) is the building block. It takes a key material input, an optional salt, and an `info` string, and produces a pseudorandom output of any length. Critically, the `info` string makes the output domain-separated — two calls with different `info` values produce unrelated outputs even from the same root key.
+
+```typescript
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha256";
+
+function deriveChildKey(
+  parentKey: Uint8Array,
+  agentId: string,
+  purpose: string
+): Uint8Array {
+  const info = new TextEncoder().encode(`agent:${agentId}:${purpose}`);
+  return hkdf(sha256, parentKey, undefined, info, 32);
+}
+```
+
+The `info` value is the path in your key tree. `agent:coordinator:signing` and `agent:sub-agent-4:encryption` derive completely independent 32-byte keys from the same root, and neither key leaks anything about the root or its siblings.
+
+## Designing the Tree
+
+A well-designed tree mirrors your agent hierarchy and authorization model. Consider a three-level scheme:
+
+**Level 0 — Root:** A single master secret, stored in a hardware security module (HSM) or a secrets manager with strict access control. This key never leaves secure storage. It is only used to derive Level 1 keys on first initialization.
+
+**Level 1 — Tenant or Environment:** One key per deployment environment or tenant: `prod`, `staging`, `tenant-acme`. Isolates environments cryptographically — a bug that leaks a staging key cannot affect production data.
+
+**Level 2 — Agent Role:** One key per role within the environment: `coordinator`, `file-reader`, `summarizer`, `reporter`. Role keys are what actual agent processes receive.
+
+**Level 3 — Purpose:** Each role key is further derived into purpose-specific keys: `signing`, `encryption`, `storage-access`, `api-hmac`. An agent that only needs to sign its output gets only the `signing` key — never the `encryption` key.
+
+```typescript
+function deriveAgentKey(
+  rootKey: Uint8Array,
+  tenant: string,
+  role: string,
+  purpose: string
+): Uint8Array {
+  const tenantKey = deriveChildKey(rootKey, `tenant:${tenant}`, "tenant");
+  const roleKey = deriveChildKey(tenantKey, `role:${role}`, "role");
+  return deriveChildKey(roleKey, `purpose:${purpose}`, "purpose");
+}
+
+// Usage:
+const agentSigningKey = deriveAgentKey(root, "acme", "summarizer", "signing");
+```
+
+Because each level is derived from its parent, you can audit the tree without storing it: given the path and the root, you can always re-derive the key. And because child keys do not reveal the parent, a compromised leaf key tells an attacker nothing about its siblings.
+
+## Bounding the Blast Radius
+
+The power of this scheme is that you can hand different keys to different agents with strict least-privilege. A file-reader agent gets `deriveAgentKey(root, tenant, "file-reader", "storage-access")` — a 32-byte value that is useless for signing API requests or decrypting other tenants' data. If that agent is compromised, the attacker gets exactly one purpose-specific key in exactly one tenant. Rotating it means re-deriving with a versioned path (`file-reader-v2`) and re-issuing to the relevant agent.
+
+Compare this to a flat key model where all agents share one API key: a single exfiltration wipes out the entire deployment.
+
+## Rotation Without a Ceremony
+
+Key rotation in a hierarchical scheme is surgical. There are two rotation strategies:
+
+**Soft rotation (path versioning):** Append a version to the path: `role:file-reader-v2`. The old key keeps working for existing sessions; new agent instances get the new derivation. No coordination required — just update the path constant in your agent bootstrap code and redeploy.
+
+**Hard rotation (root replacement):** Replace the root key when you suspect the root itself is compromised. This invalidates every derived key simultaneously. It is disruptive, but it is the correct response to a root compromise — and because the tree is deterministic, recovery means provisioning the new root and re-running derivation everywhere.
+
+Most operational rotations are soft. Schedule them on a fixed cadence — every 30 or 90 days — by bumping a version counter in your derivation path.
+
+## Binding Keys to Agent Identity
+
+A derived key proves descent from the root, but it does not by itself prove which agent is using it. To close that gap, include the agent's runtime identity in the derivation path. If your orchestrator assigns each agent a UUID at spawn time, derive its key as:
+
+```typescript
+const agentKey = deriveAgentKey(root, tenant, `${role}:${agentUUID}`, purpose);
+```
+
+Now that key is unique to this specific instantiation of the agent. If the agent signs its outputs with this key, you can audit exactly which instance produced each artifact — and revoking a specific misbehaving agent means simply not re-deriving its key for future calls (since the UUID is one-time).
+
+## Integrating with MCP Storage
+
+When an agent writes files through an MCP storage server, the storage-access key derived above becomes the per-agent credential. The MCP server validates that the presented key corresponds to a valid path under the tenant root (which it can check by re-deriving from its own copy of the root). No user-facing password, no per-agent secret provisioning — just derive and present.
+
+This is precisely how BitAtlas scopes access: each agent gets a narrow key derived for its exact role and purpose, and the server enforces that boundary at the protocol level. A file-reader agent cannot encrypt a new file into storage because its key simply does not derive from the `encryption` purpose path.
+
+## Implementation Checklist
+
+Before deploying a hierarchical key scheme, validate these properties:
+
+- **Root key security:** The root lives in an HSM or a secrets manager with audit logging. It never touches agent memory.
+- **Path canonicalization:** Define a canonical format for derivation paths (`tenant:role:purpose:version`) and enforce it. Inconsistent paths silently produce different keys.
+- **Version tracking:** Store the current version counter somewhere your bootstrap code can read it. Without this, rotation is manual and error-prone.
+- **Key material erasure:** After a derived key is in use, zero the intermediate key material from memory. In JavaScript, overwrite the Uint8Array; in Rust, use `zeroize`.
+- **Audit log:** Log each derivation event — path, timestamp, agent UUID — to an append-only store. This gives you a full lineage trace without persisting the keys themselves.
+
+## The Tradeoff to Know
+
+Hierarchical derivation is deterministic, which is its main virtue and its main risk. If the root is compromised and the attacker knows your derivation paths (which are not secret), they can re-derive every key in the tree. This means root protection is not one concern among many — it is the only concern that matters. Everything else (rotation, blast-radius limiting, audit logging) is operational hygiene that assumes the root stays safe.
+
+For deployments where that assumption is too fragile, combine hierarchical derivation with MPC-based root custody: split the root across N parties with a threshold scheme, so no single node — and no single compromise — can reconstruct it.
+
+## Summary
+
+A hierarchical key derivation scheme turns a single well-guarded secret into an entire identity and authorization infrastructure for your agent fleet. Each agent gets a cryptographically unique key that proves its role and purpose, without a centralized key database or per-agent provisioning ceremony. Compromising one leaf reveals nothing about the tree. Rotation is surgical. And the whole scheme audits itself, because every key is re-derivable from its path.
+
+For agent infrastructure, this is not an advanced optimization — it is the correct default.
