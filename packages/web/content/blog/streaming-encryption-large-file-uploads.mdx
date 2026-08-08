@@ -1,0 +1,179 @@
+---
+title: "Streaming Encryption for Large File Uploads: How to Do It Right"
+description: "How to encrypt large files in the browser chunk by chunk as they upload, without buffering the entire file in memory. A practical guide to streaming AES-GCM with the Web Streams API."
+date: 2026-08-08
+author: "BitAtlas Team"
+slug: "streaming-encryption-large-file-uploads"
+keywords: ["streaming encryption", "large file uploads", "chunked encryption", "AES-GCM streaming", "Web Streams API"]
+readingTime: "9 min read"
+---
+
+Encrypting a file before it leaves the browser is straightforward when the file is a few kilobytes. You load it into memory, call `crypto.subtle.encrypt`, and ship the ciphertext. But what happens when the file is 4 GB — a database export, a video recording, a disk image? You cannot load 4 GB into a JavaScript array and encrypt it all at once. The browser will either crash or reject the operation before it starts.
+
+The answer is streaming encryption: encrypt the file in fixed-size chunks as the upload progresses, so your memory footprint stays roughly constant regardless of file size. This post walks through the mechanics — the Web Streams API, AES-GCM chunk boundaries, authentication tag placement, and the gotchas that will break your implementation if you skip them.
+
+## Why Buffering the Whole File Fails
+
+JavaScript's `crypto.subtle.encrypt` operates on `ArrayBuffer` inputs. An `ArrayBuffer` is a contiguous allocation in the JavaScript heap. The V8 heap has a hard ceiling (around 1.5–4 GB depending on platform and build), and even well below that ceiling, allocating a 2 GB buffer will often fail due to fragmentation or GC pressure.
+
+Beyond the memory constraint, there is a user-experience problem: if you buffer the entire file before starting the upload, the user waits with zero progress feedback for the duration of the encryption pass. For a 10 GB file on a mid-range laptop, that might be 30–60 seconds of apparent inactivity before any bytes go to the network.
+
+Streaming encryption solves both problems simultaneously.
+
+## The Web Streams API in a Nutshell
+
+The browser's [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) represents a source of data that is produced over time. A `File` selected from an `<input type="file">` exposes a `stream()` method that returns one. A `TransformStream` is a pipe stage that consumes a `ReadableStream` and produces another, transformed one. You compose them like Unix pipes:
+
+```typescript
+const encryptedStream = file
+  .stream()
+  .pipeThrough(new ChunkSplitter(CHUNK_SIZE))
+  .pipeThrough(new AesGcmEncryptStream(key));
+
+await uploadStream(encryptedStream);
+```
+
+Each `TransformStream` receives data from upstream as it becomes available, processes it, and hands it downstream. No stage needs to hold more than one chunk at a time.
+
+## Chunk Size and Its Trade-offs
+
+AES-GCM is an authenticated encryption mode. It produces a ciphertext that is the same length as the plaintext, plus a 16-byte authentication tag. That tag covers everything in the chunk — any modification to a byte in the ciphertext causes tag verification to fail.
+
+A larger chunk size means fewer authentication tags and lower per-chunk overhead. A smaller chunk size means lower memory usage and the ability to detect corruption earlier in a download/decrypt pass.
+
+For large-file uploads, **1 MB chunks** are a practical default:
+
+- Memory footprint: 1 MB plaintext + 1 MB ciphertext buffer + 16-byte tag at any moment
+- Overhead: 16 bytes per 1 MB is negligible (under 0.002%)
+- Parallelism: multiple chunks can be encrypted in parallel using `Promise.all` if you maintain ordering
+
+For very large files (above 10 GB) you might go up to 4–8 MB chunks to reduce the number of individual encrypt operations. Stay below 64 GB per chunk: AES-GCM's internal counter is 32 bits wide in the standard 96-bit nonce mode, giving a maximum of 2^32 blocks (under 68 GB) before the counter wraps.
+
+## Nonce Management: The Critical Detail
+
+AES-GCM requires a unique nonce (initialisation vector) for every encryption operation under the same key. Reusing a nonce with the same key catastrophically breaks confidentiality: an attacker who observes two ciphertexts encrypted under the same key–nonce pair can XOR them together and recover the XOR of the plaintexts.
+
+With streaming chunk encryption you are calling `encrypt` many times with the same key, so you must derive a distinct nonce for every chunk. The simplest safe approach is a **counter-based nonce**:
+
+```typescript
+function nonceForChunk(fileNonce: Uint8Array, chunkIndex: number): Uint8Array {
+  // fileNonce is a random 8-byte prefix chosen once per file
+  // chunkIndex occupies the remaining 4 bytes of the 12-byte AES-GCM nonce
+  const nonce = new Uint8Array(12);
+  nonce.set(fileNonce, 0);
+  const view = new DataView(nonce.buffer);
+  view.setUint32(8, chunkIndex, false); // big-endian
+  return nonce;
+}
+```
+
+The 8-byte file nonce is generated with `crypto.getRandomValues` once per upload. Combined with the 4-byte chunk index, each chunk gets a unique nonce. The maximum file size this scheme handles is 2^32 chunks × chunk size (4 billion × 1 MB = around 4 exabytes). Sufficient for any file you will encounter in practice.
+
+Store the file nonce in the upload metadata — you will need it during download to reconstruct each chunk's nonce for decryption.
+
+## A Minimal TransformStream Implementation
+
+Here is a condensed but complete `AesGcmEncryptStream` that chunks and encrypts a `ReadableStream`:
+
+```typescript
+class AesGcmEncryptStream extends TransformStream<Uint8Array, Uint8Array> {
+  constructor(key: CryptoKey, fileNonce: Uint8Array, chunkSize = 1024 * 1024) {
+    let chunkIndex = 0;
+    let buffer = new Uint8Array(0);
+
+    super({
+      transform(incoming, controller) {
+        // Accumulate bytes until we have a full chunk
+        const merged = new Uint8Array(buffer.length + incoming.length);
+        merged.set(buffer);
+        merged.set(incoming, buffer.length);
+        buffer = merged;
+
+        while (buffer.length >= chunkSize) {
+          const chunk = buffer.slice(0, chunkSize);
+          buffer = buffer.slice(chunkSize);
+          // Enqueue the encrypt promise — maintain backpressure via ordering
+          controller.enqueue(
+            encryptChunk(key, fileNonce, chunkIndex++, chunk)
+          );
+        }
+      },
+      flush(controller) {
+        // Encrypt any remaining bytes as the final chunk
+        if (buffer.length > 0) {
+          controller.enqueue(
+            encryptChunk(key, fileNonce, chunkIndex++, buffer)
+          );
+        }
+      },
+    });
+  }
+}
+
+async function encryptChunk(
+  key: CryptoKey,
+  fileNonce: Uint8Array,
+  index: number,
+  plaintext: Uint8Array
+): Promise<Uint8Array> {
+  const nonce = nonceForChunk(fileNonce, index);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    key,
+    plaintext
+  );
+  return new Uint8Array(ciphertext);
+}
+```
+
+Two points worth noting:
+
+1. **Backpressure**: the real implementation should handle backpressure from the network so the encrypt loop does not race ahead of the upload and buffer many encrypted chunks in memory. The Fetch API's `ReadableStream` body handles this automatically when you pass the stream directly to `fetch`.
+
+2. **Ordering guarantees**: `TransformStream` controllers deliver chunks in the order `enqueue` is called. If you parallelise encryption across multiple chunks, use an index-ordered queue to ensure the upload receives chunks in the correct sequence.
+
+## Framing: How the Server Knows Where Chunks Start
+
+The server (or the downstream storage layer) needs to know where one chunk ends and the next begins so it can decrypt them during a download. You have two options:
+
+**Length-prefixed framing**: prepend each encrypted chunk with a 4-byte big-endian integer representing its length (including the 16-byte tag). The decoder reads the length, reads exactly that many bytes, decrypts, and repeats.
+
+**Fixed-size chunks**: if every chunk except possibly the last is exactly `chunkSize + 16` bytes, the decoder can skip the framing overhead and seek directly to chunk `N` by byte offset. This enables efficient random access — download and decrypt only the segment you need. This is the approach used by schemes like [STREAM](https://soatok.blog/2020/10/09/stream-encryption-best-practices/) and the [Miscreant](https://github.com/miscreant/meta) family of constructions.
+
+For most upload-then-full-download scenarios, fixed-size chunks are simpler and give you random access for free.
+
+## Verifying Authentication on Download
+
+Encryption without verification is useless. When decrypting on download, verify the authentication tag for each chunk before passing any plaintext bytes to the application. `crypto.subtle.decrypt` with AES-GCM does this automatically — it throws a `DOMException` (operation error) if the tag does not match.
+
+Because each chunk's tag covers only that chunk's ciphertext, a corrupted chunk is detected as soon as it is decrypted, before the user's application sees any plaintext. This is a significant improvement over decrypting the whole file first.
+
+For extra assurance, store a hash of the complete encrypted file on upload and verify it before beginning decryption. This catches truncation attacks (an adversary who removes the final chunks).
+
+## Putting It Together: A Real-World Upload Flow
+
+A production streaming-encrypted upload looks like this:
+
+1. **Key derivation** — derive an AES-256 encryption key from the user's master key material using HKDF with a per-file salt. Never reuse the same key across files.
+2. **Nonce generation** — generate 8 random bytes with `crypto.getRandomValues`.
+3. **Stream construction** — pipe `file.stream()` through `ChunkSplitter` → `AesGcmEncryptStream`.
+4. **Upload** — pass the encrypted `ReadableStream` as the body of a `fetch` POST. Browsers stream the body to the network without buffering the entire response.
+5. **Metadata storage** — persist the file nonce, chunk size, and total chunk count alongside the upload so decryption can reconstruct each chunk's nonce.
+
+Memory usage at peak is roughly 3× the chunk size: one buffer accumulating incoming bytes, one plaintext chunk being encrypted, one ciphertext chunk being sent to the network. For a 1 MB chunk size that is around 3 MB — constant, regardless of whether you are uploading 1 MB or 1 TB.
+
+## What BitAtlas Does for You
+
+Building this correctly from scratch — nonce management, framing, backpressure, key derivation — is several days of engineering work with multiple subtle failure modes. BitAtlas's MCP server exposes a single `upload_file` tool call that handles all of it: the key is derived client-side, the file streams through the browser's native encryption layer, and chunks arrive at BitAtlas storage already encrypted. The server stores ciphertext it cannot read.
+
+For autonomous agents reading and writing files through the MCP protocol, this means the storage layer is safe even if the MCP server infrastructure is compromised — there is no plaintext to steal.
+
+## Summary
+
+- Buffer-then-encrypt does not scale past a few hundred megabytes in a browser context.
+- AES-GCM streaming with fixed chunk sizes keeps memory usage constant at roughly 3× chunk size.
+- Counter-based nonces derived from a random per-file prefix guarantee uniqueness across all chunks under the same key.
+- Fixed-size framing enables random access — decrypt chunk `N` directly by byte offset.
+- The browser's native `crypto.subtle` API handles all of this without any third-party crypto library.
+
+The primitives are all there in the platform. The engineering effort is in wiring them together correctly — and testing that a 50 GB file produces the same decrypted output as a 500-byte file.
