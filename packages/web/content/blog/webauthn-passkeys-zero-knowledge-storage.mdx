@@ -1,0 +1,158 @@
+---
+title: "WebAuthn Passkeys and Zero-Knowledge Storage: The End of Passwords"
+description: "How WebAuthn passkeys combined with zero-knowledge storage can eliminate passwords entirely while keeping credentials encrypted and private from servers."
+date: 2026-08-10
+author: "BitAtlas Team"
+slug: webauthn-passkeys-zero-knowledge-storage
+keywords: ["webauthn", "passkeys", "zero-knowledge", "FIDO2", "authentication", "passwordless", "encryption", "security"]
+readingTime: "7 min read"
+---
+
+Passwords are a 60-year-old hack that we never stopped using. They get reused, leaked, phished, and brute-forced — not because users are careless, but because the mental model is fundamentally broken. The average person manages over 100 accounts; no one can maintain strong, unique credentials for all of them without a password manager that itself requires a master password.
+
+WebAuthn passkeys change the game. But pairing them with zero-knowledge storage takes the security model further than the spec alone allows.
+
+## What WebAuthn Actually Does
+
+WebAuthn is a W3C standard that lets browsers generate and use public-key credentials for authentication. When you register a passkey:
+
+1. Your device (or a hardware security key) generates an asymmetric key pair
+2. The **private key never leaves your device** — it's stored in a secure enclave or TPM
+3. The **public key** is sent to the server and stored there
+4. Authentication is a challenge-response: the server sends a random nonce, your device signs it with the private key, and the server verifies with the stored public key
+
+There's no shared secret. There's nothing for a server breach to leak that lets an attacker log in. Phishing is structurally prevented because the key pair is bound to the exact origin domain during registration.
+
+The FIDO2 ecosystem — which WebAuthn is part of — has been running at scale since 2019. Google, Apple, Microsoft, and 1Password all support passkeys. The question isn't whether this technology works. It's where the private keys live, and what happens when they need to move.
+
+## The Key Portability Problem
+
+WebAuthn was designed around hardware authenticators: a YubiKey or a device's secure enclave holds the private key. This is maximally secure. It's also a usability trap.
+
+If your private key lives only on your iPhone's Secure Enclave:
+
+- You can't log in on your laptop unless you use Bluetooth cross-device flow
+- If you lose your phone and don't have recovery codes, you're locked out
+- Enterprise environments with shared workstations become friction nightmares
+
+Platform vendors have responded by syncing passkeys through their cloud infrastructure — iCloud Keychain, Google Password Manager, Windows Hello. This works. But it means your private keys transit and rest on Apple's or Google's servers, encrypted under keys those companies control. You're trusting their encryption, their key management, and their legal posture when a government subpoena arrives.
+
+This is the gap zero-knowledge storage fills.
+
+## Zero-Knowledge Key Backup Without Trusting the Backup Provider
+
+Zero-knowledge encrypted storage keeps your data encrypted client-side, under keys only you hold. The storage provider holds ciphertext; they have no cryptographic capability to read your keys.
+
+For WebAuthn private key backup, the architecture looks like this:
+
+```
+User device                     ZK Storage Provider
+┌─────────────────┐             ┌────────────────────┐
+│ Passkey (privK) │──encrypt──▶ │  ciphertext(privK) │
+│ Derived KEK     │             │  (server can't read)│
+│ from passphrase │             └────────────────────┘
+└─────────────────┘
+```
+
+The Key Encryption Key (KEK) is derived client-side from something the user knows — a passphrase, a recovery phrase, or a secondary authenticator. It never touches the server. The encrypted private key blob is stored remotely. Recovery means fetching the blob, decrypting it locally, and re-importing the key into a new device's secure element.
+
+HKDF (HMAC-based Key Derivation Function) is the right tool for the KEK derivation. You derive separate subkeys for encryption and authentication from the same passphrase using different info strings, preventing cross-context key reuse:
+
+```javascript
+const kekEncrypt = await crypto.subtle.deriveBits(
+  { name: 'HKDF', hash: 'SHA-256', salt, info: encode('webauthn-backup-enc') },
+  passphraseKey,
+  256
+)
+const kekAuth = await crypto.subtle.deriveBits(
+  { name: 'HKDF', hash: 'SHA-256', salt, info: encode('webauthn-backup-mac') },
+  passphraseKey,
+  256
+)
+```
+
+Then wrap the exported private key with AES-GCM under `kekEncrypt`, and HMAC the ciphertext with `kekAuth`. The server receives only the authenticated ciphertext.
+
+## What the Server Sees (and Doesn't)
+
+Let's be explicit about the trust boundary:
+
+| Data | Server visibility |
+|------|------------------|
+| WebAuthn public key | Plaintext (required for verification) |
+| User identity (email, username) | Plaintext (required for account lookup) |
+| Passkey private key | **Never** — stays on device or in encrypted backup |
+| KEK / passphrase | **Never** — derived client-side only |
+| Authentication nonce | Plaintext (by design — it's random per-request) |
+| Signed assertion | Plaintext (verified server-side with public key) |
+
+The authentication flow itself is zero-knowledge about the private key. The backup mechanism extends this: the server stores a recovery blob it cannot decrypt.
+
+## Attestation and the Privacy Trade-off
+
+WebAuthn includes an attestation mechanism: during registration, the authenticator can prove to the server what kind of hardware generated the key (a YubiKey 5, an Apple Touch ID, etc.). Enterprise deployments use attestation to enforce policy — "only hardware-backed keys from approved devices."
+
+Attestation has a privacy cost. Batch certificates used by most platform authenticators can be tracked across registrations if handled naively. The WebAuthn spec defines anonymous attestation formats (packed, TPM, android-key) that mitigate this, but developers should explicitly request `"indirect"` or `"none"` attestation conveyance when enterprise assurance isn't needed:
+
+```javascript
+const credential = await navigator.credentials.create({
+  publicKey: {
+    attestation: 'none', // don't leak authenticator model to server
+    // ...
+  }
+})
+```
+
+For consumer applications, "none" attestation is almost always the right default. You verify the signature; you don't need to know whether it came from a Secure Enclave or a TPM.
+
+## Resident Keys vs. Server-Side Credentials
+
+WebAuthn has two credential storage modes:
+
+**Server-side credentials**: The credential ID is stored server-side. The user provides their username first; the server looks up the credential ID and sends it in the `allowCredentials` list. The authenticator finds the matching private key by ID.
+
+**Resident keys (discoverable credentials)**: The private key and associated metadata are stored on the authenticator itself, keyed to the relying party ID. The authenticator presents available credentials without the server naming them first — this is what enables the "one tap to sign in" UX.
+
+Resident keys require more storage on the authenticator and were historically limited to hardware tokens. Platform authenticators (TouchID, FaceID, Windows Hello) have abundant storage, making resident keys practical for consumer flows. For zero-knowledge backup scenarios, resident keys are better: there's no server-side credential ID to leak which authenticator a user has registered.
+
+## Implementing Recovery Without the Platform
+
+Platform passkey sync (iCloud, Google) is convenient, but it creates lock-in and trust dependency. Here's a self-sovereign recovery approach using only standard cryptographic primitives:
+
+**Registration:**
+1. Generate WebAuthn credential on device
+2. Export private key (if the authenticator supports it — platform authenticators via `keyHandleByCredentialDescriptor` in some implementations)
+3. Derive KEK from user's recovery passphrase via Argon2id (memory-hard, phishing-resistant)
+4. Encrypt exported key with AES-256-GCM under KEK
+5. Store ciphertext in ZK-encrypted storage (or print as QR recovery code for offline backup)
+
+**Recovery on new device:**
+1. User enters recovery passphrase
+2. Fetch ciphertext from ZK storage
+3. Derive KEK client-side (same Argon2id params, stored alongside ciphertext)
+4. Decrypt private key
+5. Import into new device's secure element via CTAP2 extension or create a new WebAuthn credential bound to the recovered key material
+
+Step 5 is where current platform implementations create friction — not all authenticators support importing key material. Hardware security keys (YubiKey 5 series) support this via FIDO2 credential management. Platform authenticators are more restricted. This is an active area in the FIDO Alliance specifications.
+
+## The Practical Stack for 2026
+
+For developers building passkey-first authentication today:
+
+- **Registration/authentication**: Use the WebAuthn browser API directly, or `@simplewebauthn/browser` + `@simplewebauthn/server` for a well-maintained abstraction
+- **Credential storage (public keys)**: Your database, nothing special needed
+- **Private key backup**: Client-side encryption with AES-256-GCM, KEK from Argon2id, stored in zero-knowledge encrypted storage
+- **Attestation**: "none" for consumer apps, "direct" only if you have specific hardware assurance requirements
+- **Discoverable credentials**: Yes, always — enables the "just tap to sign in" UX that makes passkeys compelling
+
+The zero-knowledge storage layer is what removes the platform lock-in and the need to trust Apple or Google's key management. Your users' private keys are cryptographically outside your control — and outside your liability.
+
+## What This Means for AI Agents
+
+AI agents that act on behalf of users face a hard authentication problem: they need credentials to access services, but those credentials shouldn't live in plaintext in the agent's context or on the server running the agent.
+
+Passkeys don't directly solve agent authentication (agents can't respond to biometric prompts). But they pair well with delegatable capability tokens: the user authenticates with a passkey, then mints a scoped, time-limited token for the agent. The agent's token can be stored in zero-knowledge encrypted agent storage — encrypted under a key the orchestration server doesn't hold.
+
+This is the emerging pattern: passkeys for human authentication, capability tokens for agent delegation, ZK storage for the token lifecycle. No plaintext credentials anywhere in the chain.
+
+Passwords weren't just a bad UX decision. They were a structural vulnerability that 60 years of patches couldn't fix. Passkeys with zero-knowledge backup are the architecture that finally removes the vulnerability rather than patching around it.
