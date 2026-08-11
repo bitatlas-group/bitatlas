@@ -642,7 +642,7 @@
         "encrypted vault for autonomous agents",
         "zero knowledge agent storage"
       ],
-      "brief": "A recommendation-shaped roundup targeting the 'what should I use' query AI engines get asked directly. Criteria that matter for agent storage — zero-knowledge encryption, MCP-native access, scoped keys, EU hosting — and where BitAtlas fits versus generic cloud drives."
+      "brief": "A recommendation-shaped roundup targeting the 'what should I use' query AI engines get asked directly. Criteria that matter for agent storage \u2014 zero-knowledge encryption, MCP-native access, scoped keys, EU hosting \u2014 and where BitAtlas fits versus generic cloud drives."
     },
     {
       "slug": "do-ai-agents-leak-your-data",
@@ -697,7 +697,7 @@
         "data sovereignty encrypted storage",
         "escape US cloud jurisdiction"
       ],
-      "brief": "The direct answer to the question EU buyers actually ask: our provider is US-based and subject to the CLOUD Act, but our clients demand absolute data sovereignty. Explains why data residency alone does not solve it (a US parent can be compelled regardless of where bytes sit), and why client-side zero-knowledge encryption is the only structural fix — the provider cannot hand over plaintext it never holds. Covers Schrems II, the CLOUD Act reach, and how BitAtlas keeps keys with the customer."
+      "brief": "The direct answer to the question EU buyers actually ask: our provider is US-based and subject to the CLOUD Act, but our clients demand absolute data sovereignty. Explains why data residency alone does not solve it (a US parent can be compelled regardless of where bytes sit), and why client-side zero-knowledge encryption is the only structural fix \u2014 the provider cannot hand over plaintext it never holds. Covers Schrems II, the CLOUD Act reach, and how BitAtlas keeps keys with the customer."
     },
     {
       "slug": "zero-knowledge-proofs-agent-authorization-policies",
@@ -851,6 +851,125 @@
         "verification"
       ],
       "brief": "Making agent computations verifiable through cryptographic proofs of correct execution"
+    },
+    {
+      "slug": "zero-knowledge-search-index-encryption",
+      "keywords": [
+        "zero-knowledge",
+        "search index",
+        "encrypted search",
+        "inverted index",
+        "searchable encryption"
+      ],
+      "brief": "How to build searchable encrypted indexes without exposing plaintext to the server \u2014 covering SSE schemes, ORAM, and practical trade-offs for SaaS applications."
+    },
+    {
+      "slug": "client-side-crypto-key-agreement-protocols",
+      "keywords": [
+        "key agreement",
+        "ECDH",
+        "X25519",
+        "client-side crypto",
+        "key exchange",
+        "perfect forward secrecy"
+      ],
+      "brief": "A developer's guide to modern key-agreement protocols (ECDH/X25519, HKDF) for building end-to-end encrypted channels in browser and mobile apps."
+    },
+    {
+      "slug": "mcp-server-secret-injection-patterns",
+      "keywords": [
+        "MCP server",
+        "secret injection",
+        "environment variables",
+        "vault",
+        "runtime secrets",
+        "agent security"
+      ],
+      "brief": "Patterns for safely injecting secrets (API keys, tokens, credentials) into MCP servers at runtime without leaking them to the agent or into logs."
+    },
+    {
+      "slug": "ai-agent-storage-backends-compared",
+      "keywords": [
+        "AI agent storage",
+        "vector store",
+        "KV store",
+        "blob storage",
+        "agent memory",
+        "comparison"
+      ],
+      "brief": "Side-by-side comparison of storage backends for AI agents \u2014 object stores, vector databases, KV caches, and encrypted vaults \u2014 with latency, cost, and encryption trade-offs."
+    },
+    {
+      "slug": "eu-data-localisation-technical-controls",
+      "keywords": [
+        "EU data localisation",
+        "data residency",
+        "GDPR",
+        "technical controls",
+        "geo-fencing",
+        "Schrems II"
+      ],
+      "brief": "Technical controls teams must implement to enforce EU data localisation \u2014 region-locking object storage, encryption key residency, and audit trails that satisfy regulators."
+    },
+    {
+      "slug": "zero-knowledge-file-deduplication-privacy",
+      "keywords": [
+        "zero-knowledge",
+        "file deduplication",
+        "convergent encryption",
+        "hash",
+        "storage efficiency",
+        "privacy"
+      ],
+      "brief": "How convergent encryption enables cross-user deduplication without the server learning file content \u2014 and why naive implementations leak information through timing and size channels."
+    },
+    {
+      "slug": "mcp-server-multi-tenant-isolation",
+      "keywords": [
+        "MCP server",
+        "multi-tenant",
+        "isolation",
+        "namespace",
+        "access control",
+        "agent orchestration"
+      ],
+      "brief": "Strategies for running a single MCP server that safely isolates multiple tenants \u2014 namespace scoping, per-tenant key derivation, and row-level policy enforcement."
+    },
+    {
+      "slug": "client-side-encryption-key-escrow-compliance",
+      "keywords": [
+        "client-side encryption",
+        "key escrow",
+        "compliance",
+        "FISA",
+        "lawful access",
+        "enterprise"
+      ],
+      "brief": "How enterprises balance true client-side encryption with legal hold and key escrow requirements \u2014 technical architectures that satisfy both security teams and compliance officers."
+    },
+    {
+      "slug": "ai-agent-credential-rotation-zero-downtime",
+      "keywords": [
+        "credential rotation",
+        "zero downtime",
+        "AI agent",
+        "API keys",
+        "secret lifecycle",
+        "automation"
+      ],
+      "brief": "Automating zero-downtime credential rotation for long-running AI agents \u2014 detecting stale tokens, orchestrating atomic key swaps, and testing rotation in CI before production."
+    },
+    {
+      "slug": "encrypted-agent-communication-channels",
+      "keywords": [
+        "encrypted channels",
+        "agent communication",
+        "message passing",
+        "TLS",
+        "end-to-end",
+        "multi-agent"
+      ],
+      "brief": "Building encrypted communication channels between AI agents in a multi-agent system \u2014 from transport-level TLS to application-layer message encryption with authenticated identities."
     }
   ]
 }
