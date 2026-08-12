@@ -1,0 +1,140 @@
+---
+title: "Client-Side Key Agreement: A Developer's Guide to ECDH, X25519, and HKDF"
+description: "How to build end-to-end encrypted channels in browser and mobile apps using modern key-agreement protocols — ECDH/X25519, perfect forward secrecy, and HKDF — without shipping your keys to a server."
+date: "2026-08-12"
+author: "BitAtlas Team"
+slug: "client-side-crypto-key-agreement-protocols"
+keywords: ["key agreement", "ECDH", "X25519", "client-side crypto", "key exchange", "perfect forward secrecy"]
+readingTime: "7 min read"
+---
+
+When two parties want to communicate privately, they face a deceptively simple problem: how do you agree on a shared secret when an attacker is watching every packet? You can't send the key in plaintext, and you can't both know it ahead of time. Key agreement protocols solve this, and in 2026 — with WebCrypto natively available in every browser — there's no excuse for pushing this work to a server. This post walks through the mechanics of ECDH, why X25519 has displaced older curves, how HKDF turns a raw shared secret into usable keys, and the session patterns that give you perfect forward secrecy.
+
+## Why Server-Side Key Exchange Breaks Zero-Knowledge Guarantees
+
+A common mistake: generate the user's keypair on the server, then send the private key to the client over TLS. The server has seen the private key. From that moment, your "end-to-end" encryption is only as trustworthy as your backend. If the server is breached, subpoenaed, or just misconfigured, the private key goes with it.
+
+The fix is to generate and store the keypair client-side, never letting the private key leave the device. The browser's `SubtleCrypto` API supports non-extractable private keys — keys that can be used for operations but whose raw bytes can never be read back. That's your starting point.
+
+## ECDH Primer: The Math You Actually Need
+
+Elliptic Curve Diffie-Hellman works like this: Alice and Bob each generate a keypair on the same curve. Alice sends Bob her public key. Bob computes `alicePublic × bobPrivate`. Alice computes `bobPublic × alicePrivate`. Because of how elliptic curve multiplication works, both computations arrive at the same point. That point is the shared secret. An eavesdropper who only sees the public keys cannot reproduce it without solving the elliptic curve discrete logarithm problem, which is computationally infeasible at current curve sizes.
+
+What you get is a raw shared secret — a point on the curve, not a symmetric key. Never use it directly as a key; run it through a KDF first.
+
+## X25519: Why It Won
+
+P-256 was the browser's original ECDH curve. It still works and is widely supported. But X25519 (Curve25519) has become the default for new systems, and for good reason:
+
+- **Constant-time by design.** The curve's cofactor structure means implementations don't branch on secret data, making timing attacks far harder.
+- **No paranoid-about-NIST concerns.** The curve parameters are generated transparently, with no potential for a trapdoor.
+- **Faster.** X25519 scalar multiplication is substantially faster than P-256 on the same hardware.
+- **Smaller keys.** A 32-byte X25519 public key versus 65 bytes for an uncompressed P-256 key.
+
+The one catch: X25519 is newer in WebCrypto. As of Chromium 133 and Firefox 130, it's fully supported. Safari added support in 17.4. If you need to support older browsers, fall back to P-256 with a capability check.
+
+```javascript
+async function generateKeyPair(algorithm = "X25519") {
+  return crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: algorithm },
+    false, // non-extractable private key
+    ["deriveKey", "deriveBits"]
+  );
+}
+```
+
+Setting `extractable: false` is critical. It means the private key bytes can never be read back — only used for derivation operations.
+
+## Deriving a Symmetric Key with HKDF
+
+After computing the shared secret via ECDH, you have raw bits, not an AES key. HKDF (HMAC-based Key Derivation Function, RFC 5869) turns those bits into one or more purpose-specific keys with a two-step process:
+
+1. **Extract:** Feed the raw shared secret and a salt into HMAC-SHA-256. This produces a pseudorandom key (PRK) with well-distributed entropy.
+2. **Expand:** Derive the actual key material from the PRK, bound to an `info` string that identifies its purpose (e.g., `"encryption"` vs. `"authentication"`).
+
+The `info` parameter is important — it domain-separates different derived keys. If you derive both an encryption key and an authentication key from the same shared secret, using different `info` values ensures they're cryptographically independent.
+
+```javascript
+async function deriveSharedKey(localPrivateKey, remotePublicKey) {
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: remotePublicKey },
+    localPrivateKey,
+    256
+  );
+
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw", sharedBits, "HKDF", false, ["deriveKey"]
+  );
+
+  const salt = crypto.getRandomValues(new Uint8Array(32));
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt,
+      info: new TextEncoder().encode("bitatlas-channel-v1-encryption"),
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+Store the salt alongside the ciphertext — it's not a secret, but the receiver needs it to derive the same key.
+
+## Perfect Forward Secrecy: Per-Session Ephemeral Keys
+
+Static long-term keys have one big flaw: if an attacker records encrypted traffic and later compromises the private key, they can decrypt everything retroactively. Perfect forward secrecy (PFS) prevents this by using ephemeral keypairs — one per session or one per message.
+
+The pattern:
+
+1. Both parties have long-term identity keypairs (used for authentication only).
+2. At the start of each session, each party generates a fresh ephemeral keypair.
+3. The ephemeral keypairs are used for ECDH key agreement.
+4. After the session ends, the ephemeral private keys are destroyed (or simply go out of scope in the browser).
+
+Because the session keys are derived from ephemeral private keys that no longer exist, recorded traffic cannot be decrypted even if the long-term identity keys are later compromised. Signal's Double Ratchet takes this further by ratcheting the key material forward with every message, so compromising one message key doesn't reveal adjacent ones.
+
+For browser applications, ephemeral key generation is fast (under a millisecond for X25519), so there's little reason not to do it per-session.
+
+## Authenticating the Key Exchange
+
+Unauthenticated ECDH is vulnerable to a man-in-the-middle attack. Mallory intercepts Alice's public key, swaps it for their own, and presents a different fake key to Bob. Both Alice and Bob think they've negotiated with each other, but they've each negotiated with Mallory.
+
+Prevention requires binding the key exchange to an authenticated identity. Practical approaches:
+
+- **Long-term signing keys.** Each party signs their ephemeral public key with a long-term Ed25519 key (the identity key). The receiver verifies the signature before using the public key in ECDH.
+- **Trust-on-first-use (TOFU) with key fingerprints.** The first time two parties communicate, they record each other's public key. Future sessions verify that the key hasn't changed. Out-of-band verification (e.g., comparing fingerprints via a phone call) closes the remaining gap.
+- **Centralized key server with audit logs.** A server distributes public keys; clients log every key fetch with cryptographic commitments so key substitution is detectable.
+
+For a BitAtlas-powered application, the storage layer keeps an immutable, cryptographically chained log of every key publication. This means unauthorized key substitutions leave a verifiable trace — you get authentication properties without requiring everyone to compare fingerprints out of band.
+
+## Putting It Together: A Minimal Encrypted Channel
+
+A complete session looks like this:
+
+1. Alice fetches Bob's long-term public key (verified against the immutable key log).
+2. Alice generates an ephemeral keypair; signs the ephemeral public key with her long-term key.
+3. Alice sends Bob the ephemeral public key and signature.
+4. Bob verifies the signature, generates his own ephemeral keypair, signs it, and sends it back.
+5. Both sides run ECDH between the ephemeral keys and derive an AES-GCM key via HKDF.
+6. Messages are encrypted with AES-GCM, each with a unique nonce.
+7. At session end, ephemeral private keys are garbage-collected.
+
+All of this happens inside the browser. The server sees ciphertext and ephemeral public keys. It has nothing useful for decryption.
+
+## Common Mistakes to Avoid
+
+- **Reusing nonces.** AES-GCM is catastrophically broken if two messages share a nonce under the same key. Use `crypto.getRandomValues` for 96-bit nonces, or a counter tracked per-session.
+- **Skipping HKDF and using the raw shared secret as a key.** The raw ECDH output is not uniformly distributed. HKDF normalizes it and lets you derive multiple independent keys.
+- **Non-ephemeral keys for session encryption.** Long-term keys used for encryption (not just authentication) eliminate forward secrecy.
+- **Extractable private keys.** If you set `extractable: true`, you can serialize the private key — and so can an attacker who finds an XSS vector. Use `extractable: false` and persist via `IndexedDB` using the `IDBKeyRange` opaque key storage pattern.
+
+## What's Next
+
+Key agreement is the foundation. Once you have a shared key, the rest of the encrypted channel is standard AES-GCM with integrity checking baked in. The harder engineering problems are key storage, rotation, and recovery — how do you let a user log in from a new device without the server ever learning their private key? That's the subject of a future post on client-side key backup and the tradeoffs between passphrase-derived keys, device-bound keys, and social recovery schemes.
+
+For applications that need immutable audit trails for key publication events, BitAtlas provides an encrypted storage layer with cryptographic chaining — so even key server operators can't silently swap public keys without detection.
