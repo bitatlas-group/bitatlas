@@ -1,0 +1,141 @@
+---
+title: "EU Data Localisation: Technical Controls That Actually Satisfy Regulators"
+description: "A developer's guide to enforcing EU data residency with region-locked object storage, encryption key geography, and audit trails that hold up to regulatory scrutiny."
+date: "2026-08-15"
+author: "BitAtlas Team"
+slug: "eu-data-localisation-technical-controls"
+keywords:
+  - EU data localisation
+  - data residency
+  - GDPR
+  - technical controls
+  - geo-fencing
+  - Schrems II
+readingTime: "8 min read"
+---
+
+Declaring "our data stays in the EU" in a privacy policy is easy. Proving it to a data protection authority is another matter entirely. After Schrems II invalidated Privacy Shield and tightened the screws on Standard Contractual Clauses, EU data localisation moved from a compliance checkbox to a genuine engineering problem. Regulators increasingly expect organisations to demonstrate *technical* controls, not just policy commitments.
+
+This guide covers the concrete controls your team needs to implement — from region-locked object storage and encryption key geography to audit logs that survive regulatory inspection.
+
+## Why Policy Alone Is Not Enough
+
+Schrems II (C-311/18) established a precedent that legal paperwork cannot fix a technical deficiency. If a US-headquartered cloud provider can be compelled by the CLOUD Act to hand over EU data — and your encryption keys live in Virginia — your contractual promises are worthless. The Court of Justice of the EU was blunt: supplementary technical measures must make the data "practically inaccessible" to unauthorised access, including by the processor itself.
+
+Data protection authorities (DPAs) across Germany, France, and the Netherlands have since issued guidance echoing this: show us the controls, not just the contracts.
+
+## Control 1: Region-Locked Object Storage
+
+The starting point is straightforward: restrict your object storage to EU regions at the infrastructure level, not the application level.
+
+**What this looks like in practice:**
+
+For AWS S3, the key is combining bucket policies with an SCPs (Service Control Policy) at the organisation level:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyNonEURegions",
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": [
+            "eu-west-1",
+            "eu-west-2",
+            "eu-west-3",
+            "eu-central-1",
+            "eu-north-1",
+            "eu-south-1"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+This SCP ensures that even if a developer or automated process attempts to create a bucket in `us-east-1`, the API call is rejected at the organisation level before it reaches IAM. Application-layer checks can be bypassed; SCPs cannot — they are enforced by AWS Control Tower regardless of role permissions.
+
+For Azure, the equivalent is Azure Policy with `deny` effect on resources outside allowed EU regions. For GCP, use Organisation Policies with `constraints/gcp.resourceLocations`.
+
+**The cross-region replication trap:** S3's automatic cross-region replication, CloudFront caching, and multi-region access points can silently move data outside the EU. Audit your bucket configurations — look specifically for `ReplicationConfiguration` elements and any CloudFront distribution pointing to EU-origin buckets with edge caches in US PoPs. If you need CDN performance, use EU-only edge locations or accept the latency.
+
+## Control 2: Encryption Key Geography
+
+Region-locked storage protects you from accidental data egress. Encryption key geography protects you from compelled disclosure.
+
+The threat model: if your KMS (Key Management Service) keys are managed by a US-headquartered provider in any region, that provider may be compelled to produce keys under US law. Hosting keys in Frankfurt does not resolve this if the legal entity controlling them is incorporated in Delaware.
+
+**The solution hierarchy, from weakest to strongest:**
+
+1. **Provider-managed EU-region KMS** — keys hosted in EU, but the provider controls the HSMs. Better than nothing, but vulnerable to provider-level legal compulsion.
+
+2. **Customer-managed keys (CMK) in EU KMS** — you generate and control the key material. The provider never sees the plaintext key. Your IAM policies govern all key usage, and you can revoke at any time.
+
+3. **External Key Manager (EKM/HYOK)** — keys never enter the cloud provider's infrastructure at all. AWS XKS (External Key Store), Google Cloud EKM, and Azure HYOK (Hold Your Own Key) all support this model. The cloud provider sends a cryptographic request to your key manager (running on your infrastructure, in an EU jurisdiction) for every encryption/decryption operation.
+
+4. **Client-side encryption with EU-resident key servers** — data is encrypted by your application before it reaches the storage layer. The provider sees only ciphertext. This is the architecture BitAtlas uses: zero-knowledge by design.
+
+For most organisations, option 3 hits the right balance of security and operational complexity. EKM does add latency (every S3 `GetObject` involves a round-trip to your key server), but for regulated workloads the audit log this creates is itself a compliance asset.
+
+**Key residency declaration:** When you implement CMK or EKM, document the key's physical HSM location and the legal jurisdiction of the entity controlling it. This documentation is what you hand to a DPA. "We use KMS" is not an answer; "keys are held in HSMs in Frankfurt under German jurisdiction, controlled by EU-entity X, with access logs retained for 24 months" is.
+
+## Control 3: Data Transfer Controls
+
+Even with region-locked storage and EU-resident keys, data can leak through application code — API responses cached by third-party services, logging pipelines that ship to US SIEMs, telemetry libraries phoning home to US endpoints.
+
+**An effective audit starts with egress logging:**
+
+```bash
+# In a VPC, enable VPC Flow Logs and filter for unexpected non-EU destinations
+# EU IP ranges are well-documented; anything outside them warrants review
+aws ec2 create-flow-logs \
+  --resource-type VPC \
+  --resource-ids vpc-xxxx \
+  --traffic-type ALL \
+  --log-destination-type cloud-watch-logs \
+  --log-group-name /vpc/flow-logs/eu-west-1
+```
+
+Parse the flow logs weekly for connections to non-EU IP ranges. Surprises are common: analytics SDKs, error trackers, payment processors, and even npm packages have phoned home to US endpoints from production systems.
+
+**For outbound HTTP from application code**, route traffic through a proxy with an allowlist of EU-jurisdiction endpoints. Squid, HAProxy, or a service mesh sidecar all work. The proxy logs every external connection; those logs become part of your compliance evidence.
+
+## Control 4: Audit Trails That Survive Inspection
+
+A DPA audit will ask for evidence that your controls actually worked — not just that you had them configured. This means tamper-evident logs with reliable timestamps, retained for a defined period, accessible without relying on the same infrastructure that might be subject to an order.
+
+**Minimum viable audit log for data localisation:**
+
+- Every S3 `GetObject`, `PutObject`, `DeleteObject` with the requesting principal's IAM ARN and source IP
+- Every KMS `Decrypt` and `GenerateDataKey` operation
+- Every IAM policy change affecting data-access roles
+- Every failed access attempt (these matter most in a breach investigation)
+
+AWS CloudTrail covers most of this out of the box. The critical configuration detail: enable **CloudTrail Insights** to detect unusual API call volumes, and ship logs to an S3 bucket with **Object Lock in Compliance Mode** — this makes the logs legally immutable. Even an account administrator cannot delete them during the retention period.
+
+Store a copy of audit logs with a separate EU-jurisdiction backup provider under your own encryption keys. If your primary cloud account is ever subject to a legal hold, you need access to logs from outside that account's blast radius.
+
+## Putting It Together: A Compliance Evidence Pack
+
+When a DPA sends a questionnaire, you want to hand them a concise evidence pack, not a wall of screenshots. Structure it as:
+
+1. **Architecture diagram** — showing data flows, storage regions, and key locations with explicit jurisdiction labels
+2. **Configuration exports** — SCPs, bucket policies, KMS key policies, and IAM role definitions as JSON
+3. **Audit log samples** — 30-day excerpts from CloudTrail and KMS showing EU-only access patterns
+4. **Incident log** — any detected policy violations and how they were remediated
+5. **Vendor jurisdiction matrix** — every third-party service that touches personal data, their registered jurisdiction, and the transfer mechanism in use (SCCs, adequacy decision, or Article 49 derogation)
+
+This pack should be version-controlled, ideally in a private Git repository with signed commits, so you can demonstrate the history of your compliance posture over time.
+
+## The Zero-Knowledge Shortcut
+
+If this feels like a significant engineering investment — it is. The honest alternative is to use a storage layer that is zero-knowledge by architecture, so the question of key geography becomes moot: no one holds your keys but you.
+
+BitAtlas encrypts every file client-side before upload. Keys never leave your browser or your application code. We host exclusively in EU jurisdictions. Schrems II compliance is architectural, not procedural. For teams that need to move quickly without building a dedicated compliance stack, this is often the pragmatic path.
+
+For teams building their own infrastructure, the controls above are non-negotiable. The Schrems II era has made one thing clear: EU data localisation is an engineering problem, and it requires engineering solutions.
