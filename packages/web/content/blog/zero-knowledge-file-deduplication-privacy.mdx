@@ -1,0 +1,145 @@
+---
+title: "Zero-Knowledge File Deduplication: Privacy Without Sacrificing Storage Efficiency"
+description: "How convergent encryption enables cross-user deduplication without the server learning file content — and why naive implementations leak through timing and size channels."
+date: "2026-08-16"
+author: "BitAtlas Team"
+slug: "zero-knowledge-file-deduplication-privacy"
+keywords: ["zero-knowledge", "file deduplication", "convergent encryption", "hash", "storage efficiency", "privacy"]
+readingTime: "7 min"
+---
+
+File deduplication is a storage provider's best friend. When a thousand users upload the same 4K movie, a smart system stores it once and maps everyone to the same blocks — a 1000x reduction in storage cost. The problem: every classical approach to deduplication requires the server to see the file, or at least its hash, before deciding whether a copy already exists. That fundamentally conflicts with zero-knowledge encryption, where the server should learn nothing about your data.
+
+Convergent encryption is the cryptographic bridge between these two requirements. It lets a storage system deduplicate across millions of users while guaranteeing the server never holds a decryption key and cannot read the content. But the naive implementation leaks more than you might think, and building it correctly requires understanding several subtleties that bite production systems.
+
+## The Core Idea: Derive the Key from the Content
+
+In traditional encryption, you choose a key (from a password, a master key, or a random source), encrypt the file, and store the ciphertext. Different users encrypting the same file get different ciphertexts because their keys differ — deduplication is impossible.
+
+Convergent encryption flips this. The encryption key is derived deterministically from the file content itself:
+
+```
+key = H(plaintext)          # a cryptographic hash of the file
+ciphertext = Encrypt(key, plaintext)
+stored_pointer = H(ciphertext)   # the content address
+```
+
+Two users with the same plaintext independently produce the same key, the same ciphertext, and the same content address. The server stores the ciphertext once, and both users receive the same pointer. Neither user's key is ever transmitted to the server.
+
+The server holds ciphertext it cannot decrypt (it has no key), yet storage deduplication works perfectly across millions of users.
+
+## The Lookup Protocol
+
+A full deduplication protocol adds one more layer. Before uploading, the client sends a convergence tag — typically `H(ciphertext)` — to the server. The server replies with one of two things:
+
+1. **Pointer exists** — the server already holds that ciphertext. The client receives the content address and skips the upload entirely.
+2. **Pointer missing** — the client uploads the ciphertext. The server stores it and returns the address.
+
+The lookup is blind in the sense that the server learns the content address but not the plaintext. Users who hold the same file see the same address; users who hold different files see different addresses. This is the privacy model you get out of the box.
+
+## Why "Out of the Box" Isn't Good Enough
+
+Three categories of information still leak even with a correctly implemented protocol:
+
+### 1. Confirmation-of-File Attacks
+
+The content address is a deterministic function of the plaintext. An adversary who suspects you possess a specific file (say, a confidential document or a known piece of malware) can compute the expected content address client-side and query the server:
+
+```
+suspected_file → H(Encrypt(H(suspected_file), suspected_file)) → query server
+```
+
+If the server confirms the address exists, the adversary learns you have that file — without ever decrypting anything. This is a known-plaintext confirmation attack, and it's a genuine threat for sensitive content.
+
+**Mitigation:** Add a user-specific secret to the key derivation — for example, `key = H(plaintext || user_secret)` — breaking the universal convergence. This prevents cross-user deduplication but preserves per-user deduplication (the same user uploading the same file twice still gets a match). Whether you want cross-user deduplication at all depends on your threat model.
+
+Alternatively, use a server-controlled convergence secret: `key = PRF(server_secret, H(plaintext))`. This prevents client-side attacks but requires trusting the server with the convergence secret — weakening the zero-knowledge property in a specific way.
+
+### 2. Size and Timing Channels
+
+The upload path leaks information even before encryption. When a client queries the server about a content address:
+
+- If the server replies instantly with "exists," an attacker observing network timing learns the file was already present.
+- The size of the upload itself reveals the plaintext size, unless padding is applied.
+
+For many use cases this is acceptable. For high-sensitivity content — legal documents, source code, configuration files — file sizes are fingerprints. A configuration file that is exactly 14,832 bytes might be uniquely identifiable across your entire user base.
+
+**Mitigation:** Pad all files to power-of-two block sizes before encryption. Accept the storage overhead (up to 2x in the worst case). For the timing channel, a constant-time response from the server regardless of cache hit or miss reduces leakage.
+
+### 3. Probabilistic Frequency Analysis
+
+If an attacker has read access to server-side content addresses over time, they can build a frequency table. High-frequency addresses correspond to common files — OS binaries, popular documents, publicly known assets. Low-frequency addresses are candidates for unique files. Combined with side-channel knowledge (upload timestamps, user account metadata), this enables probabilistic reconstruction of file ownership patterns without ever breaking the encryption.
+
+This attack is realistic for large-scale cloud providers and is one reason some high-security systems forego cross-user deduplication entirely.
+
+## A More Complete Implementation
+
+Here is a Python sketch of the convergent encryption flow with a user-specific salt:
+
+```python
+import os
+import hashlib
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+def derive_key(plaintext: bytes, user_secret: bytes) -> bytes:
+    # BLAKE2b for speed; SHA-3 is an equally valid choice
+    h = hashlib.blake2b(plaintext + user_secret, digest_size=32)
+    return h.digest()
+
+def encrypt_convergent(plaintext: bytes, user_secret: bytes) -> tuple[bytes, bytes]:
+    key = derive_key(plaintext, user_secret)
+    # Nonce: deterministic from key to preserve convergence
+    nonce = hashlib.blake2b(key, digest_size=12).digest()
+    ct = AESGCM(key).encrypt(nonce, plaintext, None)
+    content_address = hashlib.blake2b(ct, digest_size=32).digest()
+    return ct, content_address
+
+def decrypt_convergent(ciphertext: bytes, user_secret: bytes) -> bytes:
+    key = derive_key_from_ciphertext(ciphertext, user_secret)  # requires stored key or re-derivation
+    nonce = hashlib.blake2b(key, digest_size=12).digest()
+    return AESGCM(key).decrypt(nonce, ciphertext, None)
+```
+
+Notice the nonce is also derived deterministically. Random nonces break convergence — two encryptions of the same file with the same key but different nonces produce different ciphertexts. For AES-GCM, deterministic nonces are generally safe as long as `(key, nonce)` pairs are never reused for different plaintexts, which is guaranteed here by construction.
+
+## What Gets Stored Where
+
+A practical content-addressed storage system using convergent encryption typically tracks three things per user:
+
+| Object | Stored By | Contents |
+|--------|-----------|----------|
+| Ciphertext | Server | Encrypted file data (server-opaque) |
+| Content address | Server | `H(ciphertext)` — deduplication pointer |
+| Key | Client | `H(plaintext \|\| user_secret)` — never uploaded |
+
+The key is the critical piece that lives only on the client. Losing it means losing access to the file, even if the ciphertext is perfectly intact on the server. This tradeoff — data durability requires key durability — is a defining characteristic of zero-knowledge architectures.
+
+BitAtlas handles this by encrypting the key index itself under a master key derived from the user's passphrase and storing that encrypted index in the user's vault. The server holds an encrypted blob it cannot read; the user's passphrase unlocks the index at session start.
+
+## When Cross-User Deduplication Is Worth It
+
+The decision tree is roughly:
+
+- **Public or known files** (OS packages, open-source software, public datasets): cross-user deduplication is safe and the storage savings are large. Confirmation attacks are not a concern for publicly known content.
+- **Likely-shared but sensitive files** (common contract templates, standard operating procedures): consider per-user deduplication only, accepting higher storage cost.
+- **Unique and sensitive files** (personal documents, cryptographic keys, source code): skip deduplication entirely. The storage savings are near zero for unique files anyway, and the leakage risks outweigh them.
+
+If your system handles a mix, segment by file type or size tier and apply different policies to each tier.
+
+## The MCP Layer
+
+For developers building agents that manage file storage via MCP, convergent encryption can be implemented transparently inside the MCP server. The agent sends a file write request; the server derives the key, checks for deduplication, and returns a content address. The agent never handles keys directly — the MCP layer abstracts them.
+
+This pattern isolates cryptographic responsibility in one place rather than distributing key management logic across every agent that touches storage. It also means you can update your deduplication strategy (swap from cross-user to per-user, adjust padding policy) without touching agent code.
+
+## Summary
+
+Convergent encryption solves a real problem: making zero-knowledge encryption compatible with storage deduplication. The key insights are:
+
+1. Derive the encryption key from the file content, not from a separate secret, so identical files produce identical ciphertexts.
+2. Use a content address (hash of the ciphertext) as the deduplication key the server stores.
+3. Add a user-specific secret to the key derivation to block confirmation-of-file attacks if you are handling sensitive content.
+4. Pad to block sizes to prevent size-channel leakage.
+5. Know when cross-user deduplication is appropriate and when per-user or no deduplication is the right call.
+
+The naive implementation is surprisingly close to correct — the gap is mostly about understanding which information channels remain open and explicitly closing the ones that matter for your threat model.
