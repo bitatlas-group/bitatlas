@@ -1,0 +1,189 @@
+---
+title: "MCP Server Multi-Tenant Isolation: Namespace Scoping, Key Derivation, and Row-Level Policies"
+description: "How to safely run a single MCP server for multiple tenants using namespace scoping, per-tenant key derivation, and row-level policy enforcement."
+date: "2026-08-17"
+author: "BitAtlas Team"
+slug: "mcp-server-multi-tenant-isolation"
+keywords: ["MCP server", "multi-tenant", "isolation", "namespace", "access control", "agent orchestration"]
+readingTime: "7 min read"
+---
+
+Running a Model Context Protocol (MCP) server is straightforward when you have one agent talking to one backend. The hard part starts when you want that same server to serve dozens — or thousands — of tenants without letting any of them see each other's data, exhaust shared resources, or escalate their own privileges.
+
+This post walks through the three layers that actually matter for multi-tenant MCP isolation: namespace scoping at the tool layer, per-tenant key derivation at the crypto layer, and row-level policy enforcement at the storage layer. Each layer is independently useful, but you need all three if you want real isolation.
+
+## Why Multi-Tenancy in MCP Is Tricky
+
+MCP servers expose tools — functions an AI agent can call — over a stateful connection. The server typically holds long-lived sessions, maintains context about what the agent has done, and talks to one or more backing stores. In a single-tenant world, you trust the caller and the backing store is theirs. In a multi-tenant world, you have to assume that:
+
+- Two tenants could be on the same MCP connection pool.
+- A compromised agent prompt could try to reference another tenant's resource IDs.
+- A noisy tenant can hammer your rate limiter and degrade neighbors.
+- A leaked internal tool parameter could reveal cross-tenant metadata.
+
+Standard authentication middleware catches some of this, but not all. You need tenant identity threaded through every tool call, every query, and every encryption operation.
+
+## Layer 1: Namespace Scoping at the Tool Layer
+
+Every tool your MCP server exposes should accept — or, better, *inject* — a tenant namespace. The canonical pattern is to derive the namespace from the authenticated session rather than accept it as a caller-supplied argument.
+
+```typescript
+// middleware: attach tenant context before tool dispatch
+async function tenantMiddleware(
+  session: MCPSession,
+  toolCall: ToolCall,
+  next: Handler
+): Promise<ToolResult> {
+  const tenantId = await resolveTenant(session.authToken);
+  if (!tenantId) throw new AuthError("No tenant resolved from session token");
+
+  // Inject — don't trust the caller's namespace claim
+  const scopedCall = {
+    ...toolCall,
+    params: { ...toolCall.params, _tenantId: tenantId },
+  };
+  return next(scopedCall);
+}
+```
+
+The key insight is that `_tenantId` should never be something the agent supplies — it comes from the session credential. If an agent prompt is injected with `_tenantId: "other-org"`, your middleware ignores that and replaces it with the verified value.
+
+Within your tool implementations, every resource identifier should be prefixed or scoped:
+
+```typescript
+async function getFile(params: GetFileParams, ctx: TenantContext) {
+  // Prefix the user-supplied ID with the tenant namespace
+  const storageKey = `${ctx.tenantId}/${params.fileId}`;
+  return storage.get(storageKey);
+}
+```
+
+This is cheap, but it prevents an agent from retrieving `../../other-org/secret.txt` by manipulating a relative path.
+
+## Layer 2: Per-Tenant Key Derivation
+
+Namespace scoping keeps tenants from *reading* each other's data, but it does nothing if the backing storage is breached at the infrastructure level. That's where per-tenant encryption keys come in.
+
+The recommended approach is hierarchical key derivation using a root key (stored in a hardware security module or KMS) and a tenant-specific derived key:
+
+```typescript
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha256";
+
+async function deriveTenantKey(
+  rootKey: Uint8Array,
+  tenantId: string
+): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(`tenant:${tenantId}`);
+  const derived = hkdf(sha256, rootKey, /* salt= */ new Uint8Array(32), info, 32);
+
+  return crypto.subtle.importKey("raw", derived, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+```
+
+Each tenant gets a unique AES-GCM key derived from the same root without storing 10,000 separate secrets. You can rotate the root key (re-deriving all tenant keys) or revoke a single tenant by deleting their derived key from cache without touching the root.
+
+For MCP tool calls that read or write sensitive data, wrap every storage operation:
+
+```typescript
+async function writeEncrypted(
+  tenantId: string,
+  key: string,
+  value: Uint8Array
+): Promise<void> {
+  const tenantKey = await deriveTenantKey(rootKey, tenantId);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    tenantKey,
+    value
+  );
+  await rawStorage.put(key, { iv, ciphertext });
+}
+```
+
+This means even if two tenants share a database table, their rows are encrypted under different keys. A SQL injection that dumps the table gets ciphertext blobs, not plaintext.
+
+## Layer 3: Row-Level Policy Enforcement
+
+The third layer operates at query time. Even with namespace prefixes and per-tenant encryption, you need the database itself to enforce ownership — so a bug in your application code can't accidentally return a different tenant's rows.
+
+Most modern databases support row-level security (RLS). In PostgreSQL:
+
+```sql
+-- Enable RLS on the agent_state table
+ALTER TABLE agent_state ENABLE ROW LEVEL SECURITY;
+
+-- Policy: a session can only touch its own tenant's rows
+CREATE POLICY tenant_isolation ON agent_state
+  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+```
+
+At connection time, your MCP server sets the tenant context before executing any query:
+
+```typescript
+async function withTenantContext<T>(
+  db: Pool,
+  tenantId: string,
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await db.connect();
+  try {
+    await client.query("SET LOCAL app.tenant_id = $1", [tenantId]);
+    return await fn(client);
+  } finally {
+    client.release();
+  }
+}
+```
+
+With this in place, a rogue query that forgets its WHERE clause still only returns the current tenant's rows. RLS is enforced in the database engine, below your application code, so it survives code bugs, ORM quirks, and raw query shortcuts.
+
+## Putting It Together: The Isolation Stack
+
+Here's what a complete, isolated tool dispatch looks like across all three layers:
+
+```
+Incoming tool call
+  │
+  ▼
+[Auth middleware] — verifies token, resolves tenantId
+  │
+  ▼
+[Namespace middleware] — prefixes all resource IDs with tenantId
+  │
+  ▼
+[Tool handler]
+  │  ├─ derives tenant encryption key (HKDF from root)
+  │  ├─ encrypts/decrypts payload with tenant key
+  │  └─ calls DB inside withTenantContext (RLS active)
+  │
+  ▼
+Result returned to agent
+```
+
+No single layer is sufficient on its own:
+- Namespace scoping fails if an agent can forge its identity.
+- Per-tenant encryption fails if you accidentally swap key derivation inputs.
+- RLS fails if someone connects to the database directly with a super-user role.
+
+All three together give you defense in depth: a bypass at one layer doesn't automatically compromise data at the next.
+
+## Operational Considerations
+
+**Tenant onboarding** should be atomic. Create the database tenant record, initialize the namespace prefix, and register the tenant in your KMS in a single transaction so you never end up with a half-initialized tenant.
+
+**Key caching** matters for performance. Deriving a key via HKDF is fast (microseconds), but importing it into the WebCrypto API is not. Cache derived `CryptoKey` objects per tenant per process lifetime, keyed by tenant ID and root-key version.
+
+**Audit logs** should include `tenantId` on every write. When something goes wrong — and it will — you need a trail that shows which tenant touched which resource at which time without exposing cross-tenant metadata in the log query.
+
+**Rate limiting** should operate per-tenant, not per-server. A single slow tenant should not be able to starve your connection pool. Apply limits at the MCP session layer before the tool handler runs, using a tenant-scoped token bucket.
+
+## Conclusion
+
+Multi-tenant MCP servers are achievable without heroic infrastructure. The pattern is three layers: inject tenant identity from credentials (not from the agent), derive per-tenant encryption keys from a root secret, and enforce row-level policies in the database. Each layer is independently understandable and testable, and together they give you isolation that holds even when one layer has a bug.
+
+If you're building an agent platform on top of BitAtlas, these patterns compose naturally with zero-knowledge storage — your derived tenant keys never leave the client, so even the server can't read tenant data at rest.
