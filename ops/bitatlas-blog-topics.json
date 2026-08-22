@@ -970,6 +970,116 @@
         "multi-agent"
       ],
       "brief": "Building encrypted communication channels between AI agents in a multi-agent system \u2014 from transport-level TLS to application-layer message encryption with authenticated identities."
+    },
+    {
+      "slug": "wasm-crypto-browser-performance-2026",
+      "keywords": [
+        "WebAssembly",
+        "WASM",
+        "client-side crypto",
+        "browser performance",
+        "encryption benchmarks"
+      ],
+      "brief": "Benchmarking WebAssembly-based cryptography libraries for high-throughput client-side encryption in the browser \u2014 comparing noble-crypto, libsodium.js, and native Web Crypto API."
+    },
+    {
+      "slug": "agent-filesystem-access-least-privilege-design",
+      "keywords": [
+        "agent file access",
+        "least privilege",
+        "sandboxed filesystem",
+        "capability security",
+        "scoped permissions"
+      ],
+      "brief": "Designing AI agent filesystem access with strict least-privilege principles \u2014 scoped read/write paths, per-agent capability tokens, and revocation without service restart."
+    },
+    {
+      "slug": "zero-knowledge-document-sharing-encrypted",
+      "keywords": [
+        "zero-knowledge",
+        "document sharing",
+        "E2EE collaboration",
+        "encrypted links",
+        "client-side"
+      ],
+      "brief": "Building zero-knowledge document sharing where the server facilitates access without ever seeing plaintext \u2014 key wrapping, share-link design, and access revocation."
+    },
+    {
+      "slug": "mcp-server-semantic-cache-llm-responses",
+      "keywords": [
+        "MCP server",
+        "semantic caching",
+        "LLM responses",
+        "latency",
+        "cost optimization"
+      ],
+      "brief": "Implementing semantic caching in MCP servers to deduplicate near-identical LLM requests \u2014 embedding-based similarity, TTL policies, and cache invalidation strategies."
+    },
+    {
+      "slug": "eu-nis2-directive-technical-controls-2026",
+      "keywords": [
+        "NIS2 directive",
+        "EU cybersecurity",
+        "technical controls",
+        "incident response",
+        "supply chain security"
+      ],
+      "brief": "Technical controls required under the EU NIS2 Directive for operators of essential services \u2014 risk assessment, incident reporting timelines, and supply chain security obligations."
+    },
+    {
+      "slug": "agent-encrypted-scratchpad-working-memory",
+      "keywords": [
+        "agent scratchpad",
+        "working memory",
+        "encrypted",
+        "session isolation",
+        "privacy"
+      ],
+      "brief": "Giving AI agents an encrypted scratchpad for intermediate reasoning \u2014 session-scoped keys, automatic expiry, and preventing cross-task data leakage."
+    },
+    {
+      "slug": "client-side-encryption-nodejs-typescript-guide",
+      "keywords": [
+        "Node.js",
+        "TypeScript",
+        "client-side encryption",
+        "crypto module",
+        "AES-GCM"
+      ],
+      "brief": "A practical guide to client-side encryption in Node.js and TypeScript \u2014 using the built-in `crypto` module, AES-256-GCM, and safe IV generation patterns."
+    },
+    {
+      "slug": "agent-permission-delegation-chain-of-trust",
+      "keywords": [
+        "agent permissions",
+        "delegation",
+        "chain of trust",
+        "capability tokens",
+        "authorization"
+      ],
+      "brief": "Building verifiable permission delegation chains for multi-agent systems \u2014 how a root agent grants bounded sub-permissions to child agents without exposing master credentials."
+    },
+    {
+      "slug": "encrypted-agent-file-chunking-large-uploads",
+      "keywords": [
+        "file chunking",
+        "large file upload",
+        "agent storage",
+        "streaming encryption",
+        "resumable uploads"
+      ],
+      "brief": "Chunked upload strategies for large files in agent workflows \u2014 streaming AES-GCM encryption, chunk-level integrity checks, and resumable upload protocols."
+    },
+    {
+      "slug": "eu-digital-operational-resilience-dora-agents",
+      "keywords": [
+        "DORA",
+        "Digital Operational Resilience Act",
+        "financial services",
+        "AI agents",
+        "resilience testing"
+      ],
+      "brief": "DORA compliance considerations for AI agent deployments in EU financial services \u2014 operational resilience testing, ICT risk management, and incident classification."
     }
   ]
 }
