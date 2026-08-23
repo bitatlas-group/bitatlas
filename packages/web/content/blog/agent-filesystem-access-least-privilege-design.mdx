@@ -1,0 +1,209 @@
+---
+title: "Agent Filesystem Access: Designing for Least Privilege"
+description: "How to design AI agent filesystem access with strict least-privilege principles — scoped read/write paths, per-agent capability tokens, and revocation without service restart."
+date: "2026-08-23"
+author: "BitAtlas Team"
+slug: "agent-filesystem-access-least-privilege-design"
+keywords: ["agent file access", "least privilege", "sandboxed filesystem", "capability security", "scoped permissions"]
+readingTime: "7 min read"
+---
+
+AI agents are increasingly given direct filesystem access — reading configs, writing outputs, caching intermediate results. But most implementations hand the agent a broad path and call it a day. The result: an agent that can read your `.env` file, overwrite production configs, or silently accumulate gigabytes of temp files.
+
+The alternative is capability-based filesystem access built on least-privilege principles. This post walks through the design patterns that make it work in practice.
+
+## Why Broad Filesystem Access Is a Problem
+
+When you give an agent `os.getcwd()` and let it roam, a few failure modes become likely:
+
+**Accidental exfiltration.** An agent summarizing a directory might include a `.git/config` with embedded credentials in its context window, which then gets logged or passed to an upstream model API.
+
+**Runaway writes.** Agents in loops — particularly code-generation or data-processing agents — can fill disks surprisingly fast if nothing bounds their write scope.
+
+**Cross-agent contamination.** In multi-agent systems, shared filesystem paths create implicit communication channels. Agent A reads what Agent B wrote, without either agent or the orchestrator intending that interaction.
+
+**Revocation nightmares.** If you discover an agent misbehaved, "fix it" often means restarting the service, which interrupts all agents — even the well-behaved ones.
+
+Least-privilege design addresses all four.
+
+## The Core Model: Scoped Capability Tokens
+
+Instead of passing a raw path to an agent, issue a capability token that encodes exactly what the agent is allowed to do:
+
+```typescript
+interface FilesystemCapability {
+  token: string;          // opaque, signed identifier
+  roots: ScopedRoot[];
+  expiresAt: number;      // unix ms
+  agentId: string;
+}
+
+interface ScopedRoot {
+  path: string;           // absolute, realpath-resolved
+  permissions: ('read' | 'write' | 'list' | 'delete')[];
+  maxBytes?: number;      // optional write quota
+}
+```
+
+The agent receives this token and passes it to a filesystem broker — a thin service (or library) that sits between the agent and the actual OS filesystem calls. The broker validates the token on every operation: is the requested path under an allowed root? Does the token grant the requested permission? Has the token expired?
+
+This is the same model as OAuth scopes applied to file operations.
+
+## Implementing the Broker
+
+A minimal broker in Node.js looks like this:
+
+```typescript
+import path from 'path';
+import fs from 'fs/promises';
+
+class FilesystemBroker {
+  private capabilities = new Map<string, FilesystemCapability>();
+
+  async readFile(token: string, filePath: string): Promise<Buffer> {
+    const cap = this.validateToken(token);
+    const resolved = path.resolve(filePath);
+    this.assertPermission(cap, resolved, 'read');
+    return fs.readFile(resolved);
+  }
+
+  async writeFile(token: string, filePath: string, data: Buffer): Promise<void> {
+    const cap = this.validateToken(token);
+    const resolved = path.resolve(filePath);
+    this.assertPermission(cap, resolved, 'write');
+    await this.checkQuota(cap, resolved, data.length);
+    return fs.writeFile(resolved, data);
+  }
+
+  private assertPermission(
+    cap: FilesystemCapability,
+    resolved: string,
+    perm: string
+  ): void {
+    const root = cap.roots.find(r =>
+      resolved.startsWith(r.path + path.sep) || resolved === r.path
+    );
+    if (!root || !root.permissions.includes(perm as any)) {
+      throw new Error(`Access denied: ${perm} on ${resolved}`);
+    }
+  }
+
+  private validateToken(token: string): FilesystemCapability {
+    const cap = this.capabilities.get(token);
+    if (!cap) throw new Error('Unknown token');
+    if (cap.expiresAt < Date.now()) throw new Error('Token expired');
+    return cap;
+  }
+}
+```
+
+Three things matter here:
+
+1. **`path.resolve` before any comparison.** Never compare raw paths — an agent can supply `../../etc/passwd` as a relative path. Always resolve to absolute before checking against roots.
+
+2. **Exact prefix matching with separator.** A root of `/data/agent1` must not match `/data/agent10`. The separator check (`r.path + path.sep`) prevents this prefix collision.
+
+3. **Quota enforcement at write time.** Track cumulative bytes written per capability token to enforce `maxBytes`. You can store this in memory for short-lived tokens, or in Redis for long-running agents.
+
+## Path Scoping in Practice
+
+When you provision an agent, assign it an isolated scratch directory and explicit read roots:
+
+```typescript
+function provisionAgent(agentId: string, jobId: string): FilesystemCapability {
+  const scratchDir = path.join('/var/agent-scratch', agentId, jobId);
+  fs.mkdirSync(scratchDir, { recursive: true });
+
+  return broker.issueToken({
+    agentId,
+    roots: [
+      {
+        path: scratchDir,
+        permissions: ['read', 'write', 'list', 'delete'],
+        maxBytes: 500 * 1024 * 1024, // 500 MB
+      },
+      {
+        path: '/etc/agent-configs/public',
+        permissions: ['read', 'list'],
+      },
+    ],
+    ttlMs: 3600_000, // 1 hour
+  });
+}
+```
+
+The agent gets `scratchDir` for outputs and a read-only config path. It cannot touch anything else — not `/tmp`, not the project root, not other agents' scratch directories.
+
+## Revocation Without Restart
+
+One of the biggest advantages of the token model is that revocation is instant and surgical. When you revoke a token, only that agent loses access — the service keeps running, other agents are unaffected.
+
+```typescript
+broker.revokeToken(suspiciousToken);
+```
+
+In the broker's `validateToken`, add a revocation check:
+
+```typescript
+private validateToken(token: string): FilesystemCapability {
+  if (this.revokedTokens.has(token)) throw new Error('Token revoked');
+  // ... rest of validation
+}
+```
+
+For distributed systems, push revocations to a shared store (Redis, etcd) so all broker instances see them immediately. The latency is bounded by your cache TTL — typically under a second.
+
+Compare this to the alternative: killing the agent process, hoping it didn't leave partial writes behind, restarting the service, and re-queuing whatever work was in flight.
+
+## Handling Symlinks and Mount Points
+
+Symlinks are the classic escape hatch. An agent might write a symlink inside its allowed root that points outside it, then read through the symlink in a subsequent call.
+
+Always resolve symlinks before the permission check:
+
+```typescript
+const resolved = await fs.realpath(filePath).catch(() => path.resolve(filePath));
+this.assertPermission(cap, resolved, 'read');
+```
+
+`realpath` follows all symlinks and returns the canonical path. If the symlink target is outside the allowed root, the permission check rejects it. If the file doesn't exist yet (a write), fall back to `path.resolve` on the directory component.
+
+Similarly, be careful with bind mounts. `/data/agent1` might be a bind mount of `/sensitive/production-data`. Resolve at provisioning time and verify the real path, not just the mount point path.
+
+## Integrating with MCP
+
+If your agents use the Model Context Protocol, filesystem capability tokens map naturally to MCP tool scoping. Instead of giving an MCP server unrestricted filesystem access, pass the broker as a dependency and require each tool call to include a capability token:
+
+```typescript
+server.tool('write_file', async ({ token, path: filePath, content }) => {
+  await broker.writeFile(token, filePath, Buffer.from(content));
+  return { success: true };
+});
+```
+
+The MCP server never calls `fs.writeFile` directly — all writes go through the broker. This means your MCP server's filesystem surface is exactly as large as the tokens you issue, and no larger.
+
+## What to Audit
+
+Once the broker is in place, you have a natural audit point. Log every operation with the agent ID, token, operation type, path, and result:
+
+```typescript
+logger.info({
+  event: 'fs_op',
+  agentId: cap.agentId,
+  op: 'read',
+  path: resolved,
+  tokenExpiry: cap.expiresAt,
+  success: true,
+});
+```
+
+This log stream is the ground truth for what your agents actually touched. Feed it to your observability stack and alert on operations outside expected paths — those indicate either a capability misconfiguration or an agent behaving unexpectedly.
+
+## The Right Default
+
+Least-privilege filesystem access isn't a feature you bolt on after something goes wrong. It's the right default for any system where agents have real filesystem access. The capability token model is straightforward to implement, integrates cleanly with MCP and audit logging, and gives you surgical revocation when you need it.
+
+The agents that do their jobs don't notice the difference. The ones that misbehave get stopped before they cause real damage.
+
+If you're building agent infrastructure and need encrypted, capability-scoped file storage — not just local filesystem access — [BitAtlas](https://bitatlas.com) is designed for exactly that pattern.
