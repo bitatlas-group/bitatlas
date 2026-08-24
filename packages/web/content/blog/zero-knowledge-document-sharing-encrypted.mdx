@@ -1,0 +1,70 @@
+---
+title: "Zero-Knowledge Document Sharing: Encrypted Links Without Server-Side Plaintext"
+description: "How to build zero-knowledge sharing where the server routes access to a document without ever seeing the key. Key wrapping, share-link design, and revocation for E2EE collaboration."
+date: 2026-08-24
+author: "BitAtlas Team"
+slug: "zero-knowledge-document-sharing-encrypted"
+keywords:
+  - zero-knowledge
+  - document sharing
+  - E2EE collaboration
+  - encrypted links
+  - client-side
+readingTime: "9 min"
+---
+
+Sharing a document over an end-to-end encrypted service looks trivial from the outside — you paste a link into chat, the other person opens it, and the file appears. Under the hood, it is the hardest problem in the product. The server has to route access without seeing plaintext, and yet it also has to enforce revocation, expiry, and audit — properties that normally assume the server holds the data. This post walks through the pieces that make that possible: per-file content keys, key wrapping, the anatomy of a share link, and how you revoke access when you never had the key to begin with.
+
+## The one rule: the server never sees the content key
+
+Every document in a zero-knowledge system has its own symmetric content key — typically a 256-bit key used with AES-GCM or XChaCha20-Poly1305. Ciphertext is stored on the server, the key is not. The whole design orbits that constraint.
+
+If you only ever needed to share with yourself, you would encrypt the content key once with a key derived from your password (or better, an account key that your password unlocks) and store the wrapped copy alongside the ciphertext. Sharing breaks that neat picture because the recipient does not have your account key. The fix is public-key cryptography: every account has a long-lived asymmetric keypair, the public half lives on the server, and the private half is itself wrapped under the account key so only the user can unlock it.
+
+To share a document with another user, the sender fetches the recipient's public key, wraps the file's content key to it, and uploads the wrapped copy as a new access grant. The server now stores two wrapped copies of the same content key — one for the owner, one for the recipient — and neither is readable by the server. Adding a third collaborator is another wrap, another row, no re-encryption of the ciphertext itself.
+
+## Share links: when the recipient is not an account
+
+Account-to-account sharing is the easy case. The hard case is the shareable link you paste into a chat, where the recipient has no account, no public key, and no prior relationship to your keyring.
+
+The trick is to split the URL. The path — say, `/s/abc123` — identifies the share on the server. The URL fragment — the part after `#` — carries the key. Browsers do not send fragments to servers, so the server can log the path, count hits, enforce rate limits, and hand back ciphertext, and still never learn the key that decrypts it. The link looks like this:
+
+```
+https://example.com/s/abc123#k=BASE64URL_KEY&v=1
+```
+
+When someone opens the link, your web client parses the fragment locally, downloads the ciphertext by `abc123`, and decrypts in the browser. The server sees a request for a share token and returns bytes; it does not see `k`.
+
+You still have choices to make. Do you want the raw content key in the fragment, or a wrapping key that unwraps a per-share copy stored on the server? The latter is almost always better. If the fragment carries the raw content key, you cannot revoke without re-encrypting the file. If the fragment carries a wrapping key, the server holds an `encrypted_content_key` row per share, and revocation is a `DELETE` on that row — the fragment becomes useless because there is nothing left to unwrap.
+
+## A minimal schema
+
+The data model that falls out is small:
+
+```sql
+documents         (id, owner_id, ciphertext_blob_ref, created_at)
+document_grants   (id, document_id, grantee_kind, grantee_ref,
+                   wrapped_content_key, wrap_algo, expires_at, revoked_at)
+```
+
+`grantee_kind` is one of `user`, `share_link`, or `group`. `grantee_ref` is either a user id, a random share token, or a group id. `wrapped_content_key` is the content key wrapped under the recipient's public key (for `user`), the link's wrapping key (for `share_link`), or a group key (for `group`).
+
+Group sharing is worth calling out because it is where most implementations quietly break their own zero-knowledge claim. If the server generates the group key, it can read every document ever shared to that group. The clean design is a client-side group key wrapped for each member's public key at membership time, with membership changes triggering a rewrap by an existing member — the server orchestrates, but never holds the key.
+
+## Access revocation you can actually enforce
+
+Revocation is the property that most surprises people who are new to zero-knowledge design. The intuition is that once someone has the key, you can never take it back. That is true — but it is also true of every system, encrypted or not. Anyone with read access can screenshot, copy-paste, or exfiltrate. What revocation buys you is future access: a revoked recipient cannot pull a newer version, cannot see edits, and cannot fetch the ciphertext at all.
+
+Concretely, revocation is a two-step operation. First, set `revoked_at` on the grant row so the server refuses to serve the ciphertext to that grantee. Second, if the threat model demands it, rotate the content key: generate a new key, re-encrypt the file, and rewrap for every surviving grantee. Rotation is expensive for large files, so most products only trigger it on explicit "rotate now" actions or after a certain number of removals.
+
+Share links get the same treatment plus a small optimization. Because the share is anchored to a random token, you can revoke by deleting the wrapped key row and leaving the token in a tombstone table for a while — that way a leaked link returns a clean "revoked" response instead of a generic 404 that leaks nothing but also tells you nothing.
+
+## What the server is allowed to know
+
+A useful gut check when designing any zero-knowledge feature: write down, in one paragraph, exactly what the server learns. For share links it is roughly: a document exists, someone created a share for it at time T, the share was opened N times from these IP ranges, and it was revoked at time R. Everything else — filename, size class, content type, thumbnails, previews — is either encrypted or leaked, and you should decide deliberately which is which.
+
+Two common leaks worth naming. Filenames are usually encrypted in the grant record, not in the URL, so a share link does not carry the name. Thumbnails, if you generate them, must be generated client-side and stored as ciphertext next to the file — a server-generated thumbnail is a plaintext copy of the content, and it is the single most common way products accidentally break their own model.
+
+## Why this is worth the complexity
+
+The payoff is that the server can be compromised — subpoena, breach, rogue insider — and the attacker gets ciphertext and metadata, not documents. For teams handling contracts, medical records, or anything else that would be a headline if it leaked, that is the difference between an incident report and a disclosure notice. The engineering cost is real, but the primitives — key wrapping, fragment-carried keys, per-grant rows — are small, composable, and well-understood. Build them once, and every sharing feature you add later gets the same guarantee for free.
