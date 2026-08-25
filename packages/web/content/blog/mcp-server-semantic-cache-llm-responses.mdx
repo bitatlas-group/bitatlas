@@ -1,0 +1,197 @@
+---
+title: "Semantic Caching in MCP Servers: Cut LLM Costs Without Sacrificing Quality"
+description: "How to implement embedding-based semantic caching in your MCP server to deduplicate near-identical LLM requests, reduce latency, and control costs — including TTL policies and safe cache invalidation strategies."
+date: "2026-08-25"
+author: "BitAtlas Team"
+slug: "mcp-server-semantic-cache-llm-responses"
+keywords: ["MCP server", "semantic caching", "LLM responses", "latency", "cost optimization"]
+readingTime: "7 min read"
+---
+
+If you've built anything on top of an LLM, you've noticed the same prompts showing up again and again. A user asks "How do I reset my password?" — 300 times a day, slightly rephrased each time. Every one of those trips costs tokens, adds latency, and burns money. Exact-match caching catches none of them because the phrasing varies. Semantic caching catches almost all of them.
+
+This post is a practical guide to bolting semantic caching onto a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, the emerging standard for giving LLMs structured access to tools and data. The same patterns apply to any LLM middleware layer.
+
+## Why Semantic, Not Exact-Match
+
+Exact-match caching hashes the full prompt string. "Reset my password" and "How do I reset my password?" are cache misses even though the answer is identical. Semantic caching converts prompts to embedding vectors and finds cache hits by cosine similarity — if two prompts land within a configurable distance threshold, you return the cached response.
+
+The payoff is significant. In production systems handling conversational workloads, semantic caching typically achieves 30–60% hit rates where exact-match caching achieves under 5%.
+
+## Architecture Overview
+
+A minimal MCP semantic cache sits between your server's tool-call dispatcher and the LLM:
+
+```
+Client → MCP Server → [Semantic Cache] → LLM Provider
+                            ↕
+                       Vector Store
+                       (Redis / pgvector / Qdrant)
+```
+
+On every inbound request:
+1. Embed the prompt using a cheap, fast embedding model.
+2. Query the vector store for the nearest stored prompt.
+3. If similarity exceeds your threshold, return the cached response.
+4. Otherwise, call the LLM, store the response with its embedding, and return it.
+
+## Step 1: Choose Your Embedding Model Carefully
+
+The embedding model is the first bottleneck. Your choices:
+
+- **OpenAI `text-embedding-3-small`**: Fast, cheap, excellent for English text. At ~62M parameters it adds under 50ms latency.
+- **`all-MiniLM-L6-v2` (local)**: Runs in-process via ONNX Runtime. No network hop, no API key, under 20ms on modern hardware. Good enough for most tool-call caching.
+- **Cohere `embed-multilingual-v3.0`**: Essential for multilingual deployments.
+
+For an MCP server handling developer tooling, `all-MiniLM-L6-v2` via the `@xenova/transformers` package is the pragmatic choice. Zero egress, deterministic latency.
+
+## Step 2: Vector Store Setup
+
+For under 1 million cached entries, Redis with the `RediSearch` module (now called Redis Stack) is the simplest deployment:
+
+```bash
+docker run -d --name redis-cache -p 6379:6379 redis/redis-stack:latest
+```
+
+Create the index once at startup:
+
+```typescript
+await redis.ft.create(
+  "idx:semantic_cache",
+  {
+    "$.embedding": {
+      type: SchemaFieldTypes.VECTOR,
+      AS: "embedding",
+      ALGORITHM: VectorAlgorithms.HNSW,
+      TYPE: "FLOAT32",
+      DIM: 384, // MiniLM output dimension
+      DISTANCE_METRIC: "COSINE",
+    },
+    "$.prompt_hash": { type: SchemaFieldTypes.TEXT, AS: "prompt_hash" },
+    "$.created_at": { type: SchemaFieldTypes.NUMERIC, AS: "created_at" },
+    "$.tool_name": { type: SchemaFieldTypes.TAG, AS: "tool_name" },
+  },
+  { ON: "JSON", PREFIX: "cache:" }
+);
+```
+
+Tagging by `tool_name` lets you scope searches — you only compare embeddings for the same tool, which keeps results semantically coherent and reduces false positives.
+
+## Step 3: The Cache Lookup Function
+
+```typescript
+async function semanticLookup(
+  embedding: Float32Array,
+  toolName: string,
+  threshold = 0.92
+): Promise<CachedResponse | null> {
+  const results = await redis.ft.search(
+    "idx:semantic_cache",
+    `(@tool_name:{${toolName}})=>[KNN 3 @embedding $vec AS score]`,
+    {
+      PARAMS: { vec: Buffer.from(embedding.buffer) },
+      SORTBY: { BY: "score" },
+      RETURN: ["$.response", "$.created_at", "score"],
+      DIALECT: 2,
+    }
+  );
+
+  if (!results.total) return null;
+
+  const top = results.documents[0];
+  const similarity = 1 - parseFloat(top.value.score as string);
+
+  if (similarity < threshold) return null;
+
+  return {
+    response: JSON.parse(top.value["$.response"] as string),
+    cachedAt: Number(top.value["$.created_at"]),
+  };
+}
+```
+
+The threshold of 0.92 is a good starting point for factual tool responses. For creative tools or anything where nuance matters, push it to 0.95 or higher. Log cache hit similarity scores for the first week — the distribution will tell you where to draw the line.
+
+## Step 4: TTL Policies
+
+Not all cached responses age equally:
+
+| Response type | TTL |
+|---|---|
+| Static reference data (docs, schemas) | 24 hours |
+| Semi-static (API responses, config) | 1 hour |
+| User-specific or session data | Never cache |
+| Computed results (summarization, extraction) | 30 minutes |
+
+Store TTL alongside each cache entry and enforce it at lookup time:
+
+```typescript
+const age = Date.now() - cachedEntry.cachedAt;
+if (age > ttlMs) {
+  await redis.json.del(entryKey);
+  return null;
+}
+```
+
+Redis `EXPIRE` handles physical deletion; the age check handles logical staleness within the TTL window (useful when you want to serve stale-while-revalidate semantics).
+
+## Step 5: Cache Invalidation
+
+This is where most implementations go wrong. Three patterns that work:
+
+**Tag-based invalidation**: Store a set of "invalidation tags" with each cache entry (e.g., `user:123`, `document:abc`). When that user updates their profile, delete all entries tagged `user:123`. Redis Sets make this O(n) on the tag cardinality, not the full cache size.
+
+**Write-through invalidation**: When a tool call mutates state (a write operation), immediately delete any cached embeddings that overlap with the affected data scope. Your MCP tool schema should declare which tools are read-only vs. mutating — use that metadata to decide whether to skip the cache entirely or invalidate on completion.
+
+**Embedding drift**: If you change embedding models, every cached entry is invalid. Store the embedding model version with each entry and skip hits from previous versions. A rolling migration is safer than a full cache flush.
+
+## Step 6: Wiring It Into Your MCP Server
+
+In an MCP server built with the TypeScript SDK, the cache wraps the tool call handler:
+
+```typescript
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name: toolName, arguments: args } = request.params;
+
+  const prompt = JSON.stringify({ tool: toolName, args });
+  const embedding = await embed(prompt);
+
+  const cached = await semanticLookup(embedding, toolName);
+  if (cached) {
+    metrics.cacheHit(toolName);
+    return cached.response;
+  }
+
+  const response = await dispatchTool(toolName, args);
+
+  await storeEmbedding(embedding, prompt, toolName, response);
+  return response;
+});
+```
+
+Keep the cache bypass trivial to toggle — a per-request header (`X-Cache-Bypass: true`) or an environment flag. You will need this during debugging and for cache-busting in tests.
+
+## What Not to Cache
+
+- **Streaming responses**: Semantic caching works on complete responses. Streaming complicates this significantly; skip caching for streamed tool calls unless you buffer the full response before deciding.
+- **Side-effectful tools**: Any tool that sends an email, modifies a database, or calls an external API should never be cached. Mark these explicitly in your tool schema with a `"sideEffects": true` annotation and skip the cache layer entirely.
+- **User-PII-bearing prompts**: If the prompt contains user-identifying information, caching it creates a privacy risk. Either sanitize PII before embedding (hard to do reliably) or skip the cache for tools that handle personal data.
+
+## Measuring Impact
+
+Track these metrics from day one:
+
+- **Hit rate by tool**: Which tools benefit most? Which benefit least?
+- **Similarity score distribution at hits**: Helps tune your threshold.
+- **Latency p50/p95 for hits vs. misses**: Validates the cache is actually faster.
+- **Token savings**: Multiply miss count by average token cost. This is your ROI figure.
+
+In practice, caching a handful of high-frequency read tools (lookup, summarize, classify) can eliminate 40–70% of LLM calls within a week of deployment, with no visible quality degradation to users.
+
+## Closing Thoughts
+
+Semantic caching is one of those optimizations that pays for itself immediately and keeps compounding. The implementation complexity is low — an embedding model, a vector store, and a similarity threshold — and the payoff in latency and cost is measurable within hours of deployment.
+
+Start narrow: pick your two or three highest-volume read-only tools, enable caching there, and measure. Once you trust the hit quality, expand coverage. The threshold tuning is the only genuinely tricky part, and your own traffic data will tell you exactly where to set it.
+
+At BitAtlas, semantic caching sits at the heart of how we keep encrypted, client-side data operations fast without leaking query patterns to the server. Zero-knowledge doesn't have to mean zero performance.
