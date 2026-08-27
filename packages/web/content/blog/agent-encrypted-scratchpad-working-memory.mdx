@@ -1,0 +1,215 @@
+---
+title: "Encrypted Scratchpad Memory for AI Agents: Session Isolation Done Right"
+description: "How to give AI agents an encrypted working-memory scratchpad with session-scoped keys, automatic expiry, and cryptographic guarantees against cross-task data leakage."
+date: 2026-08-27
+author: "BitAtlas Team"
+slug: agent-encrypted-scratchpad-working-memory
+keywords:
+  - agent scratchpad
+  - working memory
+  - encrypted
+  - session isolation
+  - privacy
+readingTime: 7
+---
+
+AI agents need to think. Between receiving a task and returning a result, an agent may decompose subproblems, draft intermediate answers, record tool outputs, and revise its plan a dozen times. All of that intermediate reasoning lives somewhere—and that somewhere is often unencrypted, persistent beyond the session, and shared across tasks running on the same infrastructure.
+
+That's a data leak waiting to happen.
+
+This post covers how to design an **encrypted agent scratchpad**: a working-memory store backed by session-scoped cryptographic keys that automatically expire, with structural isolation that makes cross-task contamination cryptographically impossible rather than merely operationally unlikely.
+
+## What Gets Written to the Scratchpad
+
+Before designing the encryption scheme, it helps to inventory what agents actually write during a task:
+
+- **Intermediate reasoning**: "The user asked about X. Subproblem A requires Y. Let me check Z first."
+- **Partial tool outputs**: A database query returned 10,000 rows; the agent kept the first page while processing.
+- **Draft responses**: Versions of the answer that were discarded before the final reply.
+- **Retrieved context**: Document chunks pulled from a vector store, possibly containing sensitive customer data.
+- **Error traces**: Stack traces, API error bodies, or debug output that may embed secrets.
+
+Any of these can contain PII, credentials, or proprietary business logic. Storing them in plaintext—even transiently—creates a risk surface that most agent frameworks ignore entirely.
+
+## Session-Scoped Keys: The Core Design Choice
+
+The critical design decision is **key granularity**. You can encrypt at the agent level (one key per agent identity), the task level (one key per task run), or the session level (one key per agent session, typically tied to a user or conversation).
+
+Session-scoped keys are usually the right choice because:
+
+1. A session maps naturally to a single trust boundary (one user, one conversation, one tenant).
+2. Keys can be derived from session tokens the user already holds, enabling zero-knowledge designs where the server never sees plaintext.
+3. Session termination provides a natural key expiry trigger without background garbage collection.
+
+A simple session key derivation using HKDF:
+
+```typescript
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha256";
+import { randomBytes } from "@noble/hashes/utils";
+
+interface SessionKeys {
+  encryptionKey: Uint8Array;   // AES-256-GCM key for scratchpad content
+  hmacKey: Uint8Array;         // HMAC-SHA256 key for entry integrity
+  sessionId: string;
+}
+
+function deriveSessionKeys(sessionToken: Uint8Array, salt?: Uint8Array): SessionKeys {
+  const ikm = sessionToken;
+  const resolvedSalt = salt ?? randomBytes(32);
+
+  const encryptionKey = hkdf(sha256, ikm, resolvedSalt, "scratchpad-enc-v1", 32);
+  const hmacKey = hkdf(sha256, ikm, resolvedSalt, "scratchpad-mac-v1", 32);
+  const sessionId = Buffer.from(hkdf(sha256, ikm, resolvedSalt, "scratchpad-id-v1", 16)).toString("hex");
+
+  return { encryptionKey, hmacKey, sessionId };
+}
+```
+
+The salt is stored alongside the session record; the `sessionToken` never leaves the client. On the server, all scratchpad entries are ciphertext—the server can store, retrieve, and delete them without ever reading them.
+
+## Writing and Reading Encrypted Entries
+
+Each scratchpad write produces an encrypted envelope with a nonce, a TTL, and an HMAC over the ciphertext. The HMAC prevents an attacker who compromises the storage layer from substituting entries without detection.
+
+```typescript
+import { gcm } from "@noble/ciphers/aes";
+
+interface ScratchpadEntry {
+  nonce: string;        // base64, 12 bytes for AES-GCM
+  ciphertext: string;   // base64 encrypted content
+  mac: string;          // base64 HMAC-SHA256 over nonce+ciphertext
+  expiresAt: number;    // Unix timestamp
+  sessionId: string;
+  entryId: string;
+}
+
+async function writeEntry(
+  keys: SessionKeys,
+  content: string,
+  ttlSeconds: number
+): Promise<ScratchpadEntry> {
+  const nonce = randomBytes(12);
+  const plaintext = new TextEncoder().encode(content);
+
+  const cipher = gcm(keys.encryptionKey, nonce);
+  const ciphertext = cipher.encrypt(plaintext);
+
+  // HMAC over nonce||ciphertext binds both to this key
+  const macInput = new Uint8Array([...nonce, ...ciphertext]);
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    await importHmacKey(keys.hmacKey),
+    macInput
+  );
+
+  return {
+    nonce: Buffer.from(nonce).toString("base64"),
+    ciphertext: Buffer.from(ciphertext).toString("base64"),
+    mac: Buffer.from(mac).toString("base64"),
+    expiresAt: Math.floor(Date.now() / 1000) + ttlSeconds,
+    sessionId: keys.sessionId,
+    entryId: randomBytes(8).toString("hex"),
+  };
+}
+```
+
+Reading reverses the process: verify the HMAC first (reject if invalid), check `expiresAt` against wall clock, then decrypt. This order matters—decrypting before MAC verification is a classic padding-oracle setup.
+
+## Automatic Expiry: TTL at the Entry Level
+
+Scratchpad entries should expire at two granularities:
+
+- **Entry TTL**: each entry carries an `expiresAt` timestamp. The storage layer purges expired entries on read or in a background sweep. This evicts short-lived reasoning traces (draft answers, error logs) quickly.
+- **Session TTL**: when a session ends, all entries for that `sessionId` are bulk-deleted. This is the safety net for entries with long TTLs that outlive their purpose.
+
+In a Redis-backed implementation:
+
+```python
+import redis
+import json
+import time
+
+class EncryptedScratchpad:
+    def __init__(self, redis_client: redis.Redis, session_id: str):
+        self.r = redis_client
+        self.session_id = session_id
+        self._namespace = f"scratch:{session_id}"
+
+    def write(self, entry: dict, ttl_seconds: int = 300) -> str:
+        entry_id = entry["entryId"]
+        key = f"{self._namespace}:{entry_id}"
+        self.r.setex(key, ttl_seconds, json.dumps(entry))
+        self.r.sadd(f"{self._namespace}:index", entry_id)
+        return entry_id
+
+    def read(self, entry_id: str) -> dict | None:
+        key = f"{self._namespace}:{entry_id}"
+        raw = self.r.get(key)
+        if raw is None:
+            return None
+        entry = json.loads(raw)
+        if entry["expiresAt"] < time.time():
+            self.r.delete(key)
+            return None
+        return entry
+
+    def purge_session(self) -> int:
+        index_key = f"{self._namespace}:index"
+        entry_ids = self.r.smembers(index_key)
+        keys = [f"{self._namespace}:{eid.decode()}" for eid in entry_ids]
+        deleted = self.r.delete(*keys, index_key) if keys else 0
+        return deleted
+```
+
+The `index` set lets `purge_session` delete all entries for a session in one round-trip regardless of how many there are. Redis TTLs handle the per-entry eviction; the index is the fallback for bulk teardown.
+
+## Cross-Task Isolation: Why Shared Keys Fail
+
+A common shortcut is using one encryption key per agent identity rather than per session. The reasoning is: the same agent handles many tasks, so reusing the key saves key management overhead.
+
+The problem is that a shared key across tasks means that a compromised task can read scratchpad entries from other tasks handled by the same agent identity. In multi-tenant environments—where one agent instance serves many users—this translates directly to cross-user data exposure.
+
+Session-scoped key derivation eliminates this. Even if two tasks share the same agent code and identity, their session tokens differ, their derived keys differ, and their scratchpad namespaces are cryptographically isolated. Stealing one session's key yields nothing about another.
+
+For agents that handle truly sensitive data (healthcare, legal, financial), consider taking this further: derive a **per-entry nonce** deterministically from the session key and entry ID so that even replaying a captured entry against a different session fails MAC verification.
+
+## Integrating with an Agent Framework
+
+Most agent frameworks expose a memory abstraction you can swap. In a LangGraph-style setup:
+
+```python
+from langgraph.graph import StateGraph
+from typing import TypedDict
+
+class AgentState(TypedDict):
+    task: str
+    scratchpad_id: str   # session-scoped scratchpad namespace
+    result: str | None
+
+def reasoning_node(state: AgentState, scratchpad: EncryptedScratchpad) -> AgentState:
+    # Write intermediate reasoning
+    entry_id = scratchpad.write(
+        encrypt_entry(session_keys, state["task"] + " intermediate notes"),
+        ttl_seconds=120
+    )
+    # ... agent does work ...
+    # Read back if needed across sub-steps
+    notes = scratchpad.read(entry_id)
+    return {**state, "result": compute_result(notes)}
+```
+
+The scratchpad instance is injected per-session; the session key never appears in agent state. At session teardown, `purge_session()` runs as part of cleanup—not as an afterthought.
+
+## What This Buys You
+
+Encrypting the agent scratchpad with session-scoped keys gives you several concrete guarantees:
+
+- **Storage-layer breach**: leaked Redis or Postgres data is ciphertext without the session key.
+- **Cross-task contamination**: impossible by construction—different session keys produce independent namespaces.
+- **Retention control**: TTL expiry at both entry and session granularity ensures intermediate reasoning doesn't outlive its purpose.
+- **Auditability**: HMAC-authenticated entries detect tampering without decryption.
+
+The overhead is small—one HKDF derivation per session, one AES-GCM encrypt/decrypt per entry—and the security boundary it creates is far cleaner than access-control lists on a shared plaintext store.
+
+Working memory is where agents think. Treat it accordingly.
