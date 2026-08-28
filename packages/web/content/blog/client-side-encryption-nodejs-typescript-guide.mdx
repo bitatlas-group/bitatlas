@@ -1,0 +1,254 @@
+---
+title: "Client-Side Encryption in Node.js and TypeScript: A Practical Guide"
+description: "Learn how to implement AES-256-GCM client-side encryption in Node.js and TypeScript using the built-in crypto module — with safe IV generation, key derivation, and real-world patterns."
+date: "2026-08-28"
+author: "BitAtlas Team"
+slug: "client-side-encryption-nodejs-typescript-guide"
+keywords: ["Node.js", "TypeScript", "client-side encryption", "crypto module", "AES-GCM"]
+readingTime: "8 min read"
+---
+
+Most developers reach for a third-party library the moment encryption comes up. That instinct is reasonable — crypto is subtle — but for symmetric encryption in Node.js, the built-in `crypto` module covers the common cases well, without extra dependencies, supply-chain exposure, or license headaches. This guide walks through AES-256-GCM encryption in Node.js and TypeScript: the right primitives, safe IV generation, key derivation from passwords, and patterns that hold up in production.
+
+## Why AES-256-GCM
+
+AES-GCM is the default choice for symmetric encryption in modern applications. It provides:
+
+- **Confidentiality** — data is ciphertext without the key
+- **Integrity** — the authentication tag detects tampering
+- **Performance** — hardware-accelerated on every modern CPU and every current Node.js build
+
+The "256" refers to the key size in bits. A 256-bit key is overkill against classical attacks, but it gives a security margin against future threats and costs almost nothing in practice.
+
+The alternative you'll see in older code is AES-CBC. Avoid it for new work: CBC requires manual HMAC for authentication, padding oracle attacks are a real category of exploit, and getting it right requires combining two primitives correctly. GCM eliminates that class of problem.
+
+## Setting Up the Types
+
+TypeScript lets you express intent clearly. Define the shape of an encrypted payload up front:
+
+```typescript
+interface EncryptedPayload {
+  ciphertext: string; // base64
+  iv: string;         // base64, 12 bytes for GCM
+  tag: string;        // base64, 16 bytes
+  version: 1;
+}
+```
+
+Versioning the payload format is cheap and saves headaches when you later change key sizes or add AAD (additional authenticated data).
+
+## Generating Keys
+
+Never hardcode keys. For a server-side key that needs to survive restarts, generate once and store in an environment variable or secrets manager:
+
+```typescript
+import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
+
+// Generate a 256-bit key — run this once, store the result securely
+const key = randomBytes(32); // 32 bytes = 256 bits
+console.log(key.toString("base64")); // store this
+```
+
+To load from an environment variable:
+
+```typescript
+const KEY_BASE64 = process.env.ENCRYPTION_KEY;
+if (!KEY_BASE64) throw new Error("ENCRYPTION_KEY env var is required");
+const key = Buffer.from(KEY_BASE64, "base64");
+if (key.length !== 32) throw new Error("ENCRYPTION_KEY must be 32 bytes (256 bits)");
+```
+
+## The IV Rule
+
+AES-GCM requires a 96-bit (12-byte) initialization vector (IV). The critical rule: **never reuse an IV with the same key**. Reuse breaks confidentiality completely — an attacker who sees two ciphertexts with the same key+IV can recover the plaintext XOR. For GCM specifically, they also recover the authentication key.
+
+The safe pattern is simple: generate a fresh random IV for every encryption operation and prepend or store it alongside the ciphertext. IVs are not secrets.
+
+```typescript
+const iv = randomBytes(12); // 96 bits — always fresh
+```
+
+## Encrypt Function
+
+```typescript
+import { createCipheriv, randomBytes } from "crypto";
+
+export function encrypt(plaintext: string, key: Buffer): EncryptedPayload {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+
+  const tag = cipher.getAuthTag();
+
+  return {
+    ciphertext: encrypted.toString("base64"),
+    iv: iv.toString("base64"),
+    tag: tag.toString("base64"),
+    version: 1,
+  };
+}
+```
+
+A few things worth noting here. `cipher.update()` accepts a string with an encoding, which saves an explicit `Buffer.from()` call. `cipher.final()` must be called before `cipher.getAuthTag()` — calling `getAuthTag()` first returns an incomplete tag. The tag defaults to 16 bytes (128 bits), which is correct; don't reduce it.
+
+## Decrypt Function
+
+```typescript
+import { createDecipheriv } from "crypto";
+
+export function decrypt(payload: EncryptedPayload, key: Buffer): string {
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(payload.iv, "base64")
+  );
+
+  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(payload.ciphertext, "base64")),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString("utf8");
+}
+```
+
+`decipher.final()` throws if the authentication tag does not match. That exception is your signal that the ciphertext was tampered with, the wrong key was used, or the payload was corrupted. Catch it deliberately:
+
+```typescript
+try {
+  const plaintext = decrypt(payload, key);
+} catch (err) {
+  // Authentication failed — do not proceed
+  throw new Error("Decryption failed: payload is invalid or key is wrong");
+}
+```
+
+Never ignore or suppress that error.
+
+## Key Derivation from Passwords
+
+If your key needs to come from a user-supplied password rather than random bytes, never use the password directly as a key. Use PBKDF2 (built into `crypto`) or scrypt (also built in, stronger) to derive a key:
+
+```typescript
+import { scryptSync, randomBytes } from "crypto";
+
+export function deriveKey(password: string, salt: Buffer): Buffer {
+  // N=32768, r=8, p=1 — tuned for ~100ms on modern hardware
+  return scryptSync(password, salt, 32, { N: 32768, r: 8, p: 1 });
+}
+
+// Deriving a new key (e.g., on account creation):
+const salt = randomBytes(16);
+const key = deriveKey(userPassword, salt);
+// Store salt alongside the encrypted data; it is not secret
+```
+
+Store the salt with the ciphertext — it must be the same salt to derive the same key. Like IVs, salts are not secrets; they exist to make precomputed attacks impractical.
+
+## Streaming Large Files
+
+For files too large to hold in memory, Node.js streams compose naturally with the cipher:
+
+```typescript
+import { createReadStream, createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
+import { createCipheriv, randomBytes } from "crypto";
+
+async function encryptFile(
+  inputPath: string,
+  outputPath: string,
+  key: Buffer
+): Promise<{ iv: string; tag: string }> {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+
+  await pipeline(
+    createReadStream(inputPath),
+    cipher,
+    createWriteStream(outputPath)
+  );
+
+  return {
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+  };
+}
+```
+
+Store the returned IV and tag alongside the file — you need both to decrypt and verify. For a production system, prepend them as a fixed-size header in the output file so the whole thing is self-contained.
+
+## Additional Authenticated Data (AAD)
+
+GCM supports AAD: plaintext data that is authenticated but not encrypted. This is useful for binding context to a ciphertext — for example, ensuring an encrypted record can only be decrypted in its original context (user ID, record type, environment):
+
+```typescript
+const aad = Buffer.from(JSON.stringify({ userId, recordType: "note" }));
+cipher.setAAD(aad);
+// ... encrypt ...
+
+decipher.setAAD(aad);
+// ... decrypt ...
+```
+
+If the AAD doesn't match on decryption, `decipher.final()` throws. This prevents ciphertexts from being moved between users or contexts, even by an attacker who has the key.
+
+## Putting It Together in a Real Service
+
+A practical service encapsulates the key lifecycle:
+
+```typescript
+export class EncryptionService {
+  private readonly key: Buffer;
+
+  constructor(keyBase64: string) {
+    this.key = Buffer.from(keyBase64, "base64");
+    if (this.key.length !== 32) {
+      throw new Error("Invalid key length");
+    }
+  }
+
+  encryptString(plaintext: string): EncryptedPayload {
+    return encrypt(plaintext, this.key);
+  }
+
+  decryptString(payload: EncryptedPayload): string {
+    return decrypt(payload, this.key);
+  }
+
+  encryptJSON<T>(value: T): EncryptedPayload {
+    return this.encryptString(JSON.stringify(value));
+  }
+
+  decryptJSON<T>(payload: EncryptedPayload): T {
+    return JSON.parse(this.decryptString(payload)) as T;
+  }
+}
+```
+
+Inject a single `EncryptionService` instance at application startup and pass it where needed. The key is loaded once, the IV generation is inside the function, and callers never touch raw crypto primitives.
+
+## What to Watch Out For
+
+A few mistakes appear regularly in code reviews:
+
+**Reusing IVs**: The most dangerous error. Always generate a fresh IV per encryption call — never derive it from a counter, timestamp, or any predictable value.
+
+**Storing keys in code**: Even behind environment variables, keys in your repository's history are a leak waiting to happen. Use a secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager) and inject at runtime.
+
+**Catching and swallowing authentication errors**: A failed `decipher.final()` is a security event. Log it, surface it, and reject the request. Do not fall back to "best-effort" decryption.
+
+**Using `crypto.createCipher` instead of `createCipheriv`**: The old `createCipher` API derives a key from a password using MD5, which is cryptographically weak. It was deprecated in Node.js 10 and removed in 22. Use `createCipheriv` and manage keys explicitly.
+
+## Where This Fits in a Larger Architecture
+
+The `crypto` module handles the cryptographic operations. What it doesn't handle is key management: where keys live, how they rotate, who can access them, and what happens when they need to change. For a production system, that means integrating with a key management service or building a rotation scheme where new keys encrypt new data and old keys remain available to decrypt existing data.
+
+BitAtlas is built around exactly this problem — giving developers a secure, encrypted store for agent state and files without building key management infrastructure themselves. The patterns in this guide are the foundation; the platform handles the operational layer on top.
+
+The Node.js `crypto` module is more capable than most developers realize. For AES-256-GCM, it has everything you need.
