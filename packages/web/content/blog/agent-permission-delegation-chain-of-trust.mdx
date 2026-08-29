@@ -1,0 +1,178 @@
+---
+title: "Building Permission Delegation Chains for Multi-Agent Systems"
+description: "How to design verifiable permission delegation in multi-agent architectures — granting bounded sub-permissions to child agents without ever exposing master credentials."
+date: "2026-08-29"
+author: "BitAtlas Team"
+slug: "agent-permission-delegation-chain-of-trust"
+keywords: ["agent permissions", "delegation", "chain of trust", "capability tokens", "authorization", "multi-agent", "zero-knowledge"]
+readingTime: "7 min"
+---
+
+When you build a multi-agent system, one of the first trust problems you hit is permission delegation: the orchestrator agent needs to hand off work to a child agent, but you don't want that child to carry full root credentials. If the child is compromised, you want the blast radius contained to exactly what it needed to do, nothing more.
+
+This post walks through a practical approach to building verifiable permission delegation chains — the kind you can audit, revoke, and reason about cryptographically.
+
+## Why Naive Credential Forwarding Fails
+
+The simplest approach is to copy API keys or access tokens into child agent environments. This is also the worst approach:
+
+- **Revocation is impossible in practice.** Every child that received the key can keep using it until expiry.
+- **Scope creep is invisible.** Nothing stops a child from using the key for operations beyond what it was meant to do.
+- **Audit trails are meaningless.** All actions appear as the root principal; you lose accountability per agent.
+
+A proper delegation chain solves all three problems.
+
+## The Core Concept: Capability Tokens with Bounded Scope
+
+The idea comes from capability-based security: instead of giving an agent an identity credential, give it a _capability token_ — a signed, tamper-evident assertion that says "this agent may perform operations X, Y, Z on resource R until time T."
+
+The token carries:
+
+1. **Issuer DID** — a decentralized identifier (or a simple public key fingerprint) for the agent that minted the token.
+2. **Subject** — the child agent's identity.
+3. **Capability set** — the exact operations the bearer may invoke.
+4. **Delegation depth** — how many further levels of delegation the bearer can issue.
+5. **Expiry** — a hard expiry timestamp; typically short-lived (minutes to hours).
+6. **Parent chain hash** — a hash of the issuing token, so validators can reconstruct the full chain.
+
+```typescript
+interface CapabilityToken {
+  iss: string;          // issuer public key fingerprint
+  sub: string;          // subject (child agent) public key fingerprint
+  cap: string[];        // list of capability identifiers
+  delegateDepth: number;
+  exp: number;          // unix timestamp
+  parentHash: string | null;
+  signature: string;    // ed25519 signature over canonical JSON
+}
+```
+
+The issuer signs the token with their private key. The child agent presents this token at a service boundary; the service validates the signature, checks the chain, and enforces scope.
+
+## Building the Chain
+
+### Root Issuance
+
+The orchestrator holds a root keypair. When it spins up a child agent, it mints a capability token:
+
+```typescript
+import { sign } from "@noble/ed25519";
+import { sha256 } from "@noble/hashes/sha256";
+
+async function mintToken(
+  issuerPrivKey: Uint8Array,
+  issuerPubKey: Uint8Array,
+  childPubKey: Uint8Array,
+  capabilities: string[],
+  delegateDepth: number,
+  parentToken: CapabilityToken | null
+): Promise<CapabilityToken> {
+  const token: Omit<CapabilityToken, "signature"> = {
+    iss: bufToHex(issuerPubKey),
+    sub: bufToHex(childPubKey),
+    cap: capabilities,
+    delegateDepth,
+    exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour
+    parentHash: parentToken
+      ? bufToHex(sha256(JSON.stringify(parentToken)))
+      : null,
+  };
+  const payload = new TextEncoder().encode(JSON.stringify(token));
+  const sig = await sign(payload, issuerPrivKey);
+  return { ...token, signature: bufToHex(sig) };
+}
+```
+
+### Sub-Delegation
+
+A child agent that received a token with `delegateDepth > 0` can issue tokens to its own children, but it must:
+
+1. Decrement `delegateDepth` by at least 1.
+2. Restrict `cap` to a subset of what it received — never expand.
+3. Set `exp` no later than its own token's expiry.
+4. Set `parentHash` to the hash of its own token.
+
+This is enforced at validation time. Any token that tries to grant a capability not present in its parent chain is rejected.
+
+### Validation at Service Boundaries
+
+Services (storage APIs, databases, external tools) act as the enforcement layer. When an agent presents a capability token, the service must:
+
+```typescript
+async function validateToken(
+  token: CapabilityToken,
+  requiredCap: string,
+  trustedRoots: Set<string>
+): Promise<boolean> {
+  // 1. Check signature
+  const { signature, ...payload } = token;
+  const valid = await verify(
+    hexToBuf(signature),
+    new TextEncoder().encode(JSON.stringify(payload)),
+    hexToBuf(token.iss)
+  );
+  if (!valid) return false;
+
+  // 2. Check expiry
+  if (token.exp < Math.floor(Date.now() / 1000)) return false;
+
+  // 3. Check required capability is present
+  if (!token.cap.includes(requiredCap)) return false;
+
+  // 4. Walk chain to a trusted root
+  return walkToTrustedRoot(token, trustedRoots);
+}
+```
+
+`walkToTrustedRoot` fetches the parent token (by hash, from an append-only log), verifies its signature, and recurses until it reaches a root issuer in `trustedRoots`.
+
+## Delegation Depth in Practice
+
+Depth 0 means the token holder cannot sub-delegate. Use this for leaf agents — the ones that actually talk to external services. Depth 1 allows one level of sub-delegation. In most production systems, a depth of 2 or 3 is sufficient for complex pipelines.
+
+| Role | Depth | Typical Cap Set |
+|---|---|---|
+| Orchestrator | 3 | `["storage:read", "storage:write", "compute:run", "network:fetch"]` |
+| Planner Agent | 2 | `["storage:read", "compute:run"]` |
+| Executor Agent | 1 | `["storage:read"]` |
+| Tool Agent | 0 | `["storage:read:path:/jobs/abc"]` |
+
+Notice the tool agent at depth 0 receives a _path-scoped_ capability — not just `storage:read` but `storage:read:path:/jobs/abc`. Hierarchical capability naming lets services enforce fine-grained scopes cheaply with a prefix match.
+
+## Revocation Without a Central Server
+
+One hard problem with short-lived tokens is revocation before expiry. Options:
+
+**Option A — Just use short expiries.** One-hour tokens with no revocation mechanism are often sufficient. For most agentic tasks, the run is over before the token would need revoking.
+
+**Option B — Revocation ledger.** Maintain an append-only revocation list (a hash-addressed log) that services check. The check is a simple set membership query; the ledger is write-once and can be replicated.
+
+**Option C — Online validation at a capabilities service.** The service calls back to the issuer on each request. Simple to build, but creates availability dependency. Use only for high-value operations.
+
+BitAtlas's storage layer uses option A for compute tasks and option B for storage write permissions, since leaked write access is more dangerous than leaked read access.
+
+## Connecting to Encrypted Storage
+
+Capability tokens are complementary to zero-knowledge encrypted storage. The storage layer doesn't need to see the content of files to enforce access — it checks the token's capability set, then hands back encrypted blobs. The agent decrypts locally with keys that were also scoped to the task.
+
+This means even a fully compromised service provider can't read the data and can't forge tokens — the two properties are orthogonal and reinforce each other.
+
+## Putting It Together
+
+A practical multi-agent system with proper permission delegation looks like this:
+
+1. **Orchestrator generates an ephemeral keypair per run.** No reuse across jobs.
+2. **Root capability token is minted for the orchestrator by a long-lived trust anchor** (your deployment system or a hardware security module).
+3. **Orchestrator mints child tokens** with reduced scope and decremented depth as it spawns workers.
+4. **Every service boundary validates the full chain** before executing operations.
+5. **Tokens expire automatically**; completed runs leave no live credentials behind.
+
+The chain is auditable (every token hashes to its parent), revocable (append to the revocation ledger), and scoped (capability narrowing is enforced cryptographically).
+
+## What to Avoid
+
+- **Don't pass raw API keys via environment variables** to child containers. Use the token minting pattern above.
+- **Don't set expiries longer than the expected run time.** One hour is a reasonable default for most tasks.
+- **Don't skip the chain walk in validation.** Checking only the immediate token signature is not enough — the issuer itself needs to be trusted.
+
+Permission delegation done right makes multi-agent systems both more capable and more secure. Agents can operate autonomously on bounded tasks, and when something goes wrong, you know exactly which delegation chain was involved and can revoke future actions without touching unrelated systems.
