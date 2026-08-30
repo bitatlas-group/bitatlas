@@ -1,0 +1,173 @@
+---
+title: "Encrypted File Chunking for Large Uploads in AI Agent Workflows"
+description: "How to implement streaming AES-GCM encryption with chunk-level integrity checks and resumable upload protocols for large files in agent workflows."
+date: 2026-08-30
+author: "BitAtlas Team"
+slug: "encrypted-agent-file-chunking-large-uploads"
+keywords: ["file chunking", "large file upload", "agent storage", "streaming encryption", "resumable uploads"]
+readingTime: "7 min read"
+---
+
+AI agents routinely handle files that can't fit in memory: training datasets, video exports, database backups, document corpora. Naively uploading a 2 GB file as a single request is fragile — a network hiccup means starting over, and the entire payload must be held in RAM before encryption can begin. Chunked uploads fix both problems, but the implementation has enough moving parts that developers often skip end-to-end encryption or skip integrity checking. This post walks through doing it right.
+
+## Why Chunking and Encryption Are Better Together
+
+The standard objection is: "I'm uploading to an HTTPS endpoint — the transport is encrypted." That's true, but it only protects data in transit. Once the file lands on the server, it typically sits at rest in plaintext unless you've added another layer. If the server is compromised, or the cloud provider's support staff can browse your storage bucket, your users' data is exposed.
+
+Client-side chunked encryption gives you:
+
+- **Streaming encryption** — encrypt each chunk before it leaves the process, so the plaintext never touches disk unencrypted and RAM pressure stays constant regardless of total file size.
+- **Chunk-level integrity** — AES-GCM produces an authentication tag per chunk. You can verify each chunk independently without reassembling the whole file.
+- **Safe resumability** — a failed upload can resume from the last confirmed chunk, not from byte zero.
+
+## The Chunking Model
+
+Before writing any code, settle on the chunk size. Chunks that are too small add round-trip overhead; chunks that are too large waste bandwidth on retries. A chunk size between 5 MB and 16 MB is a reasonable default for most agent workloads.
+
+Each chunk needs its own metadata:
+
+```
+chunk_index  — 0-based position in the sequence
+total_chunks — lets the receiver know when assembly is complete
+file_id      — ties chunks to a specific upload session
+iv           — unique 12-byte initialization vector for this chunk
+auth_tag     — 16-byte GCM tag appended after ciphertext
+```
+
+The receiver stores chunks with `(file_id, chunk_index)` as the composite key. Assembly is just iterating from 0 to `total_chunks - 1` and concatenating the decrypted payloads.
+
+## Generating Per-Chunk IVs Safely
+
+AES-GCM requires a unique IV for every encryption operation that uses the same key. Reusing an IV with the same key is catastrophic — it leaks the keystream and breaks authenticity. Two safe patterns:
+
+**Counter-based**: derive the IV from the chunk index using a fixed nonce prefix.
+
+```python
+import os, struct
+
+upload_nonce = os.urandom(8)  # 8 bytes, stored with the session
+
+def iv_for_chunk(upload_nonce: bytes, chunk_index: int) -> bytes:
+    # 8-byte random prefix + 4-byte big-endian counter = 12 bytes total
+    return upload_nonce + struct.pack(">I", chunk_index)
+```
+
+This approach is deterministic, which means you can reconstruct the correct IV for any chunk during retry without storing per-chunk IV state.
+
+**Random per-chunk**: generate `os.urandom(12)` for each chunk and store it alongside the ciphertext. This is simpler but requires the IV to travel with the chunk — prepend it to the ciphertext payload.
+
+For agent workflows, the counter-based approach is often preferable because the session state is smaller and retry logic is stateless.
+
+## Streaming Encryption in Python
+
+```python
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import os, struct
+
+def encrypt_chunk(key: bytes, chunk_index: int, upload_nonce: bytes, plaintext: bytes) -> bytes:
+    iv = upload_nonce + struct.pack(">I", chunk_index)
+    aesgcm = AESGCM(key)
+    ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, None)
+    # Returns ciphertext || 16-byte auth tag
+    return ciphertext_with_tag
+
+def chunk_file(path: str, chunk_size: int):
+    with open(path, "rb") as f:
+        index = 0
+        while True:
+            data = f.read(chunk_size)
+            if not data:
+                break
+            yield index, data
+            index += 1
+```
+
+`AESGCM.encrypt` from the `cryptography` library appends the authentication tag automatically. The caller never sees plaintext after encryption — the chunk loop reads a window, encrypts it, yields it, and moves on.
+
+## Uploading with Retry and Resumability
+
+A robust chunked uploader tracks which chunks have been confirmed server-side. On resume, it asks the server for the list of committed chunk indices and skips them:
+
+```python
+import httpx, time
+
+def upload_file(path: str, key: bytes, upload_url: str, chunk_size_bytes: int = 8 * 1024 * 1024):
+    upload_nonce = os.urandom(8)
+    file_id = os.urandom(16).hex()
+
+    # Pre-scan to get total_chunks without reading entire file
+    file_size = os.path.getsize(path)
+    total_chunks = -(-file_size // chunk_size_bytes)  # ceiling division
+
+    # Fetch already-committed chunks for resume
+    resp = httpx.get(f"{upload_url}/status/{file_id}")
+    committed = set(resp.json().get("committed_chunks", []))
+
+    for chunk_index, plaintext in chunk_file(path, chunk_size_bytes):
+        if chunk_index in committed:
+            continue  # skip already-uploaded chunks
+
+        ciphertext = encrypt_chunk(key, chunk_index, upload_nonce, plaintext)
+
+        payload = {
+            "file_id": file_id,
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks,
+            "iv": (upload_nonce + struct.pack(">I", chunk_index)).hex(),
+        }
+
+        for attempt in range(3):
+            try:
+                r = httpx.post(
+                    f"{upload_url}/chunk",
+                    content=ciphertext,
+                    headers={
+                        "X-File-Id": file_id,
+                        "X-Chunk-Index": str(chunk_index),
+                        "X-Total-Chunks": str(total_chunks),
+                        "X-IV": payload["iv"],
+                    },
+                    timeout=60,
+                )
+                r.raise_for_status()
+                break
+            except httpx.HTTPError:
+                time.sleep(2 ** attempt)
+        else:
+            raise RuntimeError(f"Chunk {chunk_index} failed after 3 attempts")
+```
+
+The ceiling-division trick (`-(-n // d)`) avoids importing `math.ceil` and works correctly for integer arithmetic.
+
+## Server-Side Integrity Verification
+
+The server should verify each chunk before acknowledging it. With AES-GCM, the authentication tag check happens inside `decrypt` — if the tag doesn't match, the library raises an exception before returning any plaintext.
+
+```python
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
+
+def receive_chunk(key: bytes, iv_hex: str, ciphertext: bytes) -> bytes:
+    iv = bytes.fromhex(iv_hex)
+    aesgcm = AESGCM(key)
+    try:
+        return aesgcm.decrypt(iv, ciphertext, None)
+    except InvalidTag:
+        raise ValueError("Chunk authentication failed — data may be corrupt or tampered")
+```
+
+Return HTTP 422 on `InvalidTag` so the agent knows to re-encrypt and re-upload rather than retry the same ciphertext.
+
+## Final Assembly
+
+Once `committed_chunks` equals `total_chunks`, the server reassembles the file by decrypting and concatenating chunks in order. If you're using BitAtlas for the storage layer, the assembly step happens server-side inside the encrypted vault — your application only needs to call the finalize endpoint with the `file_id`.
+
+## Key Points to Remember
+
+- Use a unique IV per chunk. Counter-based derivation keeps the session state small and retry logic stateless.
+- AES-GCM authentication tags give you per-chunk integrity for free — verify on receipt, not just on assembly.
+- Store `(file_id, chunk_index)` as the commit key so the resumable-upload query is a simple indexed lookup.
+- Chunk sizes between 5 MB and 16 MB balance throughput and retry cost for most network conditions.
+- Never send plaintext to the upload endpoint. Encrypt in the agent process before the bytes leave the machine.
+
+Large file handling is where many "encrypted storage" solutions quietly fall back to plaintext for performance reasons. Streaming AES-GCM with per-chunk tags makes it possible to stay encrypted through the entire pipeline without loading the whole file into memory.
