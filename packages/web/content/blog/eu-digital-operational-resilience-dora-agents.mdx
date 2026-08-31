@@ -1,0 +1,115 @@
+---
+title: "DORA Compliance for AI Agents in EU Financial Services"
+description: "A practical guide to Digital Operational Resilience Act requirements for AI agent deployments — covering ICT risk management, resilience testing, and incident classification for developers building in EU financial services."
+date: "2026-08-31"
+author: "BitAtlas Team"
+slug: "eu-digital-operational-resilience-dora-agents"
+keywords: ["DORA", "Digital Operational Resilience Act", "financial services", "AI agents", "resilience testing", "ICT risk management", "EU compliance"]
+readingTime: "7 min read"
+---
+
+The EU's Digital Operational Resilience Act (DORA) came into full effect in January 2025, and its reach extends further than most engineering teams initially expected. If you're building AI agents for — or within — EU financial services firms, DORA applies to your systems in ways that classic software compliance frameworks don't quite cover.
+
+This post maps the practical engineering implications: what DORA demands, where autonomous agents create novel compliance surface, and what you can build now to stay ahead.
+
+## What DORA Actually Requires
+
+DORA is primarily an ICT risk management framework targeted at financial entities — banks, insurers, payment processors, investment firms, and their critical third-party ICT providers. It sets binding requirements in five areas:
+
+1. **ICT risk management** — continuous identification, classification, and mitigation of ICT risks
+2. **ICT-related incident reporting** — mandatory classification and notification timelines for material incidents
+3. **Digital operational resilience testing** — threat-led penetration testing (TLPT) and scenario-based exercises
+4. **ICT third-party risk management** — contractual and monitoring obligations for technology providers
+5. **Information sharing** — voluntary participation in threat intelligence sharing arrangements
+
+For developers, articles 9–16 of the regulation are the most operationally dense. They mandate maintaining an ICT asset register, documenting dependencies, running regular resilience tests, and having recovery time objectives (RTOs) and recovery point objectives (RPOs) for all critical functions.
+
+## Where AI Agents Complicate DORA Compliance
+
+Traditional software has stable, auditable control flows. AI agents do not. This creates friction with DORA in several specific ways.
+
+### Non-deterministic Execution Paths
+
+DORA's ICT risk management framework (Article 9) requires you to identify and document your ICT systems. With a deterministic microservice, that's straightforward — you can enumerate your call graph, your failure modes, your retry logic.
+
+An agent that routes tasks dynamically, spawns sub-agents, or selects tools based on LLM output creates an execution graph that isn't fixed at deploy time. Your documentation needs to capture not just what the agent *can* do but what governance constraints limit what it *will* do at runtime.
+
+Practically: implement tool-use allow-lists, not just capability grants. Document every tool your agent can invoke, with justification. Log every tool invocation with agent ID, session context, user intent, and outcome. This log becomes your DORA-compliant audit trail.
+
+### Incident Classification
+
+DORA Article 17 introduces a tiered incident classification model. Major ICT-related incidents must be reported to regulators within 4 hours of classification, with a detailed intermediate report within 72 hours.
+
+The problem: agent failures often manifest as "wrong output" rather than "system down." If an agent misclassifies a transaction, routes a payment incorrectly, or generates a flawed risk assessment, that's a business logic failure — and it may meet DORA's definition of a major incident depending on the financial impact threshold.
+
+You need explicit incident detection logic for agent outputs, not just infrastructure monitoring. This means:
+
+- **Output validation layers** that compare agent outputs against ground truth where available, or flag outputs outside expected distributions
+- **Confidence thresholds** that escalate low-confidence decisions to human review before execution
+- **Rollback capabilities** for agent-initiated actions — DORA expects you to be able to reverse or contain the impact of ICT failures
+
+### Third-Party ICT Provider Risk
+
+If your agents call external APIs — LLM providers, data enrichment services, vector databases hosted outside your infrastructure — each of those is an ICT third-party provider under DORA Chapter V.
+
+Article 28 requires financial entities to maintain a register of all ICT third-party dependencies and assess concentration risk. If your agent is critically dependent on a single LLM provider, that dependency must be documented, and you should have a contingency plan.
+
+For agent architectures, this means:
+- Mapping every external API call your agent can make to the provider that serves it
+- Assessing what portion of your critical business functions depend on each provider
+- Having fallback paths — either to a secondary provider or to a degraded non-AI mode — for high-criticality workflows
+
+## Resilience Testing Requirements
+
+DORA Article 25 mandates digital operational resilience testing for all financial entities. For entities classified as significant, this includes Threat-Led Penetration Testing (TLPT) at least every three years, conducted by qualified external testers.
+
+For AI agent systems, resilience testing has to go beyond network and application layer tests. You need to explicitly test:
+
+**Adversarial prompt injection** — can an external document or message hijack your agent's behavior? This is a material ICT risk for any agent that processes external inputs (emails, documents, web content).
+
+**Tool misuse chains** — can a sequence of individually permitted tool calls produce an outcome that violates policy? Test whether your allow-lists and guardrails hold under multi-step attack scenarios.
+
+**Cascade failure under degraded dependencies** — what happens when your LLM provider returns degraded output (slow, truncated, or semantically wrong responses)? Does your agent fail safely, or does it proceed with partial context?
+
+**Recovery time under incident** — if your agent infrastructure is taken offline, how quickly can you restore service? Document your RTO and test against it.
+
+## Practical Implementation Checklist
+
+Here's a minimum viable DORA-aligned architecture for AI agent deployments in financial services:
+
+**Asset register and documentation**
+- Enumerate every tool, API, and data source your agent can access
+- Classify each by criticality to business function
+- Document the data flows: what data enters the agent, what leaves, where it's stored
+
+**Audit logging**
+- Log every agent action at the tool invocation level, not just the session level
+- Logs must be tamper-evident — write-once storage or cryptographic chaining
+- Retention aligned with your ICT risk management policy (minimum 5 years under DORA for financial entities)
+
+**Incident detection and response**
+- Define what constitutes a major incident for your agent — set financial impact thresholds that trigger mandatory escalation
+- Automate detection where possible: output validation, anomaly detection on agent behavior, alerting on confidence-threshold breaches
+- Practice your 4-hour classification drill — it's faster than you think to run out of time
+
+**Third-party dependency mapping**
+- Use a service mesh or observability layer that can enumerate all external calls your agent makes
+- Tag each call with the provider and business function it serves
+- Review concentration risk quarterly
+
+**Resilience testing**
+- Include adversarial prompt injection in your penetration testing scope
+- Run degraded-dependency scenarios in staging before production
+- Document test results and remediation actions — DORA requires evidence, not just intent
+
+## What BitAtlas Provides
+
+BitAtlas is built for the data residency and audit requirements that DORA and similar frameworks demand. All storage is client-side encrypted, with cryptographic audit logs that give you a tamper-evident record of every agent action without exposing plaintext to the platform.
+
+For ICT third-party risk, our architecture minimizes the trust surface: your keys never leave your environment, so even in a dependency failure or breach scenario, your data remains protected.
+
+If you're building agent infrastructure for EU financial services and need a storage layer that's designed around these compliance requirements from the ground up, [get in touch](https://bitatlas.com/contact).
+
+---
+
+DORA isn't purely a compliance burden — the resilience testing and incident classification requirements push teams toward better engineering practices: explicit failure modes, proper observability, and documented recovery procedures. The challenge with AI agents is that you have to apply these practices to systems that are inherently less deterministic than traditional software. The teams that get ahead of this now will find it much easier when regulators start asking questions.
