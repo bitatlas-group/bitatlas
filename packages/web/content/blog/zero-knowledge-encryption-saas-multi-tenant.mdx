@@ -1,0 +1,157 @@
+---
+title: "Zero-Knowledge Encryption in Multi-Tenant SaaS: A Practical Guide"
+description: "How SaaS platforms can offer true zero-knowledge encryption to each tenant without sacrificing search, sharing, or collaboration features."
+date: "2026-09-01"
+author: "BitAtlas Team"
+slug: "zero-knowledge-encryption-saas-multi-tenant"
+keywords:
+  - zero-knowledge encryption
+  - SaaS
+  - multi-tenant
+  - data isolation
+  - client-side keys
+  - key management
+  - BYOK
+readingTime: "7 min read"
+---
+
+Multi-tenant SaaS has a fundamental tension: you want to store customer data centrally for efficiency, but customers increasingly expect that *you* can't read their data even if you wanted to. Zero-knowledge encryption resolves that tension — when done right. When done wrong, it's just marketing.
+
+This guide covers what zero-knowledge actually means in a SaaS context, the architectural patterns that make it real, and the tradeoffs you'll navigate when you try to add search, sharing, and collaboration on top.
+
+## What "Zero-Knowledge" Actually Means for SaaS
+
+Zero-knowledge encryption means the service provider cannot decrypt customer data. It doesn't mean:
+
+- The provider never touches the data (they store ciphertext)
+- The provider has no metadata (they still have access logs, file sizes, timestamps)
+- The provider can't be compelled to hand over data (they can — but ciphertext without keys is useless)
+
+The key property is that **decryption keys never leave the customer's control**. Every tenant holds their own key material; the server only ever sees encrypted blobs.
+
+Compare this to "encryption at rest," where the provider encrypts your data — but with keys the provider also controls. That protects against disk theft, not against a subpoena or a rogue employee.
+
+## The Core Architecture
+
+A zero-knowledge multi-tenant system has three layers:
+
+### 1. Tenant Key Hierarchy
+
+Each tenant gets a unique root key — never stored on your servers. From that root, you derive scoped subkeys using HKDF:
+
+```typescript
+// Derive a per-collection subkey from the tenant root
+async function deriveCollectionKey(
+  rootKey: CryptoKey,
+  collectionId: string
+): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(`bitatlas:collection:${collectionId}`);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info },
+    rootKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+This means a leak of one collection key doesn't compromise other collections — and you can rotate keys at any granularity without re-encrypting everything.
+
+### 2. Client-Side Encryption Before Upload
+
+Data is encrypted in the browser (or in the client SDK) before it reaches your API. Your server receives only ciphertext and a nonce:
+
+```typescript
+async function encryptRecord(
+  key: CryptoKey,
+  plaintext: object
+): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(JSON.stringify(plaintext));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encoded
+  );
+  return { ciphertext, iv };
+}
+```
+
+The server stores `(tenant_id, collection_id, record_id, iv, ciphertext)`. It can look up records by ID but cannot read their contents.
+
+### 3. Key Delivery Without Server Knowledge
+
+When a tenant authenticates, you need to give them back their root key — but you can't store it. The two standard approaches:
+
+**Password-derived keys (PBKDF2 / Argon2):** The tenant's password is never sent to the server. Instead, it derives the root key client-side. You store a verifier (not the password, not the key) for authentication. This works, but password recovery is impossible — if they forget it, the data is gone.
+
+**Wrapped keys with hardware tokens / passkeys:** Generate the root key randomly, then wrap (encrypt) it with the tenant's WebAuthn credential. Store the wrapped blob on your server. Only a device holding the hardware key can unwrap it. This is the better UX choice for 2026 — passkeys are now widely supported and the recovery story is manageable.
+
+## The Hard Part: Search
+
+Here's where most "zero-knowledge SaaS" claims fall apart. Full-text search requires the server to index content — but in a true ZK system, the server can't read content to index it.
+
+The practical options:
+
+**Client-side search index:** Build the search index client-side, encrypt it, and upload it alongside your data. The client downloads and decrypts the index on demand. This works well for small datasets (up to a few thousand records); it breaks down at scale because the index download becomes expensive.
+
+**Encrypted keyword search (SSE):** Structured Symmetric Encryption lets a client generate search tokens from their key, and the server matches tokens against an encrypted index without learning the keywords. Libraries like [SEAL](https://github.com/microsoft/SEAL) and research implementations of OXT exist, but production-grade SSE at SaaS scale is genuinely hard engineering.
+
+**Searchable field escrow:** For SaaS that can't compromise on search, a common middle ground is "searchable fields" — certain fields (like name or email) are stored in plaintext or encrypted with a server-side key specifically designated for search, while sensitive fields (like document content or credentials) are zero-knowledge. You document the split clearly to customers. This is honest and pragmatic.
+
+## Sharing and Collaboration
+
+Sharing in a ZK system means re-encrypting data with the recipient's key, or using a symmetric group key. Both require key exchange — and key exchange requires the server to mediate without learning the key.
+
+**Per-share symmetric keys:** When Alice shares a file with Bob, the client generates a new share key, encrypts the file content under it, and encrypts the share key with Bob's public key (which can be stored on your server — public keys aren't secret). Bob's client decrypts the share key with his private key, then decrypts the file. The server only ever sees ciphertext.
+
+```typescript
+// Alice shares a file with Bob
+async function createShare(
+  fileKey: CryptoKey,
+  bobPublicKey: CryptoKey,
+  fileId: string
+): Promise<{ wrappedKey: ArrayBuffer }> {
+  const shareKey = await crypto.subtle.exportKey("raw", fileKey);
+  const wrappedKey = await crypto.subtle.encrypt(
+    { name: "RSA-OAEP" },
+    bobPublicKey,
+    shareKey
+  );
+  return { wrappedKey };
+}
+```
+
+**Group keys for team workspaces:** Teams share a symmetric group key. Adding a member means encrypting the group key to their public key; removing a member means generating a new group key and re-encrypting all group content. The re-encryption step is expensive — most products defer it (removed members retain historical access until re-key) or scope it narrowly (re-key only after sensitive removal events).
+
+## Handling Key Recovery Without Breaking ZK
+
+The #1 objection from enterprise buyers: "What if we lose the key?" A ZK system where losing the key means losing the data is a hard sell.
+
+Practical recovery strategies that don't require giving the server your key:
+
+**M-of-N key sharding:** Split the root key using Shamir's Secret Sharing across N recovery shares (e.g., 5), require M to reconstruct (e.g., 3). Give shares to different administrators, a recovery service, and a physical backup. None of the M shares alone is useful.
+
+**Recovery code at enrollment:** Derive a recovery key from a high-entropy code shown once at account creation (like a BIP-39 mnemonic). The customer is responsible for storing it. Many enterprise IT departments are comfortable with this — they have processes for HSM key custody.
+
+**Admin key escrow with audit trail:** For regulated industries, escrow the wrapped key with a neutral third party (e.g., a law firm or key escrow service) under a documented legal agreement. The third party holds a wrapped version; your server holds the wrapping key; neither can decrypt alone.
+
+## Deployment Checklist
+
+Before shipping a ZK feature to production:
+
+- [ ] Verify keys are generated client-side and never sent to your server in plaintext
+- [ ] Audit your server logs — make sure plaintext doesn't show up in request bodies or query params
+- [ ] Test key rotation — rotating a subkey should not require re-encrypting other subkeys' data
+- [ ] Document which fields are ZK and which are plaintext (search fields, metadata)
+- [ ] Add key fingerprints to your UI so users can verify their key hasn't changed
+- [ ] Define your recovery story and test it before you need it
+
+## Where BitAtlas Fits
+
+BitAtlas is built around this architecture: your encryption keys live in your browser or your SDK, your data lands on our servers as opaque ciphertext, and our MCP server interface lets AI agents read and write encrypted blobs without us ever seeing the plaintext. The agent holds the key; we hold the box.
+
+If you're building a SaaS product and want ZK storage as infrastructure rather than a feature you build yourself, that's exactly what the BitAtlas API is for. Start with the [quickstart](/docs/quickstart) or look at the [MCP server integration guide](/docs/mcp-server) to see how agents plug in.
+
+Zero-knowledge multi-tenant SaaS is achievable today. The cryptography is well-understood; the engineering is in the integration details. The guide above is the map — the tradeoffs around search and recovery are where you'll spend most of your design time.
