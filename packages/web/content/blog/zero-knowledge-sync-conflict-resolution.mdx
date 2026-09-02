@@ -1,0 +1,165 @@
+---
+title: "Zero-Knowledge Sync Conflict Resolution: Merging Without Leaking"
+description: "How to resolve sync conflicts in zero-knowledge encrypted storage systems without revealing plaintext to the server, using CRDTs and client-side merge strategies."
+date: "2026-09-02"
+author: "BitAtlas Team"
+slug: "zero-knowledge-sync-conflict-resolution"
+keywords:
+  - zero-knowledge
+  - sync
+  - conflict resolution
+  - CRDT
+  - encrypted storage
+  - client-side merge
+  - offline-first
+readingTime: "7 min read"
+---
+
+Building a sync system is hard enough. Building one where the server cannot read any of the data it is syncing is significantly harder. Yet that is exactly what zero-knowledge storage demands: the server must coordinate multiple clients without ever seeing plaintext, which means it cannot run the merge logic itself.
+
+This post covers the design space for conflict resolution in zero-knowledge sync systems — what the server can know, what it must not know, and how to structure your client code to handle the hard cases without leaking data.
+
+## Why Normal Sync Approaches Break
+
+Most distributed sync systems rely on the server to detect and resolve conflicts. The server sees two diverging document versions, applies a merge strategy (last-write-wins, operational transform, a CRDT reduction), and pushes the winner to all clients.
+
+In a zero-knowledge system, the server stores only ciphertexts. It cannot compare field values, diff document trees, or decide which change "wins" in a meaningful way. The server is essentially a content-addressed blob store — it can tell you that two blobs exist at the same logical path, but it cannot merge them.
+
+Your conflict resolution logic must therefore live entirely on the client.
+
+## What the Server Can Know
+
+Even in a zero-knowledge system, the server can safely know a few things without compromising privacy:
+
+- **Logical version vectors.** A version vector (or vector clock) tracks which client wrote which version without encoding any content. The server can store and serve version vectors in the clear — they are structural metadata, not data.
+- **Blob hashes.** The HMAC or hash of a ciphertext uniquely identifies a blob without revealing its plaintext. The server can use these for deduplication and change detection.
+- **Timestamps.** Wall-clock timestamps on write operations tell the server when a write happened, enabling last-write-wins as a coarse fallback.
+- **Encrypted tombstones.** A client can write a specially-shaped ciphertext to signal that a document was deleted; the server treats it as a deletion marker without needing to decrypt.
+
+The server must never see decrypted field values, document diffs, or merge decisions. Those stay on the client.
+
+## CRDTs as the Natural Fit
+
+Conflict-free Replicated Data Types (CRDTs) are a natural fit for zero-knowledge sync because they encode merge semantics into the data structure itself. Two clients can independently append operations to a CRDT log, and any client can merge the logs deterministically, producing the same result regardless of merge order.
+
+### LWW-Element Sets for Simple Key-Value Data
+
+A Last-Write-Wins Element Set (LWW-ESet) assigns a timestamp to each key-value pair. On merge, the entry with the higher timestamp wins. Clients encrypt the entire LWW-ESet entry (key, value, timestamp) together as a single ciphertext blob. The server stores the blobs indexed by their HMAC.
+
+```typescript
+interface LWWEntry<T> {
+  value: T;
+  timestamp: number; // logical clock, not wall time
+  clientId: string;
+}
+
+function mergeLWW<T>(
+  local: Map<string, LWWEntry<T>>,
+  remote: Map<string, LWWEntry<T>>
+): Map<string, LWWEntry<T>> {
+  const merged = new Map(local);
+  for (const [key, remoteEntry] of remote) {
+    const localEntry = merged.get(key);
+    if (!localEntry || remoteEntry.timestamp > localEntry.timestamp) {
+      merged.set(key, remoteEntry);
+    } else if (
+      remoteEntry.timestamp === localEntry.timestamp &&
+      remoteEntry.clientId > localEntry.clientId
+    ) {
+      // Tie-break deterministically on clientId
+      merged.set(key, remoteEntry);
+    }
+  }
+  return merged;
+}
+```
+
+Notice that `mergeLWW` never touches the server. Both clients decrypt their blobs, run the merge locally, re-encrypt the result, and upload the merged ciphertext. The server only sees that the old blob was replaced.
+
+### Grow-Only Sets and Counters
+
+For append-only data (audit logs, activity feeds, metric counters), a Grow-Only Set (G-Set) or Positive-Negative Counter (PN-Counter) is even simpler. Clients encrypt individual operations as blobs. On merge, the union of all operation blobs is the correct state — no conflict is possible.
+
+This is the basis for encrypted audit logs: each event is a separate ciphertext appended to the set. Even if two offline clients create events simultaneously, both events survive the merge.
+
+## Handling Arbitrary Document Edits
+
+LWW and G-Set work well for structured data, but rich documents (notes, files, collaborative text) need finer-grained merge semantics. Two classic approaches apply:
+
+### Operational Transform on Encrypted Operations
+
+Clients record every edit as an encrypted operation (insert, delete, format). On sync, clients exchange operation logs, decrypt them locally, run operational transform to produce a consistent final state, re-encrypt the merged document, and upload.
+
+The cost is bandwidth: clients must upload the full operation log, not just the current document state. For long-lived documents with many edits, this log grows large.
+
+### Encrypted Delta CRDTs
+
+A more recent approach uses delta CRDTs, where only the "delta" — the minimal state needed to advance a remote peer — is exchanged. Each delta is encrypted as a separate blob. Clients download only the deltas they are missing (identified by version vector) and merge them locally.
+
+```typescript
+async function applyRemoteDeltas(
+  db: EncryptedStore,
+  localVersion: VectorClock,
+  remoteDeltas: EncryptedBlob[]
+): Promise<VectorClock> {
+  let version = localVersion;
+  for (const blob of remoteDeltas) {
+    const delta = await decrypt(blob, db.key);
+    version = mergeClock(version, delta.clock);
+    applyDelta(db.localDoc, delta);
+  }
+  return version;
+}
+```
+
+The server only stores and serves encrypted delta blobs; it has no idea which deltas are "ahead" of which, or what they contain.
+
+## The Three-Party Merge Problem
+
+A subtlety: when client A and client B both edit offline and then sync, neither has the other's changes. A naive system would let one overwrite the other. Proper zero-knowledge sync handles this with a **three-way merge**:
+
+1. Client A downloads all remote blobs it is missing (from client B's last online session).
+2. Client A decrypts and identifies the common ancestor version using version vectors.
+3. Client A runs a three-way merge locally: `merge(base, local, remote)`.
+4. Client A encrypts the merged document and uploads it with an updated version vector.
+
+The common ancestor is either stored as a versioned snapshot (encrypted), or reconstructable by replaying a CRDT operation log from the beginning. The server stores all snapshots and operation logs as encrypted blobs — it never knows which is the "base" for a merge.
+
+## What Breaks and How to Fix It
+
+**Large binary files.** Three-way merge works well for text and structured data. Binary files (images, PDFs) do not merge meaningfully — you get one or the other. The pragmatic approach: treat binary files as LWW blobs, break them into content-addressed encrypted chunks for deduplication, and let the user resolve true conflicts in the UI.
+
+**Clock skew.** Logical clocks (Lamport timestamps, vector clocks) are immune to wall-clock drift and should be preferred over wall time wherever possible. Only fall back to wall time for UI display.
+
+**Key rotation during a long offline session.** If a client rotates its encryption key while another client is offline, the offline client cannot decrypt deltas encrypted under the new key. The solution: encrypt each delta under a derivation of the shared document key, and include key version metadata in the version vector. Clients that encounter an unknown key version must complete a key agreement step before resuming sync.
+
+**Storage growth.** A CRDT operation log that never compacts grows forever. Periodically, a client can generate an encrypted snapshot of the current merged state, upload it, and mark all older deltas as superseded. The server stores the snapshot blob; clients that come online after the snapshot can start from there instead of replaying the entire history.
+
+## Putting It Together
+
+A production zero-knowledge sync system combines these pieces:
+
+| Layer | Responsibility | Server visibility |
+|---|---|---|
+| Transport | TLS, delta chunking | Ciphertext sizes, timing |
+| Version tracking | Vector clocks | Version numbers, client IDs |
+| Conflict detection | Clock comparison | None |
+| Merge | Client-side CRDT / 3-way merge | None |
+| Storage | Encrypted blobs by HMAC | Ciphertext only |
+| Snapshots | Client-generated, encrypted | Ciphertext only |
+
+The server is demoted to a dumb blob store with a version-vector index. Every merge decision, every conflict resolution, every "which version wins" judgment is made on the client, over plaintext, after decryption.
+
+This is more code on the client than a traditional sync system. It is also the only architecture that gives users a genuine privacy guarantee: the sync infrastructure cannot reconstruct their data, even under legal compulsion, because it never had the keys.
+
+## Where to Start
+
+If you are building on top of BitAtlas or another zero-knowledge storage backend, the minimal starting point is:
+
+1. Attach a vector clock to every write operation.
+2. Encrypt the (payload + clock) together as a single atomic blob.
+3. On read, decrypt, compare clocks, and merge client-side before returning data to the application.
+
+From there, you can layer in richer CRDT types or three-way merge as your data model requires. The key invariant to maintain throughout: the server touches version metadata only, never plaintext, never merge decisions.
+
+That constraint is what makes the privacy guarantee real.
