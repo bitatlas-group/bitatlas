@@ -1,0 +1,140 @@
+---
+title: "Migrating Zero-Knowledge Systems to Post-Quantum Cryptography"
+description: "A practical guide for developers on migrating ZK encryption and proof systems from classical to post-quantum cryptographic primitives, now that NIST PQC standards are final."
+date: "2026-09-03"
+author: "BitAtlas Team"
+slug: "post-quantum-zero-knowledge-migration-guide"
+keywords: ["post-quantum cryptography", "zero-knowledge proofs", "NIST PQC", "lattice-based crypto", "migration"]
+readingTime: "7 min"
+---
+
+Zero-knowledge encryption and ZK proof systems are two of the strongest privacy tools developers have. But both rely on mathematical assumptions that a fault-tolerant quantum computer would break. With NIST's post-quantum cryptography (PQC) standards now final, "we'll deal with it later" is no longer a reasonable plan. This guide walks through the migration path: what to change, in what order, and what the code actually looks like.
+
+## Why Zero-Knowledge Systems Are Especially Exposed
+
+Classical encryption depends on problems quantum computers can solve efficiently with Shor's algorithm—integer factorization (RSA) and the discrete logarithm problem (ECDH, ECDSA). Most ZK-based systems sit on top of these:
+
+- **Key encapsulation**: ZK storage products typically use ECDH to wrap per-file symmetric keys.
+- **ZK-SNARK proof systems**: Groth16, PlonK, and most production SNARKs are built over elliptic curves (BN254, BLS12-381). The pairing operations they depend on involve the discrete log problem—quantum-vulnerable.
+- **Signatures and authentication**: Ed25519 and ECDSA are used to authenticate users, servers, and proofs.
+
+STARKs are the notable exception: they rely on hash functions and information-theoretic properties rather than elliptic curves, making them largely quantum-resistant today. If you're already using STARKs, one layer of your stack is already in better shape.
+
+## What NIST Has Finalized
+
+NIST published its final PQC standards in August 2024:
+
+- **ML-KEM** (FIPS 203, formerly Kyber): key encapsulation mechanism. Drop-in replacement for ECDH key exchange. Use ML-KEM-768 for 128-bit post-quantum security, ML-KEM-1024 for 256-bit.
+- **ML-DSA** (FIPS 204, formerly Dilithium): digital signatures. Replaces ECDSA and Ed25519.
+- **SLH-DSA** (FIPS 205, formerly SPHINCS+): hash-based signatures. Larger signatures, but simpler security assumptions. Suitable for code signing or certificate authorities.
+
+A fourth standard, FN-DSA (FALCON), is expected in 2025 for applications requiring compact signatures.
+
+## Migration Strategy: Hybrid First, Pure PQC Later
+
+The safest migration path is **hybrid cryptography**: combine a classical algorithm with a PQC algorithm so that security holds as long as *either* is unbroken. This gives you quantum resilience immediately without betting your existing users on unproven implementations.
+
+### Phase 1: Hybrid Key Encapsulation
+
+Replace pure ECDH with a hybrid scheme: `X25519 + ML-KEM-768`. The shared secret is the concatenation of both KEM outputs, hashed together.
+
+```typescript
+import { ml_kem768 } from '@noble/post-quantum/ml-kem';
+import { x25519 } from '@noble/curves/ed25519';
+import { hkdf } from '@noble/hashes/hkdf';
+import { sha256 } from '@noble/hashes/sha256';
+
+async function hybridEncapsulate(recipientX25519Pub: Uint8Array, recipientKemPub: Uint8Array) {
+  // Classical leg
+  const ephemeralX25519 = x25519.utils.randomPrivateKey();
+  const classicalShared = x25519.getSharedSecret(ephemeralX25519, recipientX25519Pub);
+
+  // PQC leg
+  const { cipherText, sharedSecret: pqcShared } = ml_kem768.encapsulate(recipientKemPub);
+
+  // Combine: security holds if either algorithm holds
+  const combinedSecret = hkdf(sha256, new Uint8Array([...classicalShared, ...pqcShared]), undefined, 'hybrid-kem-v1', 32);
+
+  return {
+    ephemeralX25519Pub: x25519.getPublicKey(ephemeralX25519),
+    kemCipherText: cipherText,
+    combinedSecret,
+  };
+}
+```
+
+The `@noble/post-quantum` library (by Paul Miller, same author as `@noble/curves`) is a pure-JavaScript, audited implementation with no native dependencies. It runs in Node, browsers, and edge runtimes.
+
+For Rust backends, `pqcrypto` wraps the NIST reference implementations. For Go, `github.com/cloudflare/circl` provides ML-KEM and ML-DSA with good performance.
+
+### Phase 2: Hybrid Signatures
+
+Replace Ed25519 with Ed25519 + ML-DSA-65 (the 128-bit post-quantum security variant). Sign the message with both, send both signatures; verify that *both* are valid.
+
+```typescript
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa';
+import { ed25519 } from '@noble/curves/ed25519';
+
+function hybridSign(message: Uint8Array, edPrivKey: Uint8Array, mlPrivKey: Uint8Array) {
+  return {
+    edSig: ed25519.sign(message, edPrivKey),
+    mlSig: ml_dsa65.sign(mlPrivKey, message),
+  };
+}
+
+function hybridVerify(message: Uint8Array, edPubKey: Uint8Array, mlPubKey: Uint8Array, sigs: { edSig: Uint8Array; mlSig: Uint8Array }) {
+  return (
+    ed25519.verify(sigs.edSig, message, edPubKey) &&
+    ml_dsa65.verify(mlPubKey, message, sigs.mlSig)
+  );
+}
+```
+
+The main cost is key size: ML-DSA-65 public keys are around 1,952 bytes versus 32 bytes for Ed25519, and signatures are around 3,309 bytes versus 64. For most storage-layer use cases this is fine; for certificate chains, plan your storage accordingly.
+
+### Phase 3: ZK Proof System Migration
+
+This is the hardest part and the longest horizon.
+
+**SNARKs (Groth16, PlonK, Halo2 over BN254/BLS12-381)**: These cannot be made quantum-resistant by parameter changes alone—the underlying elliptic curve assumptions are broken by Shor's algorithm. Migration paths:
+
+1. **Switch to STARKs**: FRI-based STARKs (as in StarkWare, Risc0) rely only on hash function collision resistance. They're already quantum-resistant. The tradeoff is larger proofs (tens of KB vs under 1 KB for SNARKs) and no trustless universal setup.
+
+2. **Lattice-based SNARKs**: Research systems like Banquet, Ligero, and Aurora are lattice-based or hash-based. None are production-ready today, but this space is moving fast.
+
+3. **Hybrid proof wrapping**: Wrap a SNARK proof inside a STARK—prove the SNARK verification inside a STARK circuit. Computationally expensive but preserves existing SNARK circuits while adding quantum resistance at the outer layer.
+
+For most application-layer ZK use cases (proving knowledge of a secret, anonymous credentials, private set membership), the STARK migration is the practical path today.
+
+## Key Management: Don't Forget the Bootstrapping Problem
+
+Migrating cryptographic primitives is only half the job. Your existing encrypted data was wrapped under classical keys. You need a plan to re-encrypt it or to keep old keys accessible long enough to decrypt on demand.
+
+A sensible approach:
+
+1. **Generate new PQC key pairs** for each user during their next login.
+2. **Re-wrap the data encryption key (DEK)** for each file under the new PQC public key during a background migration job. The file ciphertext doesn't change—only the key envelope changes.
+3. **Keep the classical key pair** until the re-wrapping job confirms completion.
+4. **Set a sunset date** for classical key pairs—90 to 180 days is reasonable for most SaaS deployments.
+
+Never try to re-encrypt the file bodies themselves unless your threat model specifically requires it (e.g., a data breach occurred and the attacker captured ciphertexts). Key envelope re-wrapping is orders of magnitude cheaper and achieves the same security outcome.
+
+## Timeline Recommendations
+
+| Horizon | Action |
+|---------|--------|
+| Now | Audit all key exchange and signature usage; inventory SNARK vs STARK usage |
+| 3–6 months | Deploy hybrid ML-KEM for key encapsulation in new encryption flows |
+| 6–12 months | Deploy hybrid ML-DSA for new signature operations; begin DEK re-wrapping |
+| 12–24 months | Sunset pure classical key pairs; evaluate STARK migration for ZK proof flows |
+| 2+ years | Pure PQC once implementations mature and tooling stabilizes |
+
+## What BitAtlas Is Doing
+
+BitAtlas's client-side encryption layer currently uses X25519 for key encapsulation. We're rolling out hybrid ML-KEM-768 support in our SDK this quarter, with automatic DEK re-wrapping for existing files. New accounts will receive ML-KEM key pairs by default. Our ZK proof layer uses FRI-based STARKs, so no changes are needed there.
+
+We'll publish detailed migration notes in the SDK changelog as each phase ships. If you have questions or want to discuss the approach, reach out on our community Discord.
+
+---
+
+Post-quantum migration is a multi-year project, not a sprint. Starting with hybrid key encapsulation today is low-risk, gives you meaningful protection immediately, and builds operational muscle for the harder migrations to come. The cryptographic community has done the hard work of standardizing these algorithms—now it's the engineering layer's turn.

@@ -1080,6 +1080,117 @@
         "resilience testing"
       ],
       "brief": "DORA compliance considerations for AI agent deployments in EU financial services \u2014 operational resilience testing, ICT risk management, and incident classification."
+    },
+    {
+      "slug": "post-quantum-zero-knowledge-migration-guide",
+      "keywords": [
+        "post-quantum cryptography",
+        "zero-knowledge proofs",
+        "NIST PQC",
+        "lattice-based crypto",
+        "migration"
+      ],
+      "brief": "How to migrate zero-knowledge systems to post-quantum cryptographic primitives as NIST finalizes PQC standards"
+    },
+    {
+      "slug": "encrypted-agent-session-continuity-resumption",
+      "keywords": [
+        "AI agent sessions",
+        "encrypted continuity",
+        "session resumption",
+        "stateful agents",
+        "secure storage"
+      ],
+      "brief": "Architecting encrypted session persistence so AI agents can resume work across restarts without leaking context"
+    },
+    {
+      "slug": "mcp-server-capability-negotiation-versioning",
+      "keywords": [
+        "MCP protocol",
+        "capability negotiation",
+        "versioning",
+        "backward compatibility",
+        "server extensions"
+      ],
+      "brief": "A deep look at how MCP servers advertise, negotiate, and version their capabilities for long-term stability"
+    },
+    {
+      "slug": "client-side-crypto-supply-chain-threats",
+      "keywords": [
+        "supply chain attack",
+        "client-side encryption",
+        "npm security",
+        "dependency audit",
+        "cryptography"
+      ],
+      "brief": "Supply chain attacks on client-side crypto libraries: threat model, real-world incidents, and mitigation strategies"
+    },
+    {
+      "slug": "eu-eidas2-digital-wallet-agent-integration",
+      "keywords": [
+        "eIDAS 2.0",
+        "European Digital Identity Wallet",
+        "EUDIW",
+        "AI agents",
+        "identity verification"
+      ],
+      "brief": "How the EU Digital Identity Wallet regulation reshapes identity verification for AI agent architectures"
+    },
+    {
+      "slug": "zero-knowledge-rate-limiting-private-quotas",
+      "keywords": [
+        "zero-knowledge proofs",
+        "rate limiting",
+        "anonymous credentials",
+        "quota enforcement",
+        "privacy"
+      ],
+      "brief": "Enforcing per-user rate limits without tracking users: zero-knowledge approaches to private quota management"
+    },
+    {
+      "slug": "agent-encrypted-tool-call-logs-compliance",
+      "keywords": [
+        "AI agent logs",
+        "tool calls",
+        "encrypted audit trail",
+        "compliance",
+        "SOC2",
+        "HIPAA"
+      ],
+      "brief": "Building encrypted, tamper-evident logs of agent tool calls that satisfy SOC 2 and HIPAA audit requirements"
+    },
+    {
+      "slug": "encrypted-shared-workspaces-multi-agent-teams",
+      "keywords": [
+        "multi-agent systems",
+        "shared workspace",
+        "end-to-end encryption",
+        "collaboration",
+        "agent orchestration"
+      ],
+      "brief": "Designing end-to-end encrypted shared workspaces for teams of AI agents with fine-grained access control"
+    },
+    {
+      "slug": "client-side-key-sharding-threshold-recovery",
+      "keywords": [
+        "Shamir's Secret Sharing",
+        "threshold recovery",
+        "key sharding",
+        "client-side crypto",
+        "key backup"
+      ],
+      "brief": "Implementing threshold-based key recovery with Shamir's Secret Sharing for robust client-side encryption key backup"
+    },
+    {
+      "slug": "data-minimisation-privacy-by-design-agents",
+      "keywords": [
+        "data minimisation",
+        "privacy by design",
+        "GDPR Article 25",
+        "AI agents",
+        "PETs"
+      ],
+      "brief": "Applying GDPR data minimisation and privacy-by-design principles to AI agent data pipelines and storage"
     }
   ]
 }
