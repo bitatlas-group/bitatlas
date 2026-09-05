@@ -1,0 +1,156 @@
+---
+title: "MCP Server Capability Negotiation and Versioning: A Developer's Guide"
+description: "How MCP servers advertise, negotiate, and version their capabilities — practical patterns for building stable, backward-compatible server extensions."
+date: "2026-09-05"
+author: "BitAtlas Team"
+slug: "mcp-server-capability-negotiation-versioning"
+keywords: ["MCP protocol", "capability negotiation", "versioning", "backward compatibility", "server extensions", "MCP servers", "protocol design"]
+readingTime: "7 min read"
+---
+
+When you build an MCP server today, you're not building for today's clients alone. A plugin you ship this week will be called by Claude Desktop, by VS Code extensions, by autonomous agents running inside CI pipelines — some of them months old, some of them not yet written. Getting capability negotiation right is what separates a brittle integration from one that actually stays up.
+
+This post digs into how MCP handles capability advertisement and negotiation, where the common mistakes happen, and what versioning patterns let you evolve a server without breaking the clients that already depend on it.
+
+## How MCP Capability Negotiation Works
+
+The MCP handshake is deliberately simple. When a client connects, it sends an `initialize` request carrying its own protocol version and the capabilities it supports. The server responds with the protocol version it will use and the capabilities it exposes. Neither side tries to negotiate line-by-line — it's a single exchange that establishes the contract for the whole session.
+
+```json
+// Client → Server: initialize
+{
+  "jsonrpc": "2.0",
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {
+      "sampling": {},
+      "roots": { "listChanged": true }
+    },
+    "clientInfo": { "name": "my-agent", "version": "1.4.2" }
+  }
+}
+
+// Server → Client: response
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {
+      "tools": { "listChanged": true },
+      "resources": { "subscribe": true, "listChanged": true },
+      "prompts": {}
+    },
+    "serverInfo": { "name": "bitatlas-vault", "version": "2.1.0" }
+  }
+}
+```
+
+The key insight: **capabilities are opt-in on both sides**. If the server advertises `resources.subscribe`, the client knows it can send `resources/subscribe` requests. If it doesn't, the client must treat resources as static. The server likewise only calls client-side features like sampling if the client declared them.
+
+This means the negotiation phase is your one chance to correctly represent what you support. A server that lies here — advertising a feature it only partially implements — causes the hardest kind of bug to diagnose: one that appears only when a client actually exercises the edge case.
+
+## Protocol Versioning vs. Server Versioning
+
+MCP uses two distinct version concepts, and conflating them is the source of most versioning headaches.
+
+**Protocol version** (`protocolVersion` in the handshake) tracks the MCP specification itself. It's a date string like `2025-06-18`. The server picks the highest version both sides can agree on. If the client sends `2024-11-05` and the server only knows `2024-11-05`, they negotiate to that — even if a newer spec exists. If they share no common version, the server should return an error before the session proceeds.
+
+**Server version** (`serverInfo.version`) is your own application's semver. It's informational — clients can log it, surface it in UIs, or use it for debugging — but MCP itself doesn't interpret it. Don't use semver bumps here as a substitute for proper capability flags.
+
+The practical rule: use `protocolVersion` to gate spec-level features, and use capability flags to gate your own feature additions. Never use semver to communicate "this server now supports X."
+
+## Advertising Optional Capabilities Cleanly
+
+The capabilities object is a nested map where presence indicates support and specific sub-fields refine behavior. The cleanest pattern for a server that is growing its feature set:
+
+```typescript
+const capabilities: ServerCapabilities = {
+  tools: {
+    listChanged: true,       // we support tool-list change notifications
+  },
+  resources: {
+    subscribe: featureFlags.resourceSubscriptions,  // gated on config
+    listChanged: true,
+  },
+  // Omit 'prompts' entirely if the server has none
+};
+```
+
+Omitting a top-level key is meaningful — it tells the client "we don't do this at all." An empty object `{}` means "we support the baseline of this category." Use omission and presence deliberately; don't include a key just because you might add the feature later.
+
+For server extensions that go beyond the spec (custom transport headers, vendor-specific metadata fields), use a namespaced key in `serverInfo` rather than polluting the capabilities object:
+
+```typescript
+serverInfo: {
+  name: "bitatlas-vault",
+  version: "2.1.0",
+  extensions: {
+    "bitatlas.encryptedStore": { version: "1" },
+    "bitatlas.keyRotation": { version: "1" },
+  }
+}
+```
+
+Clients that don't understand `extensions` simply ignore it. Clients you control can look for your namespace and activate the matching code path.
+
+## Handling Version Skew Gracefully
+
+The worst-case scenario isn't a mismatch on the initial handshake — that's detectable and fails fast. The worst case is a client that successfully negotiates a session and then sends a request your server doesn't recognize.
+
+MCP specifies that servers must return a `-32601 Method not found` error for unknown methods. But "correctly returning the error" isn't the same as "handling the situation gracefully." A few patterns that actually work:
+
+**Check capability declarations before sending requests.** On the client side, before calling any server method, verify the server declared support for it. This is obvious for spec-level features but easy to skip for custom extensions. Write a thin capability-check wrapper:
+
+```typescript
+function assertCapability(caps: ServerCapabilities, path: string[]) {
+  let node: unknown = caps;
+  for (const key of path) {
+    if (typeof node !== 'object' || node === null || !(key in node)) {
+      throw new Error(`Server does not support capability: ${path.join('.')}`);
+    }
+    node = (node as Record<string, unknown>)[key];
+  }
+}
+
+// Before calling resources/subscribe:
+assertCapability(serverCaps, ['resources', 'subscribe']);
+```
+
+**Version your tool schemas, not just your tool names.** If you need to change a tool's input schema in a breaking way, add a new tool name and keep the old one available for at least one major version cycle. Renaming parameters or making optional fields required breaks existing clients silently — they'll call the tool with the old schema and get unexpected validation errors.
+
+**Emit capability change notifications conservatively.** If you advertise `tools.listChanged: true`, you're committing to sending `notifications/tools/list_changed` whenever your tool set changes. Don't advertise this if tool registration is dynamic and unbounded — a flood of notifications will degrade client performance. Better to serve a stable tool list and version the server than to treat every hot-reload as a list-changed event.
+
+## Backward Compatibility Rules That Actually Hold
+
+Across real-world MCP server deployments, a few rules consistently predict whether a change breaks clients:
+
+**Safe changes:**
+- Adding a new tool, resource, or prompt
+- Adding optional fields to existing tool input schemas
+- Adding new enum values to output schemas (if clients use exhaustive matching, they should handle unknown values)
+- Adding new top-level capability keys
+
+**Breaking changes:**
+- Removing a tool, resource, or prompt
+- Making optional input fields required
+- Changing a field's type
+- Removing capability keys you previously advertised
+
+When you must make a breaking change, the cleanest path is a new tool name with the updated contract, a deprecation notice in the old tool's description, and a sunset timeline you actually communicate to downstream teams.
+
+## Testing Capability Negotiation
+
+Capability negotiation is one of the most under-tested surfaces in MCP server code. Two tests worth adding to every server:
+
+First, a negotiation snapshot test: assert that the capabilities object your server returns matches an expected shape. This catches accidental regressions when a feature flag is misconfigured or a refactor removes a declaration.
+
+Second, a client-skew integration test: run your server against a client that declares a minimal capability set — no optional features — and verify every standard call still works. Then run it against a client that declares every optional feature and verify the enhanced paths work. Clients in the wild vary much more than the happy-path test you wrote during development.
+
+## Putting It Together
+
+Capability negotiation in MCP is the protocol's main mechanism for safe evolution. It's not glamorous, but getting it right means your server keeps working as the ecosystem around it changes.
+
+The disciplines that matter: advertise accurately, omit rather than stub, use capability flags instead of semver for feature gates, and treat breaking changes as the exceptional case they should be. A server that respects these constraints is one you can deploy today and not worry about six months from now when half your users are on client versions you haven't seen yet.
+
+If you're building encrypted storage or file-handling capabilities on top of MCP — the kind of extension BitAtlas is designed for — these patterns become especially important: clients that manage user data need predictable, stable server contracts. The negotiation phase is where that stability is established, one handshake at a time.
