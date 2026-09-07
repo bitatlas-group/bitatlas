@@ -1,0 +1,133 @@
+---
+title: "eIDAS 2.0 and the European Digital Identity Wallet: What AI Agent Developers Need to Know"
+description: "How the EU Digital Identity Wallet regulation reshapes identity verification for AI agent architectures — practical guidance for developers building compliant, privacy-preserving agent systems."
+date: "2026-09-07"
+author: "BitAtlas Team"
+slug: "eu-eidas2-digital-wallet-agent-integration"
+keywords: ["eIDAS 2.0", "European Digital Identity Wallet", "EUDIW", "AI agents", "identity verification"]
+readingTime: "7 min read"
+---
+
+The European Digital Identity Wallet (EUDIW) is no longer a future proposal — it's live infrastructure shaping how software handles identity across the EU. If you're building AI agents that touch financial services, healthcare, e-government, or any sector requiring verified identity, eIDAS 2.0 is now a first-class architectural concern.
+
+This post walks through the core mechanics of eIDAS 2.0, how EUDIW attestations are structured, and what that means practically when you're wiring identity into an agentic system.
+
+## The Shift From eIDAS 1.0 to eIDAS 2.0
+
+The original eIDAS regulation (2014) created a cross-border framework for electronic identification and trust services — things like qualified electronic signatures and timestamps. It worked at the level of national ID schemes, which member states notified to the EU and which had to be mutually recognized.
+
+eIDAS 2.0 (Regulation 2024/1183) is a different animal. It mandates that every EU member state offer a Digital Identity Wallet to citizens and residents by 2026, and it moves identity from a state-level concern to a personal, user-held credential. The wallet lives on a user's device. It holds attestations — cryptographically verifiable claims about the holder — issued by trusted providers called Qualified Electronic Attestation of Attributes (QEAA) issuers.
+
+Two things changed that matter most to developers:
+
+1. **Selective disclosure becomes the default.** The wallet holder can share specific attributes (age over 18, tax residency, professional qualification) without revealing the full underlying document. This is implemented through SD-JWT (Selective Disclosure for JWTs) and, in some wallet implementations, mdoc (ISO/IEC 18013-5 mobile documents).
+
+2. **Relying parties must register and comply.** Any system that requests EUDIW attestations must register as a relying party, present its own attestation to the wallet, and adhere to data minimization requirements. The wallet will refuse requests that ask for more data than the stated purpose warrants.
+
+## How Attestations Are Structured
+
+An EUDIW attestation is a signed credential. The high-level structure looks like this:
+
+```json
+{
+  "vct": "eu.europa.ec.eudi.pid.1",
+  "iss": "https://issuer.example.eu",
+  "iat": 1757289600,
+  "exp": 1788825600,
+  "cnf": {
+    "jwk": { ... }
+  },
+  "_sd": [
+    "hash_of_family_name_disclosure",
+    "hash_of_birth_date_disclosure",
+    "hash_of_age_over_18_disclosure"
+  ],
+  "_sd_alg": "sha-256"
+}
+```
+
+The `_sd` array contains salted hashes of individual claims. When the holder presents to a relying party, they include only the disclosures corresponding to the claims the relying party actually needs. The relying party can verify each claim by hashing the received disclosure and checking it matches an entry in `_sd`.
+
+The `cnf` (confirmation) key binds the credential to a key pair held in the wallet's secure element. Presentation proofs are signed with that key, preventing a stolen credential from being used by someone else.
+
+## Agent Architecture Implications
+
+An AI agent acting on behalf of a user (booking travel, filing documents, verifying age for a service) may need to present identity claims or interact with services that verify them. This creates a few distinct integration patterns.
+
+### Pattern 1: Delegated Presentation
+
+The agent requests authorization from the user's wallet to present specific claims to a relying party on their behalf. The wallet holder approves the request through a user-facing prompt. The agent receives a short-lived, scoped presentation token it can forward.
+
+This is the cleanest pattern from a compliance standpoint: the user is in the loop for every presentation, selective disclosure is enforced by the wallet, and the agent never sees the underlying credential — only the disclosed attributes.
+
+The technical protocol here is OpenID for Verifiable Presentations (OID4VP). Your agent acts as a relying party and initiates a presentation request. The wallet responds via a redirect or cross-device flow.
+
+```python
+# Initiate a presentation request (OID4VP)
+request = {
+    "response_type": "vp_token",
+    "client_id": "https://your-agent.example.com",
+    "redirect_uri": "https://your-agent.example.com/callback",
+    "presentation_definition": {
+        "id": "age-check",
+        "input_descriptors": [{
+            "id": "age_over_18",
+            "constraints": {
+                "fields": [{
+                    "path": ["$.age_over_18"],
+                    "filter": {"type": "boolean", "const": True}
+                }]
+            }
+        }]
+    },
+    "nonce": generate_nonce()
+}
+```
+
+The `presentation_definition` is where you express exactly what you need. Be precise: asking for more than the minimum triggers wallet warnings and may fail compliance checks.
+
+### Pattern 2: Offline or Pre-Authorized Attestations
+
+For flows where the user isn't present in real time — an agent running an overnight batch, or acting on a pre-approved delegation — the wallet can issue a pre-authorized attestation with an explicit expiry and scope. The agent holds this attestation and presents it within the authorized window.
+
+This pattern requires careful expiry management. Attestations are short-lived by design. Your agent needs to handle 401 responses from relying parties and have a flow to trigger re-authorization from the user when a credential expires.
+
+### Pattern 3: Issuer Integration
+
+If your platform is the issuer — you're providing professional credentials, employment attestations, or domain-specific qualifications — you'll integrate on the OID4VCI (OpenID for Verifiable Credential Issuance) side. The wallet contacts your issuer endpoint, authenticates, and receives credentials it can then present selectively to other parties.
+
+This is relevant for enterprise agents that carry workforce credentials or for platforms that issue capability attestations to agents themselves (an emerging use case where an agent's permissions are attested, not just the human behind it).
+
+## Data Minimization and Audit Obligations
+
+eIDAS 2.0 pairs with GDPR, and the combination has teeth. Relying parties must:
+
+- Log every presentation request with the data requested and the purpose stated
+- Not retain disclosed attributes beyond what's needed for the stated transaction
+- Provide users a mechanism to revoke ongoing delegations
+
+For agentic systems, this means your data layer needs to distinguish between ephemeral presentation data (used once, discarded) and data that's retained for legitimate operational reasons. Audit logs must capture what the agent requested, not just what it received.
+
+If you're using BitAtlas for encrypted storage, the natural fit is storing only the transaction record — timestamps, purpose, relying party — with attribute values either not stored at all or encrypted under a key the agent cannot independently decrypt. The decryption event itself becomes the auditable access record.
+
+## Testing Without Live Wallets
+
+The EU Commission operates a reference wallet implementation (EUDIW Reference App) with test issuers that emit test credentials. For development:
+
+1. Install the reference wallet on a test device
+2. Register your relying party against the test federation
+3. Use the test credential endpoints to issue yourself PID (Person Identification Data) test credentials
+4. Run your agent against your local relying party endpoint
+
+The ARF (Architecture Reference Framework) documents the federation trust model and the exact endpoint structures. It's dense but authoritative, and reading the credential schema section will save you a lot of trial and error.
+
+## What to Start With
+
+If you're starting from scratch:
+
+- Read the ARF v1.4+ for the technical ground truth
+- Pick an OID4VP library for your stack (there are solid implementations for Python, TypeScript, and Java)
+- Start with the delegated presentation pattern — it's the most compliant and the user experience maps naturally to how people already think about sharing documents
+- Design your data model to store the minimum: transaction record, not attribute values
+
+eIDAS 2.0 and EUDIW are genuinely good infrastructure for privacy-preserving identity. The selective disclosure model, when integrated correctly, gives users meaningful control that legacy "share your passport scan" flows never could. The compliance overhead is real, but for agent systems handling sensitive actions on behalf of EU users, this is the architecture that actually holds up to scrutiny.
