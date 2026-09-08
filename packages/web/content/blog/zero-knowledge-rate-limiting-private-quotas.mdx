@@ -1,0 +1,118 @@
+---
+title: "Zero-Knowledge Rate Limiting: Enforcing Quotas Without Tracking Users"
+description: "How to enforce per-user API rate limits and storage quotas using zero-knowledge proofs and anonymous credentials — without building a surveillance database."
+date: "2026-09-08"
+author: "BitAtlas Team"
+slug: "zero-knowledge-rate-limiting-private-quotas"
+keywords: ["zero-knowledge proofs", "rate limiting", "anonymous credentials", "quota enforcement", "privacy"]
+readingTime: "7 min read"
+---
+
+Rate limiting is one of the oldest infrastructure problems. You want to give each user a fair share of a resource — API calls, storage bandwidth, compute time — without letting any single user starve the rest. The naive solution is to log every request against a user identifier. Simple, effective, and a privacy liability that grows with every row you write.
+
+There's a better way. Zero-knowledge proofs make it possible to enforce per-user quotas while learning *nothing* about which user is making each request. This post walks through how it works, what the implementation looks like, and when the complexity is worth it.
+
+## The Problem with Conventional Rate Limiting
+
+Standard rate limiting looks like this:
+
+```
+request arrives → extract user ID → increment counter in Redis → check limit → allow or reject
+```
+
+The user ID could be an API key, a session token, or a hashed email. Regardless of form, the server builds a record: this identity made this many requests in this time window. For most SaaS products that's an acceptable trade-off. For products where the *fact of usage* is sensitive — a medical data API, a legal document store, an anonymous messaging service — it isn't.
+
+Even "anonymous" identifiers accumulate patterns. Timing analysis, request volumes, and access sequences can re-identify users with surprising accuracy. If you don't store the data, you can't leak it.
+
+## Zero-Knowledge Credentials: The Core Idea
+
+The building block is a *blind token* or *anonymous credential*. The scheme works like this:
+
+1. **Issuance**: when a user authenticates, the server issues them a cryptographic credential without learning which future requests it will be attached to. The credential encodes a quota — say, 1,000 API calls per day.
+
+2. **Redemption**: for each request, the user presents a *zero-knowledge proof* that they hold a valid credential with quota remaining, without revealing the credential itself or any linkable identifier.
+
+3. **Nullifier**: each proof includes a one-time nullifier derived from the credential and the current time window. The server stores nullifiers, not user IDs. If two requests in the same window produce the same nullifier, one is rejected as a duplicate.
+
+The server accumulates a list of nullifiers — hash values with no user semantics attached. It knows "some credential holder made this request." It does not know which holder.
+
+## Implementation Sketch
+
+The most practical production system today uses one of two approaches:
+
+### Privacy Pass (IETF RFC 9576)
+
+Privacy Pass is a standardized blind token protocol. Cloudflare uses a variant of it for bot mitigation. The flow:
+
+```
+Client                          Server
+  |                               |
+  |-- BlindedToken(r) ----------->|
+  |                               | sign with server key
+  |<-- SignedBlindToken(r) -------|
+  |                               |
+  | unblind: token = unblind(r)   |
+  |                               |
+  | later, for each request:      |
+  |-- Redeem(token, request) ---->|
+  |                               | verify & nullify
+  |<-- 200 OK --------------------|
+```
+
+The `r` is a random blinding factor the client generates and discards after unblinding. The server never sees the original token — only the blinded version during issuance and the redeemed version during use. Because blinding is a one-way transformation, the server cannot correlate issuance with redemption.
+
+For quota enforcement, you issue *N* tokens at authentication time instead of one. Each token is single-use. When the user exhausts their tokens for the window, they must re-authenticate — which can itself be done with minimal disclosure.
+
+### ZK Proofs over Commitment Schemes
+
+For finer-grained quotas (track "you've used X out of Y, not just whether you have remaining tokens"), you need a more expressive scheme. The pattern:
+
+1. The credential commits to a counter: `C = Commit(count, randomness)`.
+2. The server publishes `C` after authentication.
+3. For each request, the user proves in zero knowledge: "I know a value `count` and randomness such that `C = Commit(count, r)` and `count > 0`" — and simultaneously proves knowledge of a signature over `C` from the server.
+4. The user updates their local counter and re-commits, submitting a new `C'` alongside a proof that `C' = C - 1`.
+
+This is heavier computationally, but it lets the server enforce a single quota across multiple time windows without user-side token bookkeeping.
+
+## Nullifier Storage: The Only State You Need
+
+Both schemes reduce server-side state to nullifiers. A nullifier for window `W` looks like:
+
+```
+nullifier = H(credential_secret || W)
+```
+
+The server stores a set of nullifiers per window. At window expiry, it discards them. The storage cost is proportional to the number of *requests*, not the number of users — and nothing in the nullifier reveals which user it belongs to.
+
+This is a significant reduction in regulatory surface. Under GDPR, a nullifier set that cannot be linked back to an individual is not personal data. You can retain it for abuse analysis without a lawful basis controversy.
+
+## Practical Concerns
+
+**Token issuance doesn't have to be anonymous.** For most applications, authentication can use normal credentials. The privacy benefit is in the *usage* phase: once tokens are issued, requests are unlinkable. Users who care can obtain tokens via an anonymising layer; users who don't can use their regular session.
+
+**Replay windows need to match your quota windows.** Nullifiers prevent double-spending within a window. Choose window sizes that match your rate limiting semantics — per-minute nullifiers for burst limiting, per-day for daily quotas — or compose multiple nullifier sets.
+
+**Abuse signals become coarser.** Without per-user request logs, detecting abuse patterns requires aggregate statistics. Differential privacy techniques (Laplace noise on aggregates) let you publish useful metrics — "requests per region", "error rates by endpoint" — without re-introducing per-user tracking.
+
+**Client-side complexity is real.** The user's device or SDK needs to manage token state, handle expiry, and perform the cryptographic operations for proof generation. WASM libraries for Groth16 and PLONK proofs have shrunk proof generation times to under 50ms on modern hardware, which is workable for interactive applications.
+
+## When Is This Worth It?
+
+The honest answer is: not always. For a B2B API where every request is already tied to an API key tied to a company contract, ZK rate limiting adds complexity with no benefit. The use cases where it earns its keep:
+
+- **Consumer apps with sensitive usage patterns.** Health apps, mental health platforms, legal tools — any context where knowing *that* a user accessed a resource is itself sensitive.
+- **Anonymous service tiers.** Products that want to offer free tiers without requiring accounts. ZK credentials let you give anonymous users a quota without building an identity graph.
+- **Cross-organization data collaboration.** If you're providing a shared API to multiple organizations, ZK rate limiting means you can enforce per-organization quotas without your server learning which organization is making each request.
+- **Regulatory environments where data minimisation is a hard requirement.** EU GDPR Article 5(1)(c) requires collecting only what's necessary. If you can demonstrate that nullifier-based rate limiting achieves your business goal without personal data, you may have a genuine compliance argument.
+
+## Where BitAtlas Fits
+
+BitAtlas is built around the principle that your storage provider shouldn't need to see your data to give you a fair service. The same logic extends to usage accounting. We're exploring nullifier-based quota enforcement for high-privacy tiers — where even the pattern of when and how often you access your vault is kept from us.
+
+If you're building an agent or application on top of BitAtlas and want to discuss ZK-friendly quota designs, reach out. The primitives are mature; the integration patterns are still being written.
+
+## Further Reading
+
+The IETF Privacy Pass working group has produced thorough specifications. The Zcash and Semaphore projects have production ZK nullifier implementations you can study. For the commitment-based quota scheme, Boneh and Shoup's *A Graduate Course in Applied Cryptography* (freely available) covers the Pedersen commitment scheme that underlies most practical implementations.
+
+The short version: rate limiting without tracking is possible today, costs roughly 50–200ms of added proof latency, and eliminates an entire category of data liability. For the right use case, that's a straightforward trade.
