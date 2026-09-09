@@ -1,0 +1,178 @@
+---
+title: "Encrypted, Tamper-Evident Tool Call Logs for AI Agent Compliance"
+description: "How to build audit-ready logs of agent tool calls that satisfy SOC 2 and HIPAA requirements — with encryption, integrity proofs, and a retention strategy you can show auditors."
+date: "2026-09-09"
+author: "BitAtlas Team"
+slug: "agent-encrypted-tool-call-logs-compliance"
+keywords: ["AI agent logs", "tool calls", "encrypted audit trail", "compliance", "SOC2", "HIPAA"]
+readingTime: "7 min"
+---
+
+AI agents call tools. A lot of them. A single user session can trigger dozens of tool calls — reading files, querying APIs, writing records — and in a regulated environment every one of those calls needs to be logged, protected, and retrievable on demand. SOC 2 auditors want proof that privileged actions were recorded. HIPAA requires that access to protected health information be auditable. Most agent frameworks log nothing useful by default.
+
+This post walks through building an encrypted, tamper-evident tool call log that you can actually show an auditor.
+
+## What "compliance-ready" means for tool call logs
+
+Before writing any code, get clear on what the requirement actually is. The typical bar across SOC 2 and HIPAA is:
+
+- **Completeness**: every tool call is recorded, not just failures.
+- **Integrity**: a log that can be silently edited is useless; auditors need proof that records were not altered.
+- **Confidentiality**: the log itself may contain PHI or credentials that appear in tool arguments — the log must be encrypted at rest and in transit.
+- **Retention and retrievability**: logs need to be stored for a defined period (commonly 6–12 months for SOC 2, 6 years for HIPAA) and be queryable by agent session, user, or time range.
+
+Logging to stdout and hoping your SIEM catches it covers almost none of this.
+
+## The data model
+
+Each log entry should capture enough context to reconstruct what happened without relying on the agent's internal state:
+
+```typescript
+interface ToolCallLogEntry {
+  id: string;           // UUID v4
+  sessionId: string;    // links calls within one agent session
+  userId: string;       // the human principal (not the agent)
+  agentId: string;      // which agent/deployment made the call
+  timestamp: string;    // ISO 8601, UTC
+  toolName: string;
+  toolVersion: string;
+  input: unknown;       // the exact arguments passed — may contain PHI
+  output: unknown;      // the tool's return value — may contain PHI
+  durationMs: number;
+  error: string | null;
+  prevHash: string;     // hash of the previous entry (chain integrity)
+}
+```
+
+The `prevHash` field is the key to tamper-evidence. Each entry hashes the one before it, forming a chain: if anyone alters a historical record, every subsequent hash breaks. This is the same mechanism used in append-only ledgers and certificate transparency logs.
+
+## Building the chain
+
+Keep a running hash of the most recent committed entry. On each new call, compute:
+
+```typescript
+import { createHash } from "crypto";
+
+function hashEntry(entry: ToolCallLogEntry): string {
+  // Canonical JSON ensures consistent field ordering
+  const canonical = JSON.stringify(entry, Object.keys(entry).sort());
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+async function appendEntry(
+  store: LogStore,
+  entry: Omit<ToolCallLogEntry, "id" | "prevHash">
+): Promise<ToolCallLogEntry> {
+  const prevHash = await store.getLatestHash(entry.sessionId);
+  const full: ToolCallLogEntry = {
+    ...entry,
+    id: crypto.randomUUID(),
+    prevHash: prevHash ?? "genesis",
+  };
+  const hash = hashEntry(full);
+  await store.write(full, hash);
+  return full;
+}
+```
+
+The store needs to be append-only — no update or delete operations on committed rows. A PostgreSQL table with `INSERT` access but no `UPDATE`/`DELETE` grants enforces this at the database layer.
+
+## Encrypting the payload
+
+Tool call inputs and outputs frequently carry sensitive data. A user's query to a medical record API, an argument that includes a patient identifier, a response body with a lab result — all of this belongs in the log, and all of it needs to be encrypted before it leaves the agent process.
+
+Use envelope encryption: generate a unique data encryption key (DEK) per log session, encrypt the DEK with your key management service (AWS KMS, Google Cloud KMS, or Vault's transit engine), and store the encrypted DEK alongside the session record. The log entries themselves store the AES-256-GCM ciphertext of `input` and `output`.
+
+```typescript
+import { KMSClient, GenerateDataKeyCommand, DecryptCommand } from "@aws-sdk/client-kms";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+
+const kms = new KMSClient({});
+
+async function generateSessionDEK(kmsKeyId: string) {
+  const result = await kms.send(new GenerateDataKeyCommand({
+    KeyId: kmsKeyId,
+    KeySpec: "AES_256",
+  }));
+  return {
+    plaintextKey: result.Plaintext!,        // keep only in memory
+    encryptedKey: result.CiphertextBlob!,   // store in DB
+  };
+}
+
+function encryptField(plaintext: unknown, key: Uint8Array): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const data = Buffer.from(JSON.stringify(plaintext));
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  // iv + tag + ciphertext, base64-encoded
+  return Buffer.concat([iv, tag, encrypted]).toString("base64");
+}
+```
+
+On write, encrypt `input` and `output` before the entry hits the database. The chain hash is computed over the encrypted form — this way the integrity proof still holds even when you cannot decrypt old entries (for example, after a key is rotated and archived).
+
+## Integrating with your agent framework
+
+Most frameworks expose a middleware or interceptor point where you can hook every tool call. In LangChain this is a `CallbackHandler`; in a custom framework it is usually a wrapper around the tool execution function.
+
+```typescript
+// Wrapping a tool call — framework-agnostic pattern
+async function auditedToolCall<I, O>(
+  toolName: string,
+  toolVersion: string,
+  input: I,
+  call: (input: I) => Promise<O>,
+  context: { sessionId: string; userId: string; agentId: string }
+): Promise<O> {
+  const start = Date.now();
+  let output: O;
+  let error: string | null = null;
+  try {
+    output = await call(input);
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
+    await appendEntry(logStore, {
+      sessionId: context.sessionId,
+      userId: context.userId,
+      agentId: context.agentId,
+      timestamp: new Date().toISOString(),
+      toolName,
+      toolVersion,
+      input: encryptField(input, sessionDEK),
+      output: encryptField(output!, sessionDEK),
+      durationMs: Date.now() - start,
+      error,
+    });
+  }
+  return output!;
+}
+```
+
+Notice the `finally` block — logging happens even when the tool call throws. A failed call is as audit-relevant as a successful one, and omitting errors is a common gap that auditors flag.
+
+## Retention, access control, and verification
+
+Store the log in a separate database from your application data, with its own credentials. Grant the agent service `INSERT` only. Queries for auditing run under a separate read-only role.
+
+For retention, a scheduled job archives entries older than 90 days to cold storage (S3 Glacier, Google Nearline) and writes a manifest — a Merkle root of the archived entries — back to the hot database. An auditor can verify any archived batch by recomputing the Merkle root from the raw records and comparing it to the manifest.
+
+For HIPAA, the retention period is six years. For SOC 2, your policy document defines it, but 12 months of hot storage plus long-term archival is a defensible baseline.
+
+## What to show the auditor
+
+The audit artifact package for a single agent session contains:
+
+1. The session record — agent ID, user ID, DEK (encrypted), start/end timestamps.
+2. All log entries for the session — with their chain hashes.
+3. A verification script that re-hashes the chain and confirms no breaks.
+4. Evidence that the logging path cannot be bypassed — typically, a diff showing that tool calls are routed through the audited wrapper.
+
+The chain verification script is simple enough that an auditor can read and run it themselves, which matters: if you are the only one who can verify the integrity proof, it is not much of a proof.
+
+## Starting small
+
+If you are not yet on a path to SOC 2 or HIPAA, start with the structural pieces: append-only storage, a chain hash, and encrypted payloads. The compliance machinery — retention policies, key rotation schedules, access roles — can be layered on top. An encrypted, tamper-evident log that captures every tool call is the foundation; everything else is policy built on it.
