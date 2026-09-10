@@ -1,0 +1,180 @@
+---
+title: "Designing End-to-End Encrypted Shared Workspaces for Multi-Agent Teams"
+description: "How to architect encrypted shared workspaces where multiple AI agents collaborate with fine-grained access control, without any party holding plaintext keys."
+date: 2026-09-10
+author: "BitAtlas Team"
+slug: encrypted-shared-workspaces-multi-agent-teams
+keywords:
+  - multi-agent systems
+  - shared workspace
+  - end-to-end encryption
+  - collaboration
+  - agent orchestration
+  - access control
+  - zero-knowledge
+readingTime: "7 min read"
+---
+
+Modern AI applications increasingly rely on fleets of specialized agents working in parallel: one agent fetches data, another transforms it, a third writes summaries, and a fourth triggers downstream actions. These agents need to share state — files, notes, intermediate results — in real time. But a shared workspace introduces a new attack surface: if the storage layer is compromised, every agent's work is exposed.
+
+End-to-end encryption solves this, but multi-agent collaboration raises a hard cryptographic question: **who holds the keys, and how do you enforce who can read or write what?**
+
+This post walks through the architecture decisions behind building encrypted shared workspaces for agent teams, covering key distribution, access tiers, and revocation without breaking other agents' workflows.
+
+## The Problem: Shared State Needs Shared Keys
+
+In a single-agent system, key management is simple. The agent derives a key from a secret, encrypts its outputs, and that's it. When you add a second agent, you need both agents to read the same encrypted data. That means they must share the same key — or you must re-encrypt data for each agent individually.
+
+Naively, you might give every agent the same master key. That works until one agent is compromised or decommissioned. You cannot revoke one agent's access without rotating the key for all of them, forcing every agent to re-encrypt every file.
+
+The right approach is **per-document keys wrapped for each authorized agent**, a pattern used in encrypted email (OpenPGP, S/MIME) and enterprise DRM systems.
+
+## The Architecture: Document Keys + Agent Identity Keys
+
+Each agent in the workspace has its own asymmetric key pair, generated at provisioning time:
+
+```typescript
+// Each agent generates an identity key pair at startup
+const agentKeyPair = await crypto.subtle.generateKey(
+  { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+  true,
+  ["encrypt", "decrypt"]
+);
+```
+
+When an agent creates a new document (file, note, task record), it:
+
+1. Generates a random 256-bit **document encryption key (DEK)**
+2. Encrypts the document content with AES-GCM using the DEK
+3. For each authorized agent, wraps (encrypts) the DEK with that agent's public key
+4. Stores the ciphertext plus all the wrapped DEK copies alongside it
+
+```typescript
+async function createEncryptedDocument(
+  content: Uint8Array,
+  authorizedAgentPublicKeys: CryptoKey[]
+): Promise<EncryptedDocument> {
+  // Generate a fresh DEK for this document
+  const dek = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, dek, content);
+
+  // Wrap DEK for each authorized agent
+  const rawDek = await crypto.subtle.exportKey("raw", dek);
+  const wrappedKeys = await Promise.all(
+    authorizedAgentPublicKeys.map(pubKey =>
+      crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, rawDek)
+    )
+  );
+
+  return { ciphertext, iv, wrappedKeys };
+}
+```
+
+To read the document, an agent locates its wrapped DEK copy, decrypts it with its private key, and then decrypts the content.
+
+## Fine-Grained Access Control: Roles Without a Central Authority
+
+In a multi-agent workspace, you typically want tiered access:
+
+- **Orchestrator agents** — read and write any document
+- **Worker agents** — read shared context, write only to their assigned output namespace
+- **Observer agents** — read-only access to summaries or logs
+
+You can encode these roles in the access control list (ACL) embedded in each document's header. The orchestrator, when provisioning a workspace, wraps the DEK only for agents in the appropriate role tier for that document type.
+
+```typescript
+interface DocumentHeader {
+  documentId: string;
+  createdAt: number;
+  accessControl: {
+    agentId: string;
+    role: "orchestrator" | "worker" | "observer";
+    wrappedDek: ArrayBuffer;
+  }[];
+  ciphertextHash: string; // integrity check
+}
+```
+
+The storage server sees only encrypted headers and ciphertext — it enforces no access logic, because there is nothing to enforce. An agent that does not appear in the ACL simply cannot unwrap a DEK and cannot read the document. The encryption enforces the policy, not a server-side ACL check.
+
+This is important: **cryptographic access control survives a compromised storage layer**. Even if an attacker gains full read access to your object store, they see only wrapped keys and ciphertext they cannot decrypt.
+
+## Granting Access to New Agents Mid-Workflow
+
+A common scenario: a new specialized agent joins the workspace mid-workflow and needs access to documents already created. The naive approach of re-encrypting all documents is expensive and operationally fragile.
+
+Instead, use **key re-wrapping**. The orchestrator (which holds its own copy of each DEK) wraps the DEK for the new agent and appends a new entry to the document header — without touching the ciphertext at all:
+
+```typescript
+async function grantAccess(
+  doc: EncryptedDocument,
+  orchestratorPrivateKey: CryptoKey,
+  newAgentPublicKey: CryptoKey
+): Promise<EncryptedDocument> {
+  // Orchestrator unwraps its copy of the DEK
+  const orchestratorWrapped = doc.header.accessControl.find(e => e.agentId === ORCHESTRATOR_ID);
+  const rawDek = await crypto.subtle.decrypt(
+    { name: "RSA-OAEP" },
+    orchestratorPrivateKey,
+    orchestratorWrapped.wrappedDek
+  );
+
+  // Wrap for the new agent and append to the ACL
+  const newWrappedDek = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, newAgentPublicKey, rawDek);
+  doc.header.accessControl.push({ agentId: newAgentId, role: "worker", wrappedDek: newWrappedDek });
+
+  return doc; // ciphertext untouched
+}
+```
+
+This is an O(1) operation per document — just one RSA encryption — rather than an O(n) re-encryption of all document content.
+
+## Revoking Access Without Disrupting the Fleet
+
+Revocation is the hard part. If a worker agent is decommissioned or compromised, you want to ensure it can no longer read new documents. For documents it already accessed, you cannot "un-read" them — that data is gone. But you can prevent future access.
+
+The approach:
+
+1. Remove the compromised agent's entry from the ACL of all future documents
+2. For existing sensitive documents, re-encrypt with a fresh DEK and re-wrap only for remaining authorized agents
+3. Update the workspace's **epoch number** — a monotonic counter that signals to all agents that a revocation event occurred and cached DEKs should be discarded
+
+Worker agents should check the epoch on startup and after any long idle period:
+
+```typescript
+async function loadDocument(docId: string, agentPrivateKey: CryptoKey, expectedEpoch: number) {
+  const workspace = await fetchWorkspaceMetadata();
+  if (workspace.epoch !== expectedEpoch) {
+    // Revocation occurred — flush local key cache and re-fetch access grants
+    await flushLocalKeyCache();
+    throw new EpochMismatchError("Workspace epoch changed; re-authenticate before retrying");
+  }
+  // Proceed to unwrap DEK and decrypt...
+}
+```
+
+This pattern avoids expensive fleet-wide key rotation while still providing a clean break after a revocation event.
+
+## Practical Considerations
+
+**Key storage for agents.** Each agent's private key must be stored securely. For cloud-deployed agents, use a secrets manager (AWS Secrets Manager, HashiCorp Vault, or a purpose-built agent credential store). Never embed private keys in container images or environment variables baked into build artifacts.
+
+**Avoiding DEK sprawl.** In a long-running workspace with thousands of documents, you accumulate thousands of DEKs. Consider grouping documents into encrypted **collections** that share a single collection key, with per-document keys used only for high-sensitivity items. This reduces the number of RSA operations at read time.
+
+**Workspace bootstrapping.** The first orchestrator to initialize a workspace generates the initial agent registry and provisions public keys. All subsequent agents are enrolled by the orchestrator, which wraps shared keys for them. Never allow agents to self-enroll without orchestrator authorization — this is the equivalent of an open group chat where anyone can join.
+
+**Auditability.** Document headers are signed by the creating agent using a separate signing key pair. This provides a tamper-evident log of which agent created or modified each document, even though the contents remain encrypted to the storage layer.
+
+## Putting It Together
+
+An encrypted multi-agent workspace is not fundamentally different from encrypted email or enterprise DRM — the cryptographic primitives (asymmetric key wrapping, symmetric content encryption, per-identity ACLs) are the same. What's new is the operational context: agents provision and deprovision frequently, workflows can span thousands of documents, and revocation needs to be near-instant to limit blast radius when a worker is compromised.
+
+The patterns above give you a starting point. Combine them with a robust secrets manager for private key storage, an epoch-based revocation signal to keep agents synchronized, and an orchestrator-controlled enrollment policy, and you have a workspace where the storage layer genuinely cannot read what your agents are doing — even under audit or subpoena.
+
+BitAtlas implements these patterns in its agent storage APIs, handling key wrapping, ACL management, and epoch tracking so your orchestration code can focus on the task at hand rather than the cryptography beneath it.
