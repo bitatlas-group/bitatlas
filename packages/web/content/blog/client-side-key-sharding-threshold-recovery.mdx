@@ -1,0 +1,135 @@
+---
+title: "Client-Side Key Sharding with Shamir's Secret Sharing: Threshold Recovery Done Right"
+description: "How to implement robust, user-controlled encryption key backup using Shamir's Secret Sharing — no server ever touches your key."
+date: "2026-09-11"
+author: "BitAtlas Team"
+slug: "client-side-key-sharding-threshold-recovery"
+keywords: ["Shamir's Secret Sharing", "threshold recovery", "key sharding", "client-side crypto", "key backup"]
+readingTime: "7 min"
+---
+
+The hardest problem in client-side encryption isn't encrypting data — it's answering the question: *what happens if the user loses their key?*
+
+In a traditional cloud storage model, the server holds your key, so "forgot my password" becomes a solvable support ticket. In a zero-knowledge model, the server never sees the key. That's the whole point — but it shifts the recovery burden entirely to the user. The naive solution (write your key on a sticky note) fails in practice. The sophisticated solution is **threshold secret sharing**, and after a decade of cryptographic research it's finally practical to ship.
+
+## The Core Idea: Split the Key, Not the Trust
+
+Shamir's Secret Sharing (SSS), published by Adi Shamir in 1979, lets you split a secret into `n` shares such that any `k` of them reconstruct the original, while any `k-1` shares reveal nothing. This is not XOR splitting or simple partitioning — it's polynomial interpolation over a finite field.
+
+For a `(k, n)` threshold scheme:
+
+1. Choose a random polynomial `f(x)` of degree `k-1` where `f(0)` equals your secret.
+2. Generate `n` points on this polynomial: `(1, f(1)), (2, f(2)), ..., (n, f(n))`.
+3. Distribute one point per share holder.
+
+To reconstruct, collect any `k` points and use Lagrange interpolation to recover `f(0)`. With fewer than `k` points, the polynomial is underdetermined — information-theoretically, the secret is perfectly hidden.
+
+A common deployment pattern is `(3, 5)`: five shares, any three reconstruct. The user might store shares with:
+- A trusted family member
+- A close friend
+- Their own password manager
+- A hardware security key
+- A printed QR code in a safe
+
+No single custodian can reconstruct the key. No server is involved. This is social recovery done right.
+
+## Implementing SSS in the Browser
+
+The TypeScript ecosystem has a solid library for this: `@zk-kit/secret-sharing` (used in ZK projects) or the simpler `secrets.js-grempe`. Here's a minimal implementation using the latter:
+
+```typescript
+import * as secrets from 'secrets.js-grempe';
+
+// Split a 256-bit key into 5 shares, requiring 3 to reconstruct
+function splitKey(keyHex: string, threshold: number, total: number): string[] {
+  return secrets.share(keyHex, total, threshold);
+}
+
+// Reconstruct the key from any k shares
+function recoverKey(shares: string[]): string {
+  return secrets.combine(shares);
+}
+
+// Example usage
+const masterKey = crypto.getRandomValues(new Uint8Array(32));
+const keyHex = Buffer.from(masterKey).toString('hex');
+
+const shares = splitKey(keyHex, 3, 5);
+// shares[0] through shares[4] are opaque strings, safe to distribute
+
+// Later, with any 3 shares:
+const recovered = recoverKey([shares[0], shares[2], shares[4]]);
+console.assert(recovered === keyHex, 'Recovery failed');
+```
+
+The library handles GF(2^8) arithmetic internally. The output shares are hex-encoded strings that include metadata about the threshold scheme, so you don't need to track `k` and `n` separately when distributing.
+
+## Encoding Shares for Real Users
+
+Raw hex strings are fragile. For user-facing share distribution, consider:
+
+**Mnemonic phrases**: Map share bytes to BIP-39 wordlists. A 32-byte share becomes 24 words — easy to write down, hard to transcribe incorrectly.
+
+```typescript
+import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english';
+
+function shareToMnemonic(shareHex: string): string {
+  const bytes = Buffer.from(shareHex, 'hex');
+  return entropyToMnemonic(bytes, wordlist);
+}
+
+function mnemonicToShare(mnemonic: string): string {
+  const bytes = mnemonicToEntropy(mnemonic, wordlist);
+  return Buffer.from(bytes).toString('hex');
+}
+```
+
+**QR codes**: Encode shares as `data:` URIs for printable backup cards. Under 100 bytes per share fits easily in a low-error-correction QR code.
+
+**Encrypted share envelopes**: If a custodian has their own public key, encrypt the share to them with their public key before distribution. Now the share file leaks nothing even if the custodian's storage is compromised.
+
+## What to Actually Shard
+
+You don't want to shard the user's raw encryption key directly in most architectures. Instead, use a **key encryption key (KEK)** pattern:
+
+1. Generate a random master key `K_master`.
+2. Encrypt all user data with a derived key: `K_data = HKDF(K_master, salt, "data")`.
+3. Shard `K_master` into shares.
+4. Store the encrypted data blob alongside the encrypted `K_data` (encrypted with `K_master`).
+
+This way, rotating the KEK (because a share was compromised) only requires re-encrypting `K_data`, not re-encrypting all user data. The data encryption key changes, but the bulk data stays in place.
+
+## Security Boundaries to Enforce
+
+A few non-obvious requirements that bite real implementations:
+
+**Shares must never co-locate on the same device.** If three shares live on the user's phone, the threshold provides no security. Enforce distribution through your UX — don't show all shares at once, confirm each custodian acknowledged receipt separately.
+
+**The reconstruction environment must be trusted.** If the user reconstructs their key inside a compromised browser tab, the security collapses. For high-value use cases, offer a local-first CLI or a hardware enclave path.
+
+**Share integrity matters.** A corrupted share causes reconstruction to silently produce garbage. Add a MAC or use a scheme like SSSS with checksums. The `secrets.js-grempe` library includes a `random` function that generates cryptographically random shares with a padding scheme that lets you detect corruption before committing the wrong key.
+
+**Threshold vs. redundancy are different axes.** A `(3, 5)` scheme tolerates losing 2 shares. It does *not* tolerate an adversary who controls 3 custodians — that's a trust assumption. For adversarial settings, look at verifiable secret sharing (VSS), where each share comes with a zero-knowledge proof of consistency.
+
+## Integrating with BitAtlas
+
+BitAtlas encrypts files on the client before they leave your device. The encryption key lives with you. Threshold recovery is how we support account recovery without ever seeing your key — when you set up recovery, shares are generated in your browser, distributed to custodians you designate, and zero bytes of key material hit our servers.
+
+When you initiate recovery, you collect shares from your custodians (out-of-band, over Signal, by phone call, whatever you trust), paste them into the recovery flow, and the key is reconstructed locally. Our server sees only the encrypted blobs it always stored — unchanged, uninvolved.
+
+This is what "zero-knowledge recovery" means in practice: the recovery mechanism has the same trust properties as the storage itself.
+
+## Production Checklist
+
+Before shipping threshold recovery to users:
+
+- Use a well-audited SSS library (prefer `secrets.js-grempe` or audit your own against the SSSS test vectors).
+- Encode shares in a format that survives human handling: mnemonics, not raw hex.
+- Encrypt shares to custodian public keys where possible.
+- Separate the KEK from the data encryption key.
+- Test recovery with all `k` possible subsets of shares from a `(k, n)` scheme.
+- Document what happens when a custodian is unavailable — require users to think through this before they finish setup.
+- Log share distribution events (timestamp, custodian label) in the user's local key metadata so they can audit later.
+
+Secret sharing is one of cryptography's most elegant constructions. After 45 years, it maps almost perfectly onto the problem of user-controlled key backup — distribute trust, eliminate single points of failure, and keep the server entirely out of the loop.
