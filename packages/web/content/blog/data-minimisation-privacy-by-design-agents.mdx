@@ -1,0 +1,124 @@
+---
+title: "Data Minimisation and Privacy by Design for AI Agents"
+description: "How to apply GDPR Article 25 data minimisation and privacy-by-design principles to AI agent data pipelines, memory systems, and storage architectures."
+date: "2026-09-12"
+author: "BitAtlas Team"
+slug: "data-minimisation-privacy-by-design-agents"
+keywords: ["data minimisation", "privacy by design", "GDPR Article 25", "AI agents", "PETs", "privacy engineering", "agent pipelines", "zero-knowledge"]
+readingTime: "7 min read"
+---
+
+AI agents are remarkably good at accumulating data. A well-wired agent can pull context from email threads, calendar events, file systems, API responses, and prior conversation history — all before it writes a single line of output. That breadth is also a liability. Every byte the agent touches is a byte you may one day have to explain to a regulator, disclose to a data subject, or delete on demand.
+
+GDPR Article 25 — "data protection by design and by default" — says that privacy controls must be built into the system at design time, not bolted on afterward. For AI agents specifically, this means rethinking what data they collect, how long they keep it, where they store it, and who can read it. This post walks through practical engineering decisions that satisfy Article 25 in real agent systems.
+
+## What Data Minimisation Actually Means in Agent Context
+
+Data minimisation (Article 5(1)(c)) requires that personal data be "adequate, relevant and limited to what is necessary in relation to the purposes for which they are processed." For an agent pipeline, every call to a tool, every document retrieved, and every message stored counts.
+
+Three common minimisation failures in agent architectures:
+
+1. **Fetching full records when only a field is needed.** An agent looking up a customer's subscription tier often retrieves the entire user object — email, phone, billing address, account history — when the only relevant field is `plan_name`. Pass projections or use scoped API endpoints.
+
+2. **Persisting conversation history by default.** Many frameworks (LangChain, CrewAI, AutoGen) default to storing full message histories in their memory backends. If that memory store holds personally identifiable information, every entry is a new data retention liability.
+
+3. **Logging tool inputs verbatim.** Structured logging is essential for debugging, but logging the raw text of a user request — "schedule a meeting with Alice at alice@example.com" — creates a searchable, long-lived record of personal data that may not be needed at all.
+
+## Privacy by Design: Seven Principles Applied to Agents
+
+The original "seven foundational principles" of privacy by design (Ann Cavoukian, 1995) map directly onto agent system design:
+
+| Principle | Agent Implementation |
+|-----------|---------------------|
+| Proactive, not reactive | Define data flows before the first agent is deployed |
+| Privacy as the default | Memory disabled unless explicitly enabled per session |
+| Privacy embedded into design | Scoped tool credentials, minimal context windows |
+| Full functionality | Privacy controls should not degrade agent capability |
+| End-to-end security | Encrypted at rest and in transit, including logs |
+| Visibility and transparency | Audit logs the data subject can request |
+| Respect for user privacy | Honour deletion requests across every storage backend |
+
+The hardest of these in practice is "full functionality." Engineers often resist data minimisation because they're not sure what data the agent will need. The instinct is to pass everything and let the model filter. That instinct is the enemy of compliance.
+
+## Practical Patterns
+
+### 1. Context Scoping at the Tool Layer
+
+Instead of giving the agent access to a full database, expose purpose-limited tool endpoints. A customer support agent doesn't need raw SQL access; it needs a `get_subscription_status(user_id)` tool that returns only what's necessary. This isn't just a compliance pattern — it also reduces token consumption and latency.
+
+```typescript
+// Instead of this:
+const user = await db.users.findById(userId); // full record
+
+// Do this:
+const status = await db.users.findById(userId, {
+  select: ["plan_name", "status", "renewal_date"],
+});
+```
+
+This scoping should happen in the tool definition, not in a prompt instruction. Prompt-based filtering ("only use the subscription field") is fragile. Schema-level filtering is enforced.
+
+### 2. Ephemeral Working Memory
+
+For most agent tasks, intermediate results don't need to outlive the session. Use in-process memory (a dictionary, a typed scratchpad object) for the working context, and write only a structured summary to durable storage when the task completes.
+
+```python
+# Ephemeral during task execution
+working_memory = {}
+
+# At task completion, write only the outcome
+storage.write(task_id, {
+    "outcome": "invoice_sent",
+    "recipient_domain": extract_domain(email),  # not the full email
+    "timestamp": now_utc(),
+})
+```
+
+If the agent uses a vector store for semantic search over past interactions, evaluate whether you actually need the raw text or just the embedding. Zero-knowledge storage lets you store embeddings without the plaintext being accessible to the storage provider.
+
+### 3. Differential Privacy for Agent Telemetry
+
+Agents generate telemetry: tool call counts, latency histograms, error rates. If any telemetry captures user-correlated data, apply differential privacy at the collection point. Libraries like Google's DP library and Apple's Swift Differential Privacy make this practical. The key is to decide before the data is collected — not after.
+
+### 4. Consent-Aware Routing
+
+If your agent operates across multiple tenants with different consent profiles (one user opted into analytics, another did not), that consent state must travel with the data. A simple approach is to attach a consent bitmap to every task context and gate tool calls against it:
+
+```typescript
+if (!ctx.consent.hasAnalytics) {
+  skip(telemetryTool);
+}
+```
+
+More sophisticated setups use policy engines (OPA, Cedar) to evaluate consent at the tool invocation layer. The key is that consent is enforced in code, not in documentation.
+
+### 5. Time-Bounded Retention with Cryptographic Enforcement
+
+Setting a retention policy in a database's TTL configuration works until someone forgets to configure it on the new table. A stronger pattern is to wrap data in an envelope encrypted with a key that is itself time-bounded — stored in a key management service with an automatic rotation policy. When the key expires, the ciphertext is permanently unreadable, even if the bytes remain on disk.
+
+This is particularly useful for agent conversation logs, where you want to honour the spirit of Article 17 (right to erasure) without the operational complexity of locating and deleting every row that references a given user.
+
+## Article 25 Compliance Checklist for Agent Systems
+
+Before deploying an agent that processes personal data, work through these:
+
+- [ ] Document every data input (tools, retrieval sources, user messages)
+- [ ] For each input, confirm which fields contain personal data
+- [ ] Confirm that only necessary fields are passed to the agent context
+- [ ] Confirm that tool credentials are scoped to the minimum required access
+- [ ] Define retention periods for every durable storage backend the agent writes to
+- [ ] Verify that deletion requests can be fulfilled across all backends (including logs and vector stores)
+- [ ] Confirm that audit logs capture what the agent accessed, not the personal data itself
+- [ ] Test that disabling optional data collection does not break core agent functionality
+
+## Where Storage Architecture Fits
+
+Article 25 compliance is heavily influenced by where you store agent data and on what terms. A storage provider that has access to plaintext content is also a processor of that content under GDPR — which means contracts, data processing agreements, and transfer impact assessments.
+
+Zero-knowledge storage eliminates most of this complexity. If the storage provider never has access to the decryption key, they cannot process the personal data in any meaningful sense, and many of the secondary compliance obligations collapse. This is why privacy-by-design thinking and zero-knowledge architecture converge: one is the regulatory requirement, the other is the technical mechanism that satisfies it.
+
+For agent systems in particular, where the volume of data processed per task can be high and the storage destinations many, zero-knowledge encrypted backends let you separate "the agent processed this" from "the storage layer knows what the agent processed."
+
+---
+
+GDPR Article 25 isn't new, but AI agents are. Most privacy-by-design guidance was written for web forms and databases, not for systems that autonomously call dozens of APIs, store conversation history, and generate structured outputs from personal data. The principles are the same — the implementation details are not. Get the data flows right at design time, and you'll save a significant amount of remediation work later.
