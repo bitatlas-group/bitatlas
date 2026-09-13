@@ -1191,6 +1191,116 @@
         "PETs"
       ],
       "brief": "Applying GDPR data minimisation and privacy-by-design principles to AI agent data pipelines and storage"
+    },
+    {
+      "slug": "zero-knowledge-encryption-for-developers",
+      "keywords": [
+        "zero-knowledge proofs",
+        "ZK encryption",
+        "privacy-preserving",
+        "cryptographic proofs",
+        "developer guide"
+      ],
+      "brief": "A practical guide to zero-knowledge encryption: what ZK proofs are, how they work, and how to apply them in modern applications without a PhD in cryptography."
+    },
+    {
+      "slug": "client-side-encryption-patterns",
+      "keywords": [
+        "client-side encryption",
+        "end-to-end encryption",
+        "browser crypto",
+        "Web Crypto API",
+        "key management"
+      ],
+      "brief": "Patterns and pitfalls for encrypting data in the browser before it ever touches your servers, using the Web Crypto API and modern key-management strategies."
+    },
+    {
+      "slug": "mcp-servers-explained",
+      "keywords": [
+        "MCP servers",
+        "Model Context Protocol",
+        "AI tooling",
+        "LLM integrations",
+        "agent infrastructure"
+      ],
+      "brief": "A clear-eyed explainer on Model Context Protocol (MCP) servers: what they are, why they exist, and how to build one that plugs into any MCP-compatible AI agent."
+    },
+    {
+      "slug": "ai-agent-storage-architecture",
+      "keywords": [
+        "AI agent storage",
+        "vector databases",
+        "agent memory",
+        "retrieval-augmented generation",
+        "persistent state"
+      ],
+      "brief": "How to design storage for AI agents that need to remember, retrieve, and reason over their own history\u2014covering vector stores, key-value caches, and hybrid approaches."
+    },
+    {
+      "slug": "eu-data-sovereignty-for-saas-builders",
+      "keywords": [
+        "EU data sovereignty",
+        "GDPR",
+        "data residency",
+        "cloud compliance",
+        "SaaS architecture"
+      ],
+      "brief": "What EU data-sovereignty rules mean for SaaS builders in practice: data residency requirements, cross-border transfer rules, and architectural patterns that keep you compliant."
+    },
+    {
+      "slug": "building-e2ee-file-storage",
+      "keywords": [
+        "end-to-end encryption",
+        "file storage",
+        "client-side crypto",
+        "secure cloud storage",
+        "key derivation"
+      ],
+      "brief": "Step-by-step guide to building an end-to-end encrypted file storage system where the server never sees plaintext\u2014covering key derivation, chunking, and metadata protection."
+    },
+    {
+      "slug": "local-first-data-sync",
+      "keywords": [
+        "local-first software",
+        "CRDTs",
+        "offline-first",
+        "data synchronization",
+        "conflict resolution"
+      ],
+      "brief": "How to build local-first applications that work offline, sync seamlessly, and keep users in control of their data using CRDTs and modern sync protocols."
+    },
+    {
+      "slug": "homomorphic-encryption-primer",
+      "keywords": [
+        "homomorphic encryption",
+        "FHE",
+        "privacy-preserving computation",
+        "encrypted computation",
+        "TFHE"
+      ],
+      "brief": "A developer-accessible introduction to fully homomorphic encryption (FHE): the math behind computing on encrypted data, current library options, and real use cases."
+    },
+    {
+      "slug": "key-management-best-practices",
+      "keywords": [
+        "key management",
+        "HSM",
+        "KMS",
+        "cryptographic keys",
+        "secrets management"
+      ],
+      "brief": "From hardware security modules to cloud KMS services, a practical guide to managing cryptographic keys so they stay secret even when the rest of your stack gets breached."
+    },
+    {
+      "slug": "secure-multi-party-computation-intro",
+      "keywords": [
+        "secure multi-party computation",
+        "MPC",
+        "privacy-preserving",
+        "secret sharing",
+        "collaborative computation"
+      ],
+      "brief": "What secure multi-party computation is, how secret sharing schemes make it work, and where MPC fits in the privacy-preserving toolkit alongside ZK proofs and FHE."
     }
   ]
 }
