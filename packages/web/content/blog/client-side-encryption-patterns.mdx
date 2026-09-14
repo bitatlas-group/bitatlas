@@ -1,0 +1,204 @@
+---
+title: "Client-Side Encryption Patterns: Protect Data Before It Leaves the Browser"
+description: "Patterns and pitfalls for encrypting data in the browser before it ever touches your servers, using the Web Crypto API and modern key-management strategies."
+date: 2026-09-14
+author: BitAtlas Team
+slug: client-side-encryption-patterns
+keywords:
+  - client-side encryption
+  - end-to-end encryption
+  - browser crypto
+  - Web Crypto API
+  - key management
+readingTime: "7 min read"
+---
+
+If your users trust you with sensitive data—documents, messages, health records, private notes—the safest thing you can do is ensure that data never reaches your servers in plaintext. Client-side encryption (CSE) puts the cryptographic work in the browser: data is encrypted before the HTTP request leaves the tab. Even if your database is compromised, attackers get ciphertext they cannot read.
+
+This post walks through practical patterns for implementing CSE using the native **Web Crypto API**, discusses key-management trade-offs, and flags the pitfalls that trip up most first attempts.
+
+## Why the Web Crypto API?
+
+The Web Crypto API (`window.crypto.subtle`) ships in every modern browser and gives you access to battle-tested primitives without pulling in a third-party library. It is:
+
+- **FIPS-approved algorithms** — AES-GCM, RSA-OAEP, ECDH, HKDF, PBKDF2, and more
+- **Non-extractable keys** — you can mark a `CryptoKey` as `extractable: false` so JavaScript code (including injected scripts) can never read the raw key bytes
+- **Promise-based** — all operations are async and off the main thread
+
+The downside: the API is verbose. You will wrap it in helpers immediately.
+
+## Core Pattern: Symmetric Encryption with AES-GCM
+
+AES-GCM is the workhorse for symmetric encryption. It provides both confidentiality and integrity (it is an AEAD cipher), and the 96-bit nonce is safe to generate randomly for up to ~2³² encryptions under a single key.
+
+```typescript
+// Generate a fresh key (store this; you will need it to decrypt)
+async function generateKey(): Promise<CryptoKey> {
+  return crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,          // extractable — set false if key stays in IndexedDB only
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Encrypt arbitrary bytes
+async function encrypt(
+  key: CryptoKey,
+  plaintext: Uint8Array
+): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit nonce
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    plaintext
+  );
+  return { ciphertext, iv };
+}
+
+// Decrypt
+async function decrypt(
+  key: CryptoKey,
+  ciphertext: ArrayBuffer,
+  iv: Uint8Array
+): Promise<ArrayBuffer> {
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+}
+```
+
+Store the IV alongside the ciphertext—it is not secret—but **never reuse an IV with the same key**. Nonce reuse in AES-GCM is catastrophic: it leaks the key stream and potentially the plaintext.
+
+## Key Management: The Hard Part
+
+Encryption is easy. Managing the keys—generating, protecting, distributing, and rotating them—is where most CSE implementations fall apart.
+
+### Pattern 1: Password-Derived Keys (PBKDF2)
+
+If users already have a password, derive the encryption key from it. Never store the raw password or the derived key on your servers.
+
+```typescript
+async function deriveKey(
+  password: string,
+  salt: Uint8Array
+): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 310_000, // OWASP 2023 recommendation for PBKDF2-HMAC-SHA256
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,           // non-extractable — raw bytes stay inside the browser
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+Store the `salt` (randomly generated, 16 bytes minimum) alongside the user's encrypted data. When the user logs in, re-derive the key client-side and decrypt locally.
+
+**Pitfall:** If the user forgets their password, data is gone. There is no "forgot password" flow that preserves security. Communicate this clearly in your UX or implement an optional recovery key scheme.
+
+### Pattern 2: Key Wrapping for Multi-Device Access
+
+A single derived key tied to a password does not travel well to multiple devices. A common pattern:
+
+1. Generate a random **data key** (AES-256) per user.
+2. Derive a **wrapping key** from the user's password (PBKDF2).
+3. Encrypt ("wrap") the data key with the wrapping key using AES-KW.
+4. Store the wrapped key on your server.
+
+On a new device, the user re-enters their password to unwrap the data key. Your server sees only wrapped ciphertext.
+
+```typescript
+const wrappedKey = await crypto.subtle.wrapKey(
+  "raw",
+  dataKey,         // the CryptoKey to protect
+  wrappingKey,     // derived from password
+  "AES-KW"
+);
+// Store wrappedKey (ArrayBuffer) on your server
+```
+
+### Pattern 3: ECDH for End-to-End Encrypted Messaging
+
+For user-to-user encryption (think Signal-style messaging), use ECDH to establish shared secrets:
+
+1. Each user generates a key pair: `{ privateKey, publicKey }` with P-256 or X25519.
+2. Public keys are published to your server.
+3. Sender fetches recipient's public key, runs ECDH to derive a shared secret.
+4. Shared secret is fed into HKDF to produce an AES-GCM key.
+5. Message is encrypted with that key—only the recipient's private key can decrypt.
+
+```typescript
+const senderKeyPair = await crypto.subtle.generateKey(
+  { name: "ECDH", namedCurve: "P-256" },
+  false,
+  ["deriveKey"]
+);
+
+const sharedKey = await crypto.subtle.deriveKey(
+  { name: "ECDH", public: recipientPublicKey },
+  senderKeyPair.privateKey,
+  { name: "AES-GCM", length: 256 },
+  false,
+  ["encrypt"]
+);
+```
+
+Store private keys in `IndexedDB`—not `localStorage`. IndexedDB survives browser restarts and can hold `CryptoKey` objects directly (no serialization needed for non-extractable keys).
+
+## Storing Keys in IndexedDB
+
+```typescript
+async function saveKey(db: IDBDatabase, id: string, key: CryptoKey) {
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("keys", "readwrite");
+    tx.objectStore("keys").put(key, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+```
+
+Mark keys as `extractable: false` when generating them if they will only ever live in IndexedDB. The browser will refuse to export the raw bytes, protecting you from XSS that tries to exfiltrate keys.
+
+## Common Pitfalls
+
+**Nonce reuse.** Always generate a fresh random IV per encryption operation. Never use a counter stored in `localStorage`—it does not survive across sessions reliably.
+
+**Trusting server-delivered JavaScript.** If your CDN or server can serve malicious JavaScript, client-side encryption provides no security. You need Subresource Integrity (SRI) hashes on all scripts plus a strict Content Security Policy.
+
+**Encrypting only data, not metadata.** File names, timestamps, and sizes can reveal a lot. Consider encrypting filenames and padding ciphertext to standard sizes.
+
+**Skipping authenticated encryption.** Never use AES-CBC without an HMAC. AES-GCM bundles authentication—use it.
+
+**Relying on `Math.random()`.** Always use `crypto.getRandomValues()` for any security-relevant randomness.
+
+## Putting It Together: A Practical Checklist
+
+- [ ] Generate keys with `crypto.subtle.generateKey`, not a hand-rolled RNG
+- [ ] Use AES-GCM (256-bit) for symmetric encryption
+- [ ] Generate a fresh 12-byte IV per encrypt call with `crypto.getRandomValues()`
+- [ ] Derive keys from passwords with PBKDF2 at 310,000+ iterations (SHA-256)
+- [ ] Store `CryptoKey` objects in IndexedDB, marked non-extractable
+- [ ] Implement key wrapping for multi-device scenarios
+- [ ] Enforce SRI + strict CSP to prevent script injection
+- [ ] Document the irrecoverability of password-derived keys in your UX
+
+## What BitAtlas Adds
+
+BitAtlas wraps these patterns in a managed layer: encrypted key storage, automatic nonce accounting, and an audit trail so you know which encrypted blobs were accessed and when—all without ever seeing your plaintext or your keys. It is CSE-as-infrastructure, so you get the security properties without maintaining the cryptographic plumbing yourself.
+
+---
+
+Client-side encryption shifts the trust boundary fundamentally—your servers become a dumb encrypted store. The Web Crypto API gives you everything you need. The engineering challenge is key management, not the cryptography itself. Get that right, and you have built something genuinely privacy-preserving.
