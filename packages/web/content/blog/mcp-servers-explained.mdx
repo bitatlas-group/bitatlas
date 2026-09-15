@@ -1,0 +1,169 @@
+---
+title: "MCP Servers Explained: What They Are and How to Build One"
+description: "A clear-eyed explainer on Model Context Protocol (MCP) servers: what they are, why they exist, and how to build one that plugs into any MCP-compatible AI agent."
+date: "2026-09-15"
+author: "BitAtlas Team"
+slug: "mcp-servers-explained"
+keywords: ["MCP servers", "Model Context Protocol", "AI tooling", "LLM integrations", "agent infrastructure"]
+readingTime: "7 min"
+---
+
+Every developer building AI agents hits the same wall eventually: the model is capable, but it can't reach your data. It can't query your database, call your internal API, or read files from your storage layer. You wire up a bespoke function, hard-code it into a prompt, and three weeks later your agent architecture looks like spaghetti.
+
+Model Context Protocol (MCP) is the answer to that problem. It is a standardized way to expose tools and resources to AI agents — a clean interface between the model and everything the model needs to do useful work.
+
+This post explains what MCP servers are, why the protocol exists, and how to build one from scratch.
+
+## What Problem MCP Actually Solves
+
+Before MCP, every AI framework invented its own tool-calling convention. OpenAI used one JSON schema; Anthropic used another; LangChain added a third abstraction on top. If you wanted your database client to work with more than one agent framework, you wrote adapter code for each.
+
+MCP standardizes the contract. An MCP server exposes tools, resources, and prompts over a well-defined transport. Any MCP-compatible host — Claude, a custom agent loop, an IDE extension — can discover those capabilities and use them without knowing anything about the underlying implementation.
+
+Think of it like REST for AI tooling. REST didn't invent HTTP; it gave teams a shared vocabulary for building APIs that interoperate. MCP does the same for the tool layer of AI systems.
+
+## Architecture: Hosts, Clients, and Servers
+
+Three components make up an MCP deployment:
+
+**Host** — the application the user interacts with. A chat UI, an IDE, a CLI agent. The host embeds or connects to one or more MCP clients.
+
+**Client** — the part of the host that speaks MCP. It connects to servers, fetches their capability lists, and forwards tool calls when the model requests them.
+
+**Server** — the service you build. It declares its tools and resources, handles incoming requests, and returns results. The server knows nothing about the model; it only sees structured JSON requests.
+
+The host and client live on the same machine as the user (or in the same process). The server can be local or remote. Transports include stdio (for local subprocess servers) and HTTP with Server-Sent Events (for remote servers).
+
+## What a Server Exposes
+
+MCP servers can expose three kinds of things:
+
+**Tools** — functions the model can call. A tool has a name, a description (which the model reads to decide when to use it), and an input schema. The server receives the validated arguments and returns a result.
+
+**Resources** — readable data the model can pull into context. File contents, database records, API responses. Unlike tools, resources are not invoked — they are read.
+
+**Prompts** — reusable prompt templates the host can surface to users. Less common, but useful for teams that want to standardize how users interact with certain workflows.
+
+For most practical use cases, you will build servers that expose tools. Resources are useful when you want the model to read large blobs of data without burning tokens on a tool round-trip.
+
+## Building a Minimal MCP Server
+
+Here is a working TypeScript server that exposes one tool: a lookup against a hypothetical internal user directory.
+
+```typescript
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+
+const server = new Server(
+  { name: "user-directory", version: "1.0.0" },
+  { capabilities: { tools: {} } }
+);
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: "lookup_user",
+      description: "Look up a user by email and return their profile.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          email: { type: "string", description: "The user's email address" },
+        },
+        required: ["email"],
+      },
+    },
+  ],
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.name === "lookup_user") {
+    const { email } = request.params.arguments as { email: string };
+    // Replace with your actual data layer
+    const user = await fetchUserByEmail(email);
+    return {
+      content: [{ type: "text", text: JSON.stringify(user) }],
+    };
+  }
+  throw new Error(`Unknown tool: ${request.params.name}`);
+});
+
+async function fetchUserByEmail(email: string) {
+  // Your DB query, API call, etc.
+  return { email, name: "Ada Lovelace", team: "platform" };
+}
+
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+Run this as a subprocess and any MCP-compatible host can discover the `lookup_user` tool, pass it to the model, and forward calls back to your server.
+
+The Python SDK mirrors this structure. The `fastmcp` package reduces it further to a single decorator:
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP("user-directory")
+
+@mcp.tool()
+def lookup_user(email: str) -> dict:
+    """Look up a user by email and return their profile."""
+    return fetch_user_by_email(email)
+```
+
+## Authentication and Security
+
+Local servers running over stdio inherit the user's OS permissions — no additional auth is needed, and the blast radius of a compromise is limited to that user's machine.
+
+Remote servers are a different story. The MCP spec supports OAuth 2.1 for remote authentication. In practice, many teams gate remote MCP servers behind a short-lived token issued at session start. At minimum, validate every incoming request against a secret and scope tool access to what the caller is actually allowed to do.
+
+Do not trust the model's claimed intent. An MCP server should enforce its own access controls independently of whatever the agent said in its system prompt. Treat every tool call like an API call from an untrusted client.
+
+## Persistent Context and Encrypted Storage
+
+One pattern that combines well with MCP: using the server to maintain durable, encrypted context across sessions. Rather than relying on the model's context window to remember prior state, you store structured data server-side and expose it as a resource the agent can read on startup.
+
+BitAtlas is built around this idea. Client-side encryption means the storage layer never sees plaintext — the MCP server handles keys locally, stores ciphertext remotely, and decrypts on read. The agent always has fresh, persistent context without trusting the cloud with sensitive data.
+
+## Connecting Your Server to Claude
+
+In Claude Code, add your server to `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "user-directory": {
+      "command": "node",
+      "args": ["/path/to/your/server/dist/index.js"]
+    }
+  }
+}
+```
+
+The next session picks it up automatically. Tools appear in the model's capability list alongside built-in tools, and the model calls them the same way — there is no prompt engineering required to teach it which tools exist.
+
+For remote servers, swap `command` for a `url` field pointing at your SSE endpoint.
+
+## When to Build Your Own vs. Use an Existing One
+
+The MCP ecosystem already includes servers for common services: GitHub, Linear, Slack, databases, file systems. Check the registry before writing one from scratch.
+
+Build a custom server when:
+- Your data lives behind an internal API with no public MCP server
+- You need to enforce access controls specific to your org
+- You want to expose a composite operation that spans multiple services
+- The existing server for your tool doesn't expose the subset of functionality you need
+
+The cost of building a basic server is low — a few hours for a typed TypeScript or Python implementation. The payoff is that every MCP-compatible agent in your stack gains access to the tool automatically.
+
+## The Bigger Picture
+
+MCP is still maturing. The spec is at version 2025-03-26 at the time of writing, and the tooling is evolving quickly. But the core idea — a stable interface between models and external capabilities — is sound, and adoption across frameworks and hosts is accelerating.
+
+The teams shipping reliable AI agents in production are the ones who treat tool infrastructure as a first-class concern. Building your integrations as MCP servers rather than ad-hoc function calls gives you portability, discoverability, and a clean boundary to enforce security at.
+
+That boundary is where BitAtlas lives: the layer between your agent and your data, with encryption your stack can actually reason about.
