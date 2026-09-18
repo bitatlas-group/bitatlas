@@ -1,0 +1,203 @@
+---
+title: "Building End-to-End Encrypted File Storage: A Developer's Guide"
+description: "A step-by-step guide to building an E2EE file storage system where the server never sees plaintext—covering key derivation, chunking, authenticated encryption, and metadata protection."
+date: "2026-09-18"
+author: "BitAtlas Team"
+slug: "building-e2ee-file-storage"
+keywords: ["end-to-end encryption", "file storage", "client-side crypto", "secure cloud storage", "key derivation"]
+readingTime: "8 min read"
+---
+
+# Building End-to-End Encrypted File Storage: A Developer's Guide
+
+Most cloud storage systems encrypt data at rest—but the cloud provider holds the keys. If their infrastructure is breached, or they're compelled to hand over data, your users' files go with it. End-to-end encrypted (E2EE) file storage solves this by encrypting on the client before bytes ever leave the device. The server stores ciphertext it can never read.
+
+This guide walks through the core engineering decisions: key derivation, file chunking, authenticated encryption, and metadata protection. We'll use concrete primitives you can ship today.
+
+## The Core Principle: Zero Server Knowledge
+
+In a true E2EE system, the server is a dumb byte store. It receives opaque blobs, stores them, and retrieves them. It cannot distinguish a PDF from a JPEG. It cannot read filenames, file sizes, or access patterns—not if you've designed it right.
+
+The client holds the master secret. Everything flows from that.
+
+## Step 1: Master Key Derivation
+
+Start with a user secret—typically a password or a randomly generated master key stored in a hardware token or secure enclave.
+
+**From a password:**
+
+```typescript
+import { argon2id } from '@noble/hashes/argon2';
+import { randomBytes } from '@noble/hashes/utils';
+
+const SALT_LENGTH = 32;
+
+async function deriveMasterKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const raw = argon2id(encoder.encode(password), salt, {
+    t: 3,        // iterations
+    m: 64 * 1024, // 64 MB memory
+    p: 4,        // parallelism
+    dkLen: 32,
+  });
+
+  return crypto.subtle.importKey('raw', raw, { name: 'HKDF' }, false, ['deriveKey', 'deriveBits']);
+}
+```
+
+Use Argon2id (not PBKDF2 or bcrypt) for password hashing. It's both memory-hard and GPU-resistant, and it's the current OWASP recommendation for new systems.
+
+**From a random master key (no password):**
+
+If you control key issuance—for example in an enterprise environment—generate 256 bits of randomness and store it in the device's secure enclave or via the Web Crypto API's non-extractable `CryptoKey`. Never export it to JavaScript-accessible memory.
+
+## Step 2: Per-File Key Derivation
+
+Never encrypt multiple files with the same key. Derive a unique key per file using HKDF, with the file's ID and a purpose label as context:
+
+```typescript
+async function deriveFileKey(masterKey: CryptoKey, fileId: string): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(`bitatlas:file-encryption:${fileId}`);
+
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info },
+    masterKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+```
+
+Using HKDF this way means:
+- Key compromise for one file doesn't compromise others.
+- Revoking access to a file only requires rekeying that file, not regenerating the master key.
+- The server never needs to know the relationship between files and keys.
+
+## Step 3: Chunked Encryption
+
+Encrypting a file as one monolithic blob creates two problems: you can't stream large files, and a single corrupted byte invalidates the entire file.
+
+Chunk files into fixed-size blocks (1 MB is a reasonable default) and encrypt each block independently. Critically, include the block index in the AES-GCM additional data (AAD) to prevent block reordering attacks:
+
+```typescript
+const CHUNK_SIZE = 1024 * 1024; // 1 MB
+
+async function encryptChunk(
+  key: CryptoKey,
+  chunk: Uint8Array,
+  chunkIndex: number
+): Promise<{ iv: Uint8Array; ciphertext: Uint8Array }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const indexBytes = new Uint8Array(4);
+  new DataView(indexBytes.buffer).setUint32(0, chunkIndex, false);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: indexBytes, tagLength: 128 },
+    key,
+    chunk
+  );
+
+  return { iv, ciphertext: new Uint8Array(ciphertext) };
+}
+```
+
+AES-GCM's authentication tag covers both the ciphertext and the AAD. If an attacker reorders chunks or replaces one block with another file's block, decryption will fail with a `DOMException`. This is the integrity guarantee you need.
+
+Store chunks as `iv || ciphertext`. The IV (12 bytes for AES-GCM) is safe to store in plaintext alongside the ciphertext.
+
+## Step 4: Metadata Encryption
+
+File metadata is just as sensitive as file content. Filenames, extensions, sizes, and access timestamps can reveal a lot about a user's activity. Encrypt all of it.
+
+Create a separate metadata structure per file, serialize it as JSON, and encrypt it with its own derived key:
+
+```typescript
+interface FileMetadata {
+  name: string;
+  mimeType: string;
+  size: number;
+  createdAt: number;
+  chunkCount: number;
+  chunkSize: number;
+}
+
+async function encryptMetadata(
+  masterKey: CryptoKey,
+  fileId: string,
+  metadata: FileMetadata
+): Promise<{ iv: Uint8Array; ciphertext: Uint8Array }> {
+  const metaKey = await deriveKey(masterKey, `bitatlas:meta:${fileId}`);
+  const plaintext = new TextEncoder().encode(JSON.stringify(metadata));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, tagLength: 128 },
+    metaKey,
+    plaintext
+  );
+
+  return { iv, ciphertext: new Uint8Array(ciphertext) };
+}
+```
+
+Store encrypted metadata as a separate object from the file chunks. The server sees two opaque blobs: metadata blob and chunk blobs. It has no idea what they are.
+
+## Step 5: Avoiding Metadata Leakage at the Transport Layer
+
+Even perfect encryption leaks information if you're not careful about transport-level metadata:
+
+**File size:** Pad files to the next power-of-two chunk count before encrypting, or use fixed chunk counts per storage tier. This prevents the server from inferring file types from sizes.
+
+**Access patterns:** If the server can see which chunks are accessed together, it may infer file structure. If this matters for your threat model, use oblivious RAM (ORAM) schemes—though these add significant complexity and latency.
+
+**Upload timing:** Batch uploads and use consistent timing. Uploading exactly 47 chunks at 09:15 every morning is a pattern.
+
+For most developer use cases, size-padding and access-pattern randomization are the right trade-off between security and complexity.
+
+## Step 6: Key Sharing and Collaboration
+
+Sharing files in an E2EE system requires sharing keys without the server learning them. The standard approach is public-key encryption of the symmetric file key.
+
+Each user has an asymmetric keypair (X25519 or RSA-OAEP). To share a file:
+
+1. Encrypt the file's symmetric key with the recipient's public key.
+2. Store the encrypted key bundle server-side alongside the file metadata.
+3. The recipient decrypts the key bundle with their private key on their device.
+
+The server stores `encrypt_recipient_pubkey(file_key)` but never sees `file_key`.
+
+This is the design used by ProtonDrive, Tresorit, and Keybase—and it's the right one.
+
+## Putting It Together: Upload Flow
+
+```
+1. Generate fileId (random UUID)
+2. Derive fileKey = HKDF(masterKey, fileId, "encryption")
+3. Split file into 1 MB chunks
+4. For each chunk i:
+     iv_i = random(12 bytes)
+     ciphertext_i = AES-GCM-Encrypt(fileKey, chunk_i, iv=iv_i, aad=i)
+     upload(fileId, i, iv_i || ciphertext_i)
+5. Encrypt metadata with separate metaKey
+6. Upload encrypted metadata blob
+7. If sharing: encrypt fileKey with recipient pubkeys, upload key bundles
+```
+
+Download is the exact reverse. The server remains a passive byte store throughout.
+
+## The BitAtlas Approach
+
+BitAtlas is built on exactly this architecture. When you store a file with BitAtlas, the encryption happens in your browser or application before upload. We store ciphertext, IVs, and encrypted metadata blobs. Our servers have no access to your plaintext—not now, not if compelled, not if breached.
+
+The master key lives in your control. We provide the infrastructure and the client-side SDK; you keep the secrets.
+
+If you're building on top of BitAtlas, our SDK exposes the chunked E2EE pipeline as a single `uploadFile()` call. Under the hood it runs the key derivation, chunking, and authenticated encryption described above—auditable, open-source, and based entirely on Web Crypto API primitives.
+
+## Next Steps
+
+- Read the [Web Crypto API specification](https://www.w3.org/TR/WebCryptoAPI/) for authoritative NIST-backed primitive documentation.
+- Explore [noble-ciphers](https://github.com/paulmillr/noble-ciphers) for a pure-JS, audited alternative to Web Crypto in environments where the native API isn't available.
+- Consider formal threat modeling: define what "zero server knowledge" means for your specific adversary model before you write the first line of crypto code.
+
+End-to-end encryption for file storage isn't magic—it's a handful of well-understood primitives composed carefully. The hard part isn't the cryptography; it's the key management, the UX for key recovery, and the operational discipline to keep server-side code from ever touching plaintext. Get those right and the cryptography will take care of itself.
