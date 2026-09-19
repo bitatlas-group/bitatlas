@@ -1,0 +1,126 @@
+---
+title: "Building Local-First Apps That Actually Sync: CRDTs and the End of Merge Conflicts"
+description: "A practical guide to local-first architecture—building apps that work offline, sync seamlessly across devices, and give users true ownership of their data using CRDTs and modern sync protocols."
+date: "2026-09-19"
+author: "BitAtlas Team"
+slug: "local-first-data-sync"
+keywords: ["local-first software", "CRDTs", "offline-first", "data synchronization", "conflict resolution", "Yjs", "Automerge", "peer-to-peer"]
+readingTime: "7 min read"
+---
+
+Most apps today are built inside-out. The server holds the truth; the client holds a cached copy. Go offline and your app either breaks entirely or optimistically writes to a queue that may or may not flush correctly. Users don't own their data—they rent access to it from your infrastructure.
+
+Local-first software flips this model. The device is the primary store. The network is a sync layer. The user owns the data even when your server is down—or gone entirely.
+
+This isn't a niche philosophy. It's increasingly the right architecture for any app where latency, availability, or user trust matters. And with modern tooling, it's more approachable than it looks.
+
+## What "Local-First" Actually Means
+
+The term was coined by Ink & Switch in their 2019 essay, but the ideas are older. A local-first app satisfies these constraints:
+
+- **Works offline without degradation.** Not "read-only offline." Actually works.
+- **Syncs across devices without conflicts.** Not "last write wins." Real conflict resolution.
+- **Keeps data on the device.** Users can export, inspect, and own their data independent of your service.
+- **Collaboration is additive, not centralized.** Multiple users can edit simultaneously and converge to the same state.
+
+The hard part historically was that last point. How do you let two people edit the same document offline and merge their changes correctly when they reconnect?
+
+## CRDTs: Conflict-Free by Design
+
+A Conflict-free Replicated Data Type (CRDT) is a data structure with a mathematically guaranteed merge property: any two replicas that have seen the same set of operations will converge to the same state, regardless of the order those operations arrived.
+
+There are two main families:
+
+**State-based CRDTs (CvRDTs)** merge by sharing the full state. You send your entire replica to a peer, and they compute `merge(their_state, your_state)`. The merge function must be commutative, associative, and idempotent. Simple to reason about, expensive at scale.
+
+**Operation-based CRDTs (CmRDTs)** share only the operations. You broadcast `insert(char, position, timestamp)` and every replica applies it. More efficient, but requires reliable delivery—every operation must eventually reach every replica.
+
+In practice, most production CRDT libraries blend both approaches for efficiency.
+
+### A concrete example: the OR-Set
+
+Suppose two users are offline and each deletes a different item from the same shopping list. Naive "last write wins" would clobber one deletion. A naive "merge union" would resurrect deleted items.
+
+An Observed-Remove Set (OR-Set) solves this by tagging each addition with a unique token. To remove an element, you remove all tokens you've *observed* for it. If the other user added the element again while offline, their new addition has new tokens you haven't observed—so it survives the merge. Deletions are precise; additions from concurrent edits are preserved.
+
+## The Two Libraries Worth Knowing
+
+### Yjs
+
+[Yjs](https://github.com/yjs/yjs) is the most widely used CRDT library for collaborative editing. It implements a CRDT for sequences (text, arrays) and maps, with adapters for ProseMirror, Quill, Monaco, CodeMirror, and others.
+
+```js
+import * as Y from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
+
+const doc = new Y.Doc()
+const provider = new WebsocketProvider('wss://your-signaling-server', 'my-room', doc)
+
+// Shared text, synced across all peers
+const ytext = doc.getText('document')
+ytext.insert(0, 'Hello, world')
+```
+
+Yjs uses a "YATA" (Yet Another Transformation Approach) algorithm that's extremely fast for text. It handles millions of operations without degradation, making it suitable for production collaborative editors.
+
+Persistence is pluggable. Store to IndexedDB for offline survival:
+
+```js
+import { IndexeddbPersistence } from 'y-indexeddb'
+
+const persistence = new IndexeddbPersistence('my-doc', doc)
+persistence.whenSynced.then(() => {
+  console.log('Loaded from IndexedDB')
+})
+```
+
+### Automerge
+
+[Automerge](https://automerge.org/) takes a different approach. Instead of wrapping specific data types, it provides a CRDT-backed JSON document. You write plain JS mutations; the library intercepts them and produces a merge-safe operation log.
+
+```js
+import * as A from '@automerge/automerge'
+
+let doc = A.init()
+doc = A.change(doc, d => {
+  d.items = []
+  d.items.push({ text: 'Buy milk', done: false })
+})
+
+// Later, merge a peer's changes
+const merged = A.merge(doc, peerDoc)
+```
+
+Automerge 2.0 rewrote the core in Rust (compiled to WASM), cutting memory usage by roughly 10x and making it viable for large documents. The sync protocol is efficient: peers exchange a compact "bloom filter" of what they know, then the server sends only the missing operations.
+
+## Sync Without a Centralized Server
+
+If you want true local-first behavior, your sync layer shouldn't be a bottleneck or single point of failure. Several approaches exist:
+
+**WebRTC (peer-to-peer):** Yjs ships `y-webrtc`, which uses a signaling server only to establish connections, then transfers data directly between peers. The signaling server never sees document content—just connection metadata.
+
+**Relay servers:** For latency and NAT traversal, a relay that stores and forwards encrypted blobs is pragmatic. The server can't read the content if you encrypt before syncing. This is close to what BitAtlas does: client-side encryption means sync infrastructure is just a dumb pipe.
+
+**Sync engines like Electric SQL:** Projects like ElectricSQL bring CRDT-style sync to Postgres—changes flow from the database to clients and back without custom sync code. Useful when you have existing relational data and want to add offline capability.
+
+## Practical Considerations
+
+**Not everything needs a CRDT.** User settings, account data, append-only logs—these are easier to handle with simpler strategies (last-write-wins, event sourcing). CRDTs add complexity; use them where concurrent edits are actually possible.
+
+**Storage grows.** CRDTs keep operation history to resolve merges. Without compaction ("squashing" old history into a snapshot), your storage will grow unboundedly. Both Yjs and Automerge support snapshot-based compaction; build it in from the start.
+
+**Undo is hard.** Because operations from multiple peers interleave, local undo isn't trivial. Yjs has a `UndoManager` that correctly scopes undo to the local user's operations. Design this into your UX before launch.
+
+**Testing is different.** You can't just write unit tests against a single state. Write property-based tests that verify convergence: generate random sequences of concurrent operations on two replicas, merge in both orders, and assert the results are equal.
+
+## Why This Matters for Privacy-First Apps
+
+If you're building an app where user data should be private—notes, finances, health data, anything sensitive—local-first isn't just a reliability improvement. It's a trust primitive.
+
+When the primary copy lives on the user's device and sync happens over an encrypted channel, your server never has plaintext access to user data. You become unable to be breached in ways that expose that data. Users can audit what's stored locally. They can delete everything locally and know it's gone.
+
+Combining local-first architecture with client-side encryption (encrypt before sync, decrypt only on device) gives you an app that's both highly available and genuinely private. The two goals reinforce each other.
+
+---
+
+The tooling is mature. Yjs and Automerge are both production-ready. The sync protocols are well-documented. The main barrier is mental: accepting that the server is not the source of truth. Once you internalize that, local-first becomes less exotic and more like what good software architecture has always looked like—resilient, user-controlled, and honest about where data actually lives.
