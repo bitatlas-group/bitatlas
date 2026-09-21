@@ -1,0 +1,155 @@
+---
+title: "Homomorphic Encryption: A Developer's Primer on Computing Over Encrypted Data"
+description: "Fully homomorphic encryption (FHE) lets you run computations directly on ciphertext without ever decrypting it. Here's what every developer needs to know — the math, the libraries, and where it actually makes sense to use it."
+date: "2026-09-21"
+author: "BitAtlas Team"
+slug: "homomorphic-encryption-primer"
+keywords: ["homomorphic encryption", "FHE", "privacy-preserving computation", "encrypted computation", "TFHE"]
+readingTime: "8 min read"
+---
+
+Imagine sending your bank account balance to a third-party service for analysis — but the service never sees the actual number. It runs all its computations, hands you back a result, and you decrypt it on your end. The numbers stayed secret the entire time.
+
+That's fully homomorphic encryption (FHE) in a nutshell, and it's no longer just theoretical. Production-grade libraries exist today, and real applications are shipping. This post cuts through the academic fog and gives you a practical mental model.
+
+## The Core Idea
+
+Classical encryption is a one-way gate: lock the data, send it, unlock it, process it. FHE breaks that model entirely. An FHE scheme is a pair of algorithms such that:
+
+```
+Encrypt(a) ⊕ Encrypt(b) = Encrypt(a + b)
+Encrypt(a) ⊗ Encrypt(b) = Encrypt(a × b)
+```
+
+You can add and multiply ciphertexts, and the result decrypts to the same value you'd get if you'd done the arithmetic in the clear. Any function that can be expressed as a circuit of additions and multiplications — which is every program you've ever written — can be evaluated on encrypted inputs.
+
+The catch: it's slow. We'll get to that.
+
+## A Brief Taxonomy
+
+Not all FHE is the same. There's a spectrum:
+
+**Partially Homomorphic (PHE)** — supports either addition *or* multiplication, but not both indefinitely. RSA is multiplicatively homomorphic. Paillier is additively homomorphic. Useful when you only need one operation (e.g. summing salaries without revealing them).
+
+**Somewhat Homomorphic (SHE)** — supports both operations, but only up to a bounded circuit depth. Noise accumulates with each operation; once it exceeds a threshold, decryption fails. Real-world use requires keeping circuits shallow.
+
+**Fully Homomorphic (FHE)** — supports arbitrary depth via *bootstrapping*, a technique that "refreshes" a ciphertext by homomorphically evaluating the decryption circuit to reduce accumulated noise. This is the holy grail, and it's what most new work targets.
+
+## The Noise Problem
+
+Every modern FHE scheme encodes data inside a noisy encoding. This is intentional — the noise is what makes the scheme semantically secure. But arithmetic operations amplify it:
+
+- Addition roughly doubles noise
+- Multiplication squares it
+
+After enough multiplications, the signal drowns. Bootstrapping resets the noise, but it's expensive — a single bootstrapping operation can take hundreds of milliseconds even on fast hardware. Circuit design in FHE means minimizing multiplicative depth above all else.
+
+## RLWE: The Foundation Most Schemes Use
+
+Modern FHE schemes (BGV, BFV, CKKS, TFHE, FHEW) are built on the **Ring Learning With Errors (RLWE)** problem. The short version: given a polynomial ring `R_q = Z_q[x]/(x^n + 1)` and a secret polynomial `s`, it's computationally hard to distinguish `(a, a·s + e)` from a random pair, where `e` is small error.
+
+You don't need to understand the algebra deeply to use FHE libraries — just know that `n` (the ring dimension) and `q` (the ciphertext modulus) are the primary performance knobs. Bigger `n` means more security and more noise headroom, but dramatically slower operations.
+
+## The Schemes Developers Actually Encounter
+
+**BFV and BGV** — integer arithmetic over `Z_t`. Great for exact integer computation. BFV is a bit simpler to reason about; BGV is more efficient for deep circuits. Available in Microsoft SEAL and OpenFHE.
+
+**CKKS (Cheon-Kim-Kim-Song)** — approximate arithmetic over complex numbers. You lose a few bits of precision per operation, but this is acceptable for machine learning inference, statistics, and signal processing. Often 10–100x faster than BFV for the same circuit because it batches more values per ciphertext. The go-to for ML privacy.
+
+**TFHE (Torus FHE)** — operates bitwise on individual bits with fast bootstrapping. Each gate takes ~1–10ms on CPU but bootstrapping is cheap enough that you can do it *every gate*. Enables arbitrary boolean circuits with fixed, predictable latency. Used by Zama, and the basis of `concrete` and `concrete-ml`.
+
+**FHEW** — similar to TFHE. Faster bootstrapping in some implementations.
+
+## Current Libraries Worth Knowing
+
+```
+Microsoft SEAL       C++, BFV/BGV/CKKS, widely deployed, MIT license
+OpenFHE              C++, BFV/BGV/CKKS/TFHE/FHEW, successor to PALISADE
+concrete (Zama)      Rust + Python, TFHE, designed for ML workflows
+concrete-ml (Zama)   scikit-learn/PyTorch model compilation to FHE circuits
+Lattigo              Go, BFV/BGV/CKKS, multiparty protocols included
+HElib                C++, BGV/CKKS, from IBM Research, production-hardened
+```
+
+If you're doing ML inference on private data: `concrete-ml`. If you're building a backend service in C++: SEAL or OpenFHE. If you need Go: Lattigo. If you're doing boolean circuit computation: OpenFHE's FHEW/TFHE modes.
+
+## A Concrete Example: Encrypted Mean
+
+Here's what computing a mean over encrypted salary data looks like in Python with `concrete`:
+
+```python
+import numpy as np
+import concrete.numpy as cnp
+
+def mean_salary(salaries):
+    return np.sum(salaries) // len(salaries)
+
+# Compile for FHE
+compiler = cnp.Compiler(mean_salary, {"salaries": "encrypted"})
+inputset = [np.array([50000, 75000, 90000, 60000])]
+circuit = compiler.compile(inputset)
+
+# Client side
+salaries = np.array([52000, 81000, 95000, 67000])
+encrypted = circuit.encrypt(salaries)
+
+# Server side (never sees plaintext)
+encrypted_result = circuit.run(encrypted)
+
+# Client side
+result = circuit.decrypt(encrypted_result)
+print(result)  # 73750
+```
+
+The server receives and returns only ciphertexts. It has zero information about the individual salaries.
+
+## Performance Reality Check
+
+FHE is orders of magnitude slower than plaintext computation. In 2026, rough benchmarks on a modern CPU:
+
+- Simple integer addition: ~microseconds
+- 32-bit integer multiplication (BFV): ~milliseconds
+- CKKS dot product (batched, 4096 elements): tens of milliseconds
+- TFHE gate: ~1ms per gate, no bootstrapping overhead
+
+A neural network inference that takes 10ms in plaintext might take 30 seconds in CKKS. A sorting network on 16 TFHE-encrypted integers takes a few seconds.
+
+GPU acceleration helps significantly — CKKS inference can reach near-realtime for smaller models on modern GPUs. Hardware accelerators (Intel HEXL, dedicated FHE ASICs in research) are closing the gap further.
+
+## Where FHE Is Worth the Overhead
+
+**Medical data analysis** — a hospital shares patient records encrypted under the patient's key; an analytics service runs queries without ever seeing PHI. HIPAA compliance becomes structurally enforced.
+
+**Private ML inference** — users submit queries to a model without revealing their inputs. The model owner never learns what the user asked. Especially compelling for health, legal, and financial queries.
+
+**Federated learning aggregation** — gradient aggregation on a central server without exposing individual gradients. Defends against gradient inversion attacks.
+
+**Compliance-sensitive multi-party computation** — two companies want to compute a joint statistic (e.g. fraud rate overlap) without sharing raw records. FHE (or threshold FHE) lets them outsource computation to a neutral server.
+
+**Verifiable computation substrates** — FHE and ZK proofs are increasingly used together. FHE handles confidential computation; ZK handles proof that it was done correctly.
+
+## What FHE Does Not Solve
+
+FHE protects data in use, but not:
+
+- **Data at rest** — standard symmetric encryption handles this
+- **Data in transit** — TLS handles this
+- **Key management** — if the decryption key is compromised, everything is compromised
+- **Access pattern leakage** — which ciphertexts you access is still observable; combine with ORAM if this matters
+- **Adversarial inputs** — a malicious server could submit crafted ciphertexts to probe the decryption oracle
+
+FHE is a tool, not a panacea. It shines specifically when a computation must run on a server that you don't trust to see the input.
+
+## Getting Started
+
+The fastest path to a working FHE program:
+
+1. Install `concrete-ml` if you have a scikit-learn model: `pip install concrete-ml`
+2. Replace `from sklearn.linear_model import LogisticRegression` with `from concrete.ml.sklearn import LogisticRegression`
+3. Add `.compile()` and the encrypt/run/decrypt pattern
+
+For lower-level control, the OpenFHE Python bindings (`pip install openfhe`) give you access to the full BFV/BGV/CKKS/TFHE suite with a clean API.
+
+The field is moving fast. Zama's Concrete Framework v2 cut TFHE latency by roughly 5x compared to a year ago. Intel's HEXL library accelerates CKKS on AVX-512 hardware. Hardware-accelerated FHE chips are in early silicon. The overhead that feels prohibitive today will look much more manageable in two or three years — and the design patterns you establish now will carry forward.
+
+Start with a narrow, well-defined computation where the trust model genuinely demands privacy — encrypted inference, secure aggregation, or a compliance use case with a clear regulatory payoff. Get one thing working end-to-end. The rest follows naturally.
