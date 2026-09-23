@@ -1,0 +1,118 @@
+---
+title: "Secure Multi-Party Computation: How to Compute on Data Nobody Sees"
+description: "What secure multi-party computation is, how secret sharing schemes make it work, and where MPC fits in the privacy-preserving toolkit alongside ZK proofs and FHE."
+date: "2026-09-23"
+author: "BitAtlas Team"
+slug: "secure-multi-party-computation-intro"
+keywords:
+  - "secure multi-party computation"
+  - "MPC"
+  - "privacy-preserving"
+  - "secret sharing"
+  - "collaborative computation"
+readingTime: "8 min read"
+---
+
+Imagine three competing hospitals that want to discover which of their patient populations is most at risk for a particular disease — without sharing a single patient record. Or think about a salary negotiation where five co-workers want to know whether any of them is being paid less than the group average, without anyone revealing their individual salary.
+
+Both of these are problems that **Secure Multi-Party Computation (MPC)** was designed to solve.
+
+MPC lets two or more parties compute a function over their combined inputs while each party learns only the output — nothing about anyone else's private inputs. Cryptographers often describe it with Andrew Yao's two-millionaires problem from 1982: two millionaires want to find out who is richer without disclosing their actual wealth. MPC gives them a protocol to do exactly that.
+
+This post covers what MPC is, how the most common underlying mechanism (secret sharing) works, and how MPC compares to the rest of the privacy-preserving toolkit: zero-knowledge proofs and fully homomorphic encryption.
+
+---
+
+## What "secure" actually means in MPC
+
+Before diving into mechanisms, it helps to pin down the security model. An MPC protocol is secure if it satisfies two properties:
+
+- **Correctness** – The output is accurate. No party can force the computation to produce a wrong answer.
+- **Privacy** – A party learns nothing beyond the output and what they can infer from their own input and the output together. Even if some parties collude, they gain no information about the honest parties' inputs.
+
+Most practical protocols specify a **corruption threshold**: up to *t* out of *n* parties can be corrupted (either passively — they follow the protocol but try to infer inputs from what they observe — or actively — they send arbitrary messages). A protocol that tolerates fewer corruptions is cheaper to run; one that tolerates more is more robust but heavier.
+
+---
+
+## Secret sharing: the core building block
+
+The most common mechanism inside MPC protocols is **secret sharing**, specifically Shamir's Secret Sharing from 1979.
+
+The idea: a dealer splits a secret *s* into *n* shares. Any *t* or more shares reveal *s*; any *t-1* or fewer shares reveal absolutely nothing.
+
+Here is how it works in practice. Pick a prime *p* larger than your secret. Choose a random polynomial of degree *t-1* whose constant term is *s*:
+
+```
+f(x) = s + a₁x + a₂x² + … + a_(t-1)x^(t-1)  mod p
+```
+
+Give party *i* the share `f(i)`. To reconstruct *s*, collect any *t* shares and use Lagrange interpolation to recover `f(0) = s`. With fewer than *t* shares, the polynomial is underdetermined — every possible value of *s* is equally likely.
+
+### Doing arithmetic on shares
+
+The elegant part: you can compute on shares without ever revealing the underlying secret.
+
+**Addition is free.** If Alice holds `f(i)` for secret *a*, and Bob holds `g(i)` for secret *b*, they each add their shares locally: `(f + g)(i) = f(i) + g(i)`. The resulting shares reconstruct `a + b`. No communication needed.
+
+**Multiplication requires a round of communication.** When you multiply two degree-*t* polynomials, you get a degree-*2t* polynomial. To keep share sizes manageable, the parties run a degree-reduction sub-protocol (the BGW protocol's multiplication gate) that requires one round of messages among all *n* parties.
+
+This trade-off — free linear operations, costly nonlinear ones — shapes how MPC protocols are designed. Engineers often express computations as **arithmetic circuits** to minimize the number of multiplication gates.
+
+---
+
+## Other MPC flavours
+
+Shamir-based protocols work over arithmetic circuits. A different family works over **boolean circuits** (AND/OR/XOR gates), treating secrets as bits. Yao's **Garbled Circuits** protocol, designed for two parties, turns a boolean circuit into a garbled form that one party evaluates without learning the intermediate wire values. It is efficient for a single evaluation but does not compose cheaply across many computations.
+
+More recent constructions like **SPDZ** (pronounced "Speedz") combine information-theoretic message authentication codes with preprocessing to handle dishonest-majority settings efficiently — meaning more than half of the parties can be actively corrupted and the protocol still produces a correct, private output.
+
+---
+
+## Where MPC fits alongside ZKPs and FHE
+
+The three major branches of advanced cryptographic computing each answer a different question:
+
+| Technique | Question answered | Typical use case |
+|---|---|---|
+| **MPC** | *n* parties compute *f(x₁, x₂, …, xₙ)* together | Collaborative analytics, threshold signing, private auctions |
+| **Zero-Knowledge Proofs** | One party proves a statement is true without revealing why | Regulatory compliance proofs, anonymous credentials |
+| **Fully Homomorphic Encryption (FHE)** | One party computes on another party's encrypted data alone | Outsourced ML inference, private database queries |
+
+They are complementary, not competing. A real-world system often combines them:
+
+- Use **FHE** when a single server needs to process encrypted client data.
+- Use **ZKPs** when a party needs to convince a verifier of a property without disclosing inputs.
+- Use **MPC** when multiple *data owners* need to jointly compute without a trusted third party.
+
+MPC has a cost that FHE shares but ZKPs largely avoid: **communication**. Every multiplication gate in an MPC protocol requires messages between parties. Latency and bandwidth dominate performance at scale. This is why MPC is often pre-processed: parties run an **offline phase** to generate correlated randomness (Beaver triples) before the actual data is known, then use a cheap **online phase** when the secret inputs arrive.
+
+---
+
+## Practical deployment: threshold key management
+
+The most widely deployed application of MPC today is **threshold signing**. A private key is split into shares held by separate servers (or separate HSMs). Signing a message requires a threshold of those shares to participate in an MPC protocol. The full private key is never assembled in one place.
+
+Wallet infrastructure, certificate authorities, and payment processors use this pattern. If an attacker compromises fewer than *t* servers, they get a useless share. The signing policy (which transactions can be signed, with what approval flow) is enforced collaboratively, not by trusting a single key custodian.
+
+For cloud storage applications like BitAtlas, MPC also enables **collaborative access control**: multiple key holders must agree before decryption is possible, without any single party holding the master key. The cryptography enforces the policy; trust in individuals is not required.
+
+---
+
+## Getting started with MPC
+
+If you want to experiment, a few well-maintained libraries cover the main use cases:
+
+- **[MP-SPDZ](https://github.com/data61/MP-SPDZ)** – Academic but production-capable, supports many protocols.
+- **[MOTION](https://github.com/encryptogroup/MOTION)** – Clean C++ implementation of several boolean and arithmetic protocols.
+- **[tf-encrypted](https://github.com/tf-encrypted/tf-encrypted)** – MPC on top of TensorFlow for privacy-preserving ML.
+- **[Shamir's Secret Sharing in JavaScript](https://github.com/dsprenkels/sss)** – Minimal, audited implementation for key splitting in browser/Node environments.
+
+MPC is no longer just an academic curiosity. Threshold cryptography is shipping in production hardware wallets today; privacy-preserving analytics is live in regulated industries. The main remaining friction is performance: a circuit with millions of multiplication gates across a high-latency WAN is still expensive. Hardware acceleration and better preprocessing are closing that gap quickly.
+
+---
+
+## Summary
+
+Secure Multi-Party Computation solves a fundamental problem: computing over sensitive data that nobody is willing (or legally allowed) to centralise. Secret sharing turns a private value into harmless-looking shares; arithmetic over those shares lets parties collaborate on a computation whose inputs stay private. MPC, ZKPs, and FHE each occupy a different niche in the privacy-preserving stack, and real systems increasingly combine all three.
+
+If your application handles data from multiple parties who do not fully trust each other — and in 2026, that is most applications — MPC is worth understanding, even if you end up reaching for a library rather than rolling your own protocol.
