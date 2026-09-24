@@ -1,0 +1,160 @@
+---
+title: "Zero-Knowledge Backup Encryption: Disaster Recovery Without Compromising Privacy"
+description: "How to design backup encryption schemes that preserve zero-knowledge guarantees while enabling disaster recovery through secret sharing, key escrow alternatives, and cryptographic redundancy."
+date: "2026-09-24"
+author: "BitAtlas Team"
+slug: "zero-knowledge-backup-encryption-schemes"
+keywords:
+  - zero-knowledge
+  - backup encryption
+  - secret sharing
+  - key management
+  - disaster recovery
+  - Shamir secret sharing
+  - cryptographic redundancy
+readingTime: "7 min read"
+---
+
+Zero-knowledge encryption gives users something powerful: the storage provider can never read their data. But it creates a sharp engineering problem the moment you think about backups. If only the user holds the key, what happens when they lose it?
+
+This tension — between privacy and recoverability — is one of the most underspecified problems in applied cryptography. This post walks through the patterns developers actually use to resolve it.
+
+## The Core Tension
+
+In a classical cloud storage system, the provider holds encryption keys. Disaster recovery is trivial: the provider decrypts your data on your behalf when you prove your identity.
+
+In a zero-knowledge system, the provider never holds keys. The user holds them. Lose the key, lose the data — full stop.
+
+The naive fix is to store a copy of the key with the provider. That immediately breaks the zero-knowledge property. So the engineering question becomes: how do you give users recovery options without handing the provider the key?
+
+## Option 1: Shamir Secret Sharing (SSS)
+
+Shamir Secret Sharing is the most principled approach. The idea: split the key into `n` shares such that any `k` of them reconstruct the original key, but `k-1` shares reveal nothing.
+
+A practical setup for an end-user product:
+
+- Split the master key into 5 shares with a 3-of-5 threshold
+- Give one share to the provider (encrypted under the provider's PKI key — this is not zero-knowledge but limits exposure)
+- Give two shares to the user for offline storage (paper, hardware token)
+- Give one share to a trusted contact (optional)
+- Give one share to a recovery service the user controls (email-based OTP, authenticator app)
+
+To recover, the user combines any three of these sources. No single party has enough to reconstruct the key.
+
+```typescript
+import { split, combine } from 'shamirs-secret-sharing';
+
+const masterKey = crypto.getRandomValues(new Uint8Array(32));
+const shares = split(masterKey, { shares: 5, threshold: 3 });
+
+// Store share[0] with the provider, encrypted under provider's pubkey
+// Store share[1] and share[2] offline
+// Give share[3] to trusted contact
+// Deliver share[4] to recovery service
+```
+
+The critical implementation detail: shares stored with third parties must themselves be encrypted. The provider's share should be wrapped under the provider's public key so only the provider can use their share — but they cannot combine it with others they don't hold.
+
+## Option 2: Key Derivation from Multiple Factors
+
+Instead of splitting an existing key, derive the key from multiple independent inputs that only the user can supply. A simple three-factor derivation:
+
+```typescript
+async function deriveKey(
+  password: string,
+  deviceSecret: Uint8Array,
+  recoveryCode: string
+): Promise<CryptoKey> {
+  const combined = new TextEncoder().encode(
+    password + ':' + recoveryCode
+  );
+  const baseKey = await crypto.subtle.importKey(
+    'raw', combined, 'HKDF', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: deviceSecret, info: new Uint8Array() },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false, ['encrypt', 'decrypt']
+  );
+}
+```
+
+Recovery works if the user can supply any combination that reproduces the same derivation output. Lose one factor — say the device — but have the password and recovery code, and they can re-derive the same key on a new device.
+
+The limitation: this ties key security to the weakest factor. If the recovery code is stored in plain text somewhere, the scheme degrades to single-factor.
+
+## Option 3: Encrypted Key Export + Hardware Root of Trust
+
+For enterprise deployments or high-assurance consumer products, you can anchor key backup to a hardware root of trust:
+
+1. Generate a device key in the platform's secure enclave (iOS Secure Enclave, Android StrongBox, TPM on desktop)
+2. Wrap the master key under this device key
+3. Back up the wrapped key to the provider (the provider sees ciphertext they can't unwrap)
+4. Recovery requires the original device — or a recovery flow that re-establishes device trust
+
+This is effectively what iCloud Keychain does. The interesting variant for zero-knowledge products: use a hardware security key (FIDO2/WebAuthn) as the recovery root. The user registers a YubiKey during account creation; the master key is wrapped under the credential backed by the security key. Backup is the encrypted blob; recovery requires the physical key.
+
+```typescript
+// Pseudocode — WebCrypto + WebAuthn-derived key
+const credential = await navigator.credentials.create({
+  publicKey: { /* attestation params */ }
+});
+const recoveryKey = await deriveKeyFromCredential(credential);
+const wrappedMasterKey = await wrapKey(masterKey, recoveryKey);
+// Store wrappedMasterKey with provider — they cannot unwrap it
+```
+
+## The Key Escrow Alternative Nobody Likes (But Everyone Needs)
+
+For regulated industries — healthcare, finance, legal — users sometimes cannot hold sole custody of encryption keys. Regulators require that someone authorized (the employer, the platform operator, a court) can access data.
+
+The zero-knowledge-adjacent pattern here: threshold decryption with auditable access.
+
+- Key is split between user and a regulated escrow service
+- Escrow service requires dual authorization (legal order + user consent, or a quorum of administrators) to use their share
+- All escrow access is logged to an append-only audit trail, ideally on a public ledger
+
+This preserves operational confidentiality — the escrow party cannot read data unilaterally — while satisfying legal requirements. It is not zero-knowledge in the strict sense but provides a meaningful privacy guarantee beyond naive key escrow.
+
+## Backup Encryption Beyond the Key
+
+One detail developers miss: backing up the key is necessary but not sufficient. You also need to back up the key derivation parameters.
+
+If you use PBKDF2 or Argon2 to derive a key from a password, the salt is part of the secret material. Lose the salt, and the same password produces a different key.
+
+Treat all of the following as recovery material requiring the same protection as the key itself:
+
+- Salt values for any KDF
+- Key version identifiers (if you rotate keys)
+- Algorithm parameters (key size, cipher mode)
+- Key wrapping hierarchy descriptions
+
+Store these alongside the key material in your backup scheme. A common failure mode: developers encrypt and back up the key but store the salt in the database, then lose the database.
+
+## Testing Recovery Before Disaster
+
+The only way to know your recovery scheme works is to test it deliberately. Build recovery drills into your system design:
+
+1. **Scheduled recovery tests** — periodically derive or reconstruct a key in a sandboxed environment and verify it decrypts known ciphertext
+2. **Recovery simulation** — give QA the recovery shares, not the original key, and verify they can access test data
+3. **Partial loss scenarios** — test reconstruction when one share is unavailable; verify the threshold actually works
+
+This is uncomfortable to build and easy to skip. It is also the only signal you have that your users can actually get their data back.
+
+## Choosing the Right Pattern
+
+The right backup scheme depends on your threat model:
+
+| Scenario | Recommended Pattern |
+|---|---|
+| Consumer app, ease of use priority | Multi-factor key derivation with recovery code |
+| High-assurance consumer, loss tolerance low | Shamir SSS with trusted contacts |
+| Enterprise, compliance requirements | Threshold escrow with audit trail |
+| Developer tool, hardware-first users | Hardware-bound key with FIDO2 recovery |
+
+Zero-knowledge encryption is not incompatible with disaster recovery — it just requires more deliberate engineering than the "recover by emailing the user" default. The patterns above have been deployed at scale. Pick the one that matches your users' threat model and test it before you need it.
+
+---
+
+BitAtlas provides zero-knowledge encrypted storage with built-in key backup support. Developers building on our API get Shamir-based recovery out of the box, with hooks to plug in your own trust anchors.
