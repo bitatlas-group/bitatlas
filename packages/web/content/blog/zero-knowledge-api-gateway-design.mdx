@@ -1,0 +1,147 @@
+---
+title: "Designing a Zero-Knowledge API Gateway"
+description: "How to build an API gateway that proxies requests without ever seeing plaintext payloads — using blind relays, ZK proofs for authentication, and request signing to keep data private from the infrastructure itself."
+date: "2026-09-26"
+author: "BitAtlas Team"
+slug: "zero-knowledge-api-gateway-design"
+keywords: ["zero-knowledge", "API gateway", "privacy-preserving proxy", "ZK routing", "blind relay", "zero trust", "request signing"]
+readingTime: "8 min read"
+---
+
+Most API gateways sit in a privileged position: they terminate TLS, inspect every header and body, and log whatever they choose. That works fine when you trust the gateway operator. But what happens when the gateway *is* the threat model — when compliance rules, multi-tenant SaaS isolation, or plain distrust demands that even the infrastructure cannot read the traffic it forwards?
+
+Zero-knowledge API gateways flip the contract. The gateway routes and enforces policy, but never holds a decryption key. This post walks through the core primitives, a practical architecture, and the trade-offs you will actually encounter.
+
+## Why Standard Gateways Fall Short
+
+A conventional gateway (nginx, Kong, AWS API Gateway) does several things that require plaintext access:
+
+- **TLS termination** — the gateway holds the private key and decrypts every request.
+- **Rate limiting and auth** — token inspection happens in the clear.
+- **Logging and tracing** — request bodies land in a centralised log store.
+
+None of these are inherently bad. But any of them means the operator can reconstruct what users sent and received. For applications handling health records, financial data, or confidential agent tool calls, that is an unacceptable surface area.
+
+## The Core Primitives
+
+### Blind Relays
+
+A blind relay forwards an opaque blob it cannot decrypt. The client encrypts the payload to the *backend's* public key before the request leaves the device. The relay sees ciphertext, validates a proof that the ciphertext is well-formed (without decrypting it), then forwards it untouched.
+
+```
+Client ──[encrypt to backend key]──► Gateway ──[forward ciphertext]──► Backend
+                                        │
+                                        └── validates proof, enforces rate limit
+                                            but never decrypts body
+```
+
+This requires the client and backend to share a key that the gateway never touches. Key distribution is the hard part — handled below.
+
+### Zero-Knowledge Proofs for Authentication
+
+Token-based auth leaks the token to the gateway. Instead, the client can prove membership in an authorised set without revealing *which* member it is.
+
+Practical options in 2026:
+
+| Scheme | Prover time | Verifier time | Use case |
+|--------|------------|---------------|----------|
+| Groth16 (snarkjs) | ~200 ms | under 2 ms | Fixed circuits, highest performance |
+| PLONK (halo2) | ~400 ms | ~5 ms | Updatable trusted setup |
+| Bulletproofs | ~600 ms | ~15 ms | No trusted setup, range proofs |
+
+For API gateway auth, Groth16 with a pre-compiled circuit for "I hold a key whose hash is in this Merkle root" is the most practical. The gateway stores only the Merkle root of authorised keys. The client submits a ZK proof. The gateway verifies the proof in under 2 ms and never learns *which* key was used.
+
+### Request Signing Without Plaintext
+
+Even if the body is encrypted, the gateway still needs to enforce policies — rate limits, path routing, abuse detection — without seeing the body. This is solvable by splitting concerns:
+
+- **Metadata envelope** (unencrypted): method, path, timestamp, client pseudonym, proof of work or rate-limit token.
+- **Payload** (encrypted to backend key): the actual request body.
+
+The gateway acts on the metadata only. The backend decrypts the payload. The two layers never merge at the gateway.
+
+## Architecture Walk-Through
+
+### Key Distribution
+
+The backend generates an asymmetric keypair (X25519 for ECDH, or RSA-OAEP if you need legacy compat). The *public* key is published in a transparency log or well-known endpoint — the gateway serves it but cannot use it to decrypt.
+
+Clients fetch the backend public key on startup and encrypt all payloads to it. The gateway never needs the private key.
+
+For key rotation, the backend publishes overlapping keys with version tags. Clients include the key version in the metadata envelope so the backend knows which private key to use for decryption.
+
+### Gateway Policy Enforcement
+
+Without seeing the body, the gateway still enforces:
+
+1. **Authentication** — ZK proof validates against the stored Merkle root.
+2. **Rate limiting** — sliding-window counter keyed on the client pseudonym (a hash of their public key).
+3. **Path routing** — the path is in the unencrypted metadata envelope.
+4. **Replay prevention** — timestamps plus a nonce in the metadata envelope; the gateway keeps a short-lived nonce cache.
+
+None of these require decrypting the payload.
+
+### Logging and Observability
+
+Blind-relay logs contain only what the gateway can see: path, timestamp, pseudonym hash, response code, latency. Payload content never appears. This satisfies GDPR data minimisation by design — you cannot leak what you never stored.
+
+For debugging, the backend can emit encrypted diagnostic events signed by its private key. The gateway forwards them without interpreting them. An authorised operator with the private key can decrypt the events offline. The gateway operator cannot.
+
+## Implementation Sketch (Node.js + snarkjs)
+
+```typescript
+import { groth16 } from "snarkjs";
+import { box } from "@stablelib/x25519";
+
+// Client side: encrypt payload to backend pubkey
+async function prepareRequest(
+  backendPubKey: Uint8Array,
+  body: object,
+  clientSecretKey: Uint8Array
+): Promise<{ envelope: object; ciphertext: Uint8Array }> {
+  const sharedKey = box.before(backendPubKey, clientSecretKey);
+  const plaintext = new TextEncoder().encode(JSON.stringify(body));
+  const ciphertext = box.after(plaintext, nonce(), sharedKey);
+
+  const proof = await groth16.fullProve(
+    { secretKey: clientSecretKey, merkleRoot: KNOWN_ROOT },
+    "auth.wasm",
+    "auth.zkey"
+  );
+
+  return {
+    envelope: { path: "/api/v1/query", proof, keyVersion: "2026-Q3" },
+    ciphertext,
+  };
+}
+```
+
+The gateway verifies `proof` using `groth16.verify()` and forwards `ciphertext` unchanged. The backend uses its private key to decrypt.
+
+## Practical Trade-offs
+
+**ZK proof generation is CPU-bound on the client.** On a mid-range mobile device, Groth16 takes 300–800 ms. That is acceptable for login flows but not for every API call. Mitigate with proof caching: generate a session token proof once, use a lightweight HMAC for subsequent requests within that session window.
+
+**Key rotation has a grace period cost.** During rotation, the backend must hold two private keys simultaneously. Keep rotation windows short (under 48 h) and enforce version tags strictly to avoid decryption failures.
+
+**Debugging is harder.** You trade operational convenience for privacy. Build good out-of-band diagnostic flows (encrypted audit events, client-side error reporting with user consent) before production, not after.
+
+**Compliance is stronger.** SOC 2, HIPAA, and GDPR all ask what data your infrastructure *could* access. A ZK gateway answers "nothing in the body" with cryptographic proof rather than a policy promise. Auditors increasingly recognise this distinction.
+
+## When to Use This Pattern
+
+The pattern is justified when:
+
+- Your gateway is multi-tenant and tenants must be isolated from each other *and* from you.
+- You operate in a jurisdiction where cloud provider access to data creates legal risk (EU data sovereignty, HIPAA, financial services).
+- Your agents carry tool-call payloads that are themselves sensitive (credentials, PII, proprietary prompts).
+
+It is overkill when a single-tenant deployment with standard TLS and a private VPC already meets your threat model. Complexity has a cost — spend it where the privacy guarantee is genuinely required.
+
+## Where BitAtlas Fits
+
+BitAtlas is built around the premise that the storage layer should never hold decryption keys. The same principle extends to the API gateway in front of it: data should be encrypted before it enters the infrastructure, forwarded opaquely, and decrypted only by the intended recipient.
+
+If you are building a system where agents need to read and write private data through a shared gateway, the ZK gateway pattern combined with client-side encryption gives you the strongest possible boundary — one enforced by math, not operational promises.
+
+Zero-knowledge infrastructure is not science fiction any more. The primitives are production-ready. The question is whether you are willing to trade a little debugging convenience for a privacy guarantee that holds even against yourself.
