@@ -1301,6 +1301,116 @@
         "collaborative computation"
       ],
       "brief": "What secure multi-party computation is, how secret sharing schemes make it work, and where MPC fits in the privacy-preserving toolkit alongside ZK proofs and FHE."
+    },
+    {
+      "slug": "zero-knowledge-attestation-remote-agents",
+      "keywords": [
+        "zero-knowledge",
+        "attestation",
+        "remote agents",
+        "TEE",
+        "cryptographic proofs"
+      ],
+      "brief": "How remote attestation and ZK proofs let you verify agent behavior without exposing sensitive data or code"
+    },
+    {
+      "slug": "client-side-crypto-audit-logging",
+      "keywords": [
+        "client-side encryption",
+        "audit logs",
+        "tamper-evident",
+        "compliance",
+        "crypto"
+      ],
+      "brief": "Building tamper-evident, client-side encrypted audit logs that satisfy compliance requirements without leaking data to the server"
+    },
+    {
+      "slug": "mcp-server-secrets-injection-vault",
+      "keywords": [
+        "MCP server",
+        "secrets",
+        "HashiCorp Vault",
+        "environment variables",
+        "dynamic secrets"
+      ],
+      "brief": "Patterns for injecting short-lived secrets into MCP servers at runtime using Vault and similar secret managers"
+    },
+    {
+      "slug": "ai-agent-gdpr-data-minimisation",
+      "keywords": [
+        "AI agents",
+        "GDPR",
+        "data minimisation",
+        "privacy by design",
+        "compliance"
+      ],
+      "brief": "Practical GDPR data minimisation patterns for AI agents: what to collect, how long to keep it, and how to enforce deletion"
+    },
+    {
+      "slug": "encrypted-agent-state-checkpointing",
+      "keywords": [
+        "agent state",
+        "checkpointing",
+        "encryption",
+        "resumable tasks",
+        "fault tolerance"
+      ],
+      "brief": "How to checkpoint and resume long-running agent workflows using encrypted state snapshots, with key management strategies"
+    },
+    {
+      "slug": "zero-knowledge-multi-tenant-storage-isolation",
+      "keywords": [
+        "zero-knowledge",
+        "multi-tenant",
+        "storage isolation",
+        "SaaS",
+        "encryption"
+      ],
+      "brief": "Architecture guide for strict per-tenant data isolation in SaaS storage using ZK encryption \u2014 no server-side key access"
+    },
+    {
+      "slug": "mcp-server-end-to-end-encryption-patterns",
+      "keywords": [
+        "MCP server",
+        "end-to-end encryption",
+        "E2EE",
+        "transport security",
+        "agent communication"
+      ],
+      "brief": "Implementing E2EE between agents and MCP servers: key exchange, payload encryption, and forward secrecy"
+    },
+    {
+      "slug": "client-side-key-management-enterprise",
+      "keywords": [
+        "client-side encryption",
+        "key management",
+        "enterprise",
+        "HSM",
+        "BYOK"
+      ],
+      "brief": "Enterprise patterns for client-side key management: HSM integration, BYOK policies, and key lifecycle governance"
+    },
+    {
+      "slug": "eu-ai-act-technical-documentation-agents",
+      "keywords": [
+        "EU AI Act",
+        "technical documentation",
+        "AI agents",
+        "compliance",
+        "conformity assessment"
+      ],
+      "brief": "What technical documentation the EU AI Act requires for AI agent systems and how to automate its generation"
+    },
+    {
+      "slug": "private-agent-telemetry-differential-privacy",
+      "keywords": [
+        "AI agents",
+        "telemetry",
+        "differential privacy",
+        "observability",
+        "privacy-preserving"
+      ],
+      "brief": "Using differential privacy techniques to collect meaningful agent telemetry without exposing individual user data"
     }
   ]
 }
