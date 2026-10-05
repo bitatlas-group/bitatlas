@@ -1,0 +1,171 @@
+---
+title: "Client-Side Encrypted Audit Logs That Actually Satisfy Compliance"
+description: "How to build tamper-evident, client-side encrypted audit logs that meet SOC 2, HIPAA, and GDPR requirements without sending plaintext event data to your servers."
+date: "2026-10-05"
+author: "BitAtlas Team"
+slug: "client-side-crypto-audit-logging"
+keywords: ["client-side encryption", "audit logs", "tamper-evident", "compliance", "crypto", "SOC 2", "HIPAA", "zero-knowledge"]
+readingTime: "7 min"
+---
+
+Audit logs are a cornerstone of every compliance framework—SOC 2, HIPAA, GDPR, ISO 27001. The implicit assumption embedded in most implementations is that the system producing the log can be trusted to store it faithfully. But what if the compromised party *is* the server? And what if your customers' privacy depends on those log entries never being readable by anyone but the entity they authorise?
+
+Client-side encrypted audit logging solves both problems at once: every event is cryptographically signed at the source, sealed before it leaves the browser or edge function, and stored on the server in a form that is verifiably unmodified—even though the server cannot read it.
+
+## Why Server-Side Audit Logs Have a Blind Spot
+
+Classic audit logs trust the server completely. An attacker with database access (or a rogue admin) can silently delete or alter entries. Append-only write paths and WORM object storage help, but they protect against *future* tampering, not a past compromise. More fundamentally, if the log contains user identifiers, document names, or message snippets, any server-side breach exposes that metadata.
+
+Compliance frameworks demand integrity and confidentiality, but most implementations sacrifice one for the other. Encrypted logs stored on a server you control are confidential but not independently verifiable. Plaintext hash-chained logs are verifiable but leak data.
+
+Client-side cryptography lets you achieve both.
+
+## The Core Design: Hash Chains + Asymmetric Encryption
+
+The building block is a Merkle-style hash chain. Each log entry commits to the previous entry's digest, creating a structure where any deletion or modification breaks the chain in a way that any verifier can detect.
+
+On top of that, each entry is encrypted with a public key whose private half is held only by the auditor (your customer's security team, a compliance officer, or a hardware token). The server stores opaque ciphertext and chain hashes. It can confirm the chain is intact; it cannot read any entry.
+
+Here is a minimal TypeScript implementation using the WebCrypto API:
+
+```typescript
+interface AuditEntry {
+  seq: number;
+  timestamp: string;
+  actor: string;
+  action: string;
+  resource: string;
+  previousHash: string;
+}
+
+interface SealedEntry {
+  seq: number;
+  ciphertext: string;       // base64url encrypted AuditEntry JSON
+  entryHash: string;        // SHA-256 of ciphertext
+  previousHash: string;     // chains to prior entryHash
+  chainSignature: string;   // ECDSA signature over (seq || entryHash || previousHash)
+}
+```
+
+The `chainSignature` is produced with a *log-signing key*—an ECDSA P-256 key pair generated client-side and never transmitted to the server. The public half is registered once during setup so verifiers can confirm chain continuity. The encryption key (X25519 or RSA-OAEP) is the auditor's public key.
+
+### Sealing an Entry
+
+```typescript
+async function sealEntry(
+  entry: AuditEntry,
+  signingKey: CryptoKey,
+  encryptionPublicKey: CryptoKey,
+  previousHash: string,
+  seq: number
+): Promise<SealedEntry> {
+  const plaintext = new TextEncoder().encode(JSON.stringify(entry));
+
+  // Encrypt with auditor's public key (RSA-OAEP or ECDH-derived AES-GCM)
+  const ciphertext = await encryptForAuditor(encryptionPublicKey, plaintext);
+  const ciphertextB64 = toBase64url(ciphertext);
+
+  // Hash the ciphertext
+  const entryHashBuf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(ciphertextB64)
+  );
+  const entryHash = toBase64url(entryHashBuf);
+
+  // Sign the chain link
+  const chainData = new TextEncoder().encode(`${seq}:${entryHash}:${previousHash}`);
+  const sigBuf = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    signingKey,
+    chainData
+  );
+
+  return {
+    seq,
+    ciphertext: ciphertextB64,
+    entryHash,
+    previousHash,
+    chainSignature: toBase64url(sigBuf),
+  };
+}
+```
+
+The server receives `SealedEntry` objects. It verifies the chain signature against the registered public key and checks that `previousHash` matches the stored `entryHash` of entry `seq - 1`. If either check fails, the server rejects the submission—no silent overwrites.
+
+## Encryption Strategy: Hybrid RSA-OAEP + AES-GCM
+
+Asymmetric encryption alone is slow for large payloads and has size limits. The standard pattern is hybrid encryption: generate a fresh AES-256-GCM key per entry, encrypt the plaintext with it, then wrap the AES key with the auditor's RSA-4096-OAEP public key.
+
+```typescript
+async function encryptForAuditor(
+  publicKey: CryptoKey,
+  plaintext: Uint8Array
+): Promise<Uint8Array> {
+  const aesKey = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt"]
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    aesKey,
+    plaintext
+  );
+
+  const rawAesKey = await crypto.subtle.exportKey("raw", aesKey);
+  const wrappedKey = await crypto.subtle.encrypt(
+    { name: "RSA-OAEP" },
+    publicKey,
+    rawAesKey
+  );
+
+  // Pack: [2-byte wrappedKeyLen][wrappedKey][iv][ciphertext]
+  const out = new Uint8Array(2 + wrappedKey.byteLength + 12 + ciphertext.byteLength);
+  const view = new DataView(out.buffer);
+  view.setUint16(0, wrappedKey.byteLength, false);
+  out.set(new Uint8Array(wrappedKey), 2);
+  out.set(iv, 2 + wrappedKey.byteLength);
+  out.set(new Uint8Array(ciphertext), 2 + wrappedKey.byteLength + 12);
+  return out;
+}
+```
+
+Decryption reverses the process using the auditor's RSA private key. Because the auditor's key never touches your application server, no server compromise—however total—can expose historical audit entries.
+
+## Compliance Mapping
+
+**SOC 2 CC7.2 / CC7.3** — *Monitoring of controls*. Tamper-evident hash chains provide cryptographic proof that no log entries were deleted or reordered, satisfying the audit trail integrity requirement that Type II auditors look for.
+
+**HIPAA §164.312(b)** — *Audit controls*. The HIPAA Security Rule requires activity recording but does not prohibit encryption. Providing auditors with the decryption key on demand satisfies the access requirement while keeping PHI off your infrastructure.
+
+**GDPR Article 32** — *Security of processing*. Client-side encryption means event metadata (user IDs, resource identifiers) is processed pseudonymously from the server's perspective, reducing the scope of a breach notification if the log store is ever compromised.
+
+**GDPR Article 17** — *Right to erasure*. Because each log entry is encrypted with a per-entry AES key that is wrapped with the auditor's public key, you can implement cryptographic erasure: when a user invokes their right to erasure, destroy the relevant key material. The ciphertext remains but becomes permanently unreadable.
+
+## Batching and Off-Chain Roots
+
+Storing and verifying every entry individually is expensive at scale. A practical optimisation is a Merkle tree that batches, say, 256 entries per leaf. The tree root is published to an immutable log—a transparency log, a smart contract, or a signed certificate—once per batch. Individual entries are verified against the batch Merkle proof; the batch root is verified against the public record.
+
+This keeps per-entry storage costs low while providing an external anchor that neither you nor your customer can retroactively alter.
+
+## Operational Considerations
+
+**Key rotation.** The log-signing key should rotate on a schedule (quarterly is common). Each rotation creates a new chain segment. Store the rotation event itself as a signed log entry so verifiers can trace key continuity across segments.
+
+**Auditor key compromise.** If the auditor's decryption key is lost or compromised, historical entries are either permanently unreadable or exposed. Document the key custody policy explicitly: HSMs, multi-sig key ceremonies, or threshold recovery schemes are appropriate depending on your compliance tier.
+
+**Performance.** RSA-OAEP wrapping is fast enough for under 1,000 log entries per second on a modern browser. Above that, consider ECDH key agreement (X25519) to derive a shared secret, which is significantly faster than RSA while remaining secure.
+
+## Putting It Together
+
+Client-side encrypted audit logging is not significantly harder to implement than plaintext logging once you have a key management story. The payoff is significant: you can credibly tell customers that their activity data is sealed before it reaches your infrastructure, your compliance auditors get mathematical proof of log integrity, and a server breach exposes nothing but ciphertext.
+
+The pattern described here—hash-chained entries, hybrid encryption, per-entry chain signatures—maps directly onto the primitives available in every modern browser via the WebCrypto API and in Node.js via the `crypto.subtle` module. There is no dependency on external cryptography libraries for the core path.
+
+If your product handles regulated data, encrypted audit logs are quickly becoming a differentiator. In enterprise procurement, the ability to say "we physically cannot read your audit trail" shortens security reviews and unlocks deals that would otherwise stall.
+
+---
+
+*BitAtlas provides zero-knowledge encrypted storage primitives for developers building privacy-first applications. Explore our [SDK documentation](https://bitatlas.com/docs) to see how encrypted audit logging integrates with the rest of your data layer.*
