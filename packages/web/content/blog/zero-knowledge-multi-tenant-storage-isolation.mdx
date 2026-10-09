@@ -1,0 +1,165 @@
+---
+title: "Zero-Knowledge Multi-Tenant Storage Isolation in SaaS"
+description: "Architecture guide for strict per-tenant data isolation in SaaS storage using zero-knowledge encryption — no server-side key access, no cross-tenant leakage."
+date: "2026-10-09"
+author: "BitAtlas Team"
+slug: "zero-knowledge-multi-tenant-storage-isolation"
+keywords: ["zero-knowledge", "multi-tenant", "storage isolation", "SaaS", "encryption"]
+readingTime: "8 min read"
+---
+
+Multi-tenant SaaS has a fundamental tension: every tenant shares the same infrastructure, but each one expects that their data is completely invisible to everyone else — including you, the operator. Traditional access-control lists and row-level security help, but they leave one gap wide open: anyone with database access (a DBA, a compromised admin account, or a nosy engineer) can read any tenant's data.
+
+Zero-knowledge encryption closes that gap at the storage layer. In a zero-knowledge multi-tenant architecture the server never holds the keys needed to decrypt tenant data. Even if an attacker fully compromises your database and object store, they get ciphertext without the keys to open it.
+
+This post walks through the architecture patterns for building this kind of system — key derivation, per-tenant key hierarchies, storage layout, and the operational tradeoffs you need to understand before you commit to the design.
+
+## Why Access Controls Alone Are Not Enough
+
+Row-level security and tenant scoping in PostgreSQL are good hygiene. They prevent one tenant's API call from accidentally reading another tenant's rows. But they say nothing about what happens when:
+
+- A migration script runs with superuser credentials and logs query results.
+- A developer pulls a prod database snapshot to debug an issue.
+- A security breach gives an attacker direct read access to your storage backend.
+
+In all three scenarios, traditional multi-tenancy offers no cryptographic guarantee. Zero-knowledge multi-tenancy does: without the correct tenant key, ciphertext is indistinguishable from random bytes.
+
+## The Core Idea: Per-Tenant Key Hierarchies
+
+The foundation of zero-knowledge multi-tenant storage is that each tenant has their own encryption key, derived in a way that the server can verify identity but cannot independently derive the key.
+
+A common approach is to use a **password-authenticated key exchange** or **server-side key wrapping** where the tenant's master key is encrypted with a key derived from their credentials before being stored. The server stores an encrypted blob; the server never sees the plaintext key.
+
+Here is a simplified TypeScript sketch:
+
+```typescript
+import { webcrypto } from "crypto";
+
+async function deriveTenantKey(
+  tenantPassword: string,
+  tenantSalt: Uint8Array
+): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const baseKey = await webcrypto.subtle.importKey(
+    "raw",
+    enc.encode(tenantPassword),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return webcrypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: tenantSalt, iterations: 600_000, hash: "SHA-256" },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+The tenant's `tenantPassword` is something only they know (derived from their login credentials, a passphrase, or a hardware token). The `tenantSalt` is stored in your database in the clear — it is not secret, but it ensures that two tenants with identical passwords get different master keys.
+
+## Key Hierarchy: From Master to Object Keys
+
+Deriving a new key from the master key for every encrypted object avoids two problems: key reuse across objects (which weakens AES-GCM's security guarantees) and single-point-of-failure (compromising one object key does not expose all objects).
+
+A practical two-level hierarchy looks like this:
+
+```
+tenantMasterKey
+  └── tenantStorageKey  (derived once per session, or once per feature scope)
+        └── objectKey   (derived per object, using object ID as HKDF info)
+```
+
+You can derive these levels with HKDF:
+
+```typescript
+async function deriveObjectKey(
+  storageKey: CryptoKey,
+  objectId: string
+): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const rawStorageKey = await webcrypto.subtle.exportKey("raw", storageKey);
+  const hkdfKey = await webcrypto.subtle.importKey(
+    "raw", rawStorageKey, "HKDF", false, ["deriveKey"]
+  );
+  return webcrypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(32),
+      info: enc.encode(`object:${objectId}`)
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+The `objectId` is stored in your database. To decrypt an object, the tenant's client re-derives the same key path using their credentials.
+
+## Storage Layout
+
+In a zero-knowledge multi-tenant system the database stores only what is needed to bootstrap decryption:
+
+| Column | Contains | Secret? |
+|---|---|---|
+| `tenant_id` | UUID | No |
+| `tenant_salt` | PBKDF2 salt | No |
+| `wrapped_master_key` | Master key encrypted under a session key | Only if session key is held client-side |
+| `object_id` | UUID | No |
+| `ciphertext` | AES-GCM encrypted payload | N/A (unintelligible without key) |
+| `iv` | AES-GCM initialization vector | No |
+
+Object storage (S3, GCS, or your own server) holds only the raw ciphertext and the IV. The IV can be stored alongside the ciphertext in the object itself — prepend it as the first 12 bytes.
+
+## Key Delivery: Client-Side vs. Envelope Encryption
+
+There are two broad deployment models:
+
+**Client-side only.** The master key never leaves the client. The server stores ciphertext but cannot decrypt it under any circumstances. This gives the strongest isolation guarantee but adds operational complexity: if a tenant loses their credentials, their data is gone. Recovery requires a separate key backup scheme (secret sharing, passphrase backup with a recovery phrase, etc.).
+
+**Envelope encryption with an HSM.** The tenant's master key is encrypted with a key held in an HSM or a managed KMS (AWS KMS, Azure Key Vault, Google Cloud KMS). The operator can re-wrap keys (enabling credential recovery) but cannot decrypt tenant data without KMS authorization, which is audited. This is the practical choice for most SaaS deployments because it preserves "zero server-knowledge-at-rest" while enabling key recovery workflows.
+
+The envelope encryption flow:
+
+1. Tenant authenticates to your service.
+2. Your service requests that the KMS decrypt the wrapped master key using the tenant's identity token as additional authenticated data (AAD).
+3. The plaintext master key is held in memory for the session duration, then securely wiped.
+4. All encrypt/decrypt operations for that session use keys derived from the in-memory master key.
+
+Step 3 is critical: the plaintext key should never be written to disk, logs, or any persistent store in your infrastructure.
+
+## Tenant Isolation at the API Layer
+
+Zero-knowledge storage does not remove the need for sound API-layer isolation. Cryptography protects data at rest; your authorization layer must still prevent a tenant from requesting decryption of another tenant's ciphertext using their own key.
+
+Enforce this by:
+
+- Including the `tenant_id` in every ciphertext's AAD. Decryption fails with an authentication error if the `tenant_id` provided does not match the one used during encryption.
+- Binding object ownership in your database with a foreign key to `tenant_id`, checked before any decrypt operation is attempted.
+- Rate-limiting and auditing all key-derivation and decryption operations per tenant.
+
+The AAD binding is the key piece. AES-GCM's authentication tag covers the AAD alongside the ciphertext, so an attacker cannot take tenant A's ciphertext and decrypt it with tenant B's key without triggering an authentication failure.
+
+## Operational Tradeoffs
+
+Zero-knowledge multi-tenancy is not free. Before adopting it, understand the costs:
+
+**Search is hard.** You cannot run a SQL `LIKE` query on encrypted columns. Full-text search requires either a client-side search index (synced to the client and searched locally), a deterministic encryption scheme for exact-match lookups only, or a structured encryption scheme like searchable symmetric encryption (SSE). All of these add complexity.
+
+**Key rotation is expensive.** Rotating a tenant's master key means re-encrypting every object they own. For large tenants this can be a long-running background job. Plan for this from day one with an async key rotation pipeline.
+
+**Debugging is harder.** Your support team cannot inspect a tenant's data without their explicit key-sharing consent. Build your support workflows around structured metadata (which you encrypt separately) and client-assisted debugging rather than server-side inspection.
+
+**Performance.** AES-GCM is fast, but key derivation (PBKDF2, HKDF) adds latency on the first request per session. Cache derived session keys in memory with a short TTL rather than re-deriving on every API call.
+
+## Putting It Together
+
+Zero-knowledge multi-tenant storage gives you a cryptographic guarantee that tenant data stays isolated — not just a policy guarantee. For SaaS products operating under GDPR, HIPAA, or enterprise security requirements, this isolation is increasingly expected rather than optional.
+
+The architecture is not simple, but the building blocks are mature: AES-GCM, PBKDF2, and HKDF are all available in the Web Crypto API, Node.js `crypto`, and every major backend language. The tricky parts are key lifecycle management, key recovery, and search — all of which have workable solutions once you have committed to the model.
+
+Start with envelope encryption backed by a managed KMS, bind your `tenant_id` into every ciphertext's AAD, and enforce the binding at the database layer. From there you can iterate toward stronger client-side models as your operational maturity grows.
