@@ -1,0 +1,111 @@
+---
+title: "EU AI Act Technical Documentation for Agents: What You Actually Need to Build"
+description: "A developer's guide to the EU AI Act's technical documentation requirements for AI agent systems, what artifacts you must produce, and how to automate their generation."
+date: "2026-10-14"
+author: "BitAtlas Team"
+slug: "eu-ai-act-technical-documentation-agents"
+keywords: ["EU AI Act", "technical documentation", "AI agents", "compliance", "conformity assessment"]
+readingTime: "7 min read"
+---
+
+The EU AI Act has been in force since August 2024, and its high-risk system requirements now apply to a growing set of deployed AI agents. If you are shipping an agent that touches hiring, credit scoring, biometric identification, critical infrastructure, or law enforcement, you already have mandatory documentation obligations. Even if your use case is lower-risk today, the documentation patterns are worth learning now—both because the Act's scope is actively expanding and because good technical documentation is genuinely useful for internal incident response.
+
+This post breaks down exactly what the Act requires, which artifacts are hardest to produce, and where automation can take most of the work off your plate.
+
+## High-Risk vs. General-Purpose: Two Different Tracks
+
+The EU AI Act separates AI systems into tiers. High-risk systems (Annex III) have strict conformity assessment obligations including technical documentation under Article 11. General-purpose AI models (GPAI) have separate transparency and copyright obligations under Articles 53–55, but no conformity assessment in the same sense.
+
+For AI agents the analysis is compositional:
+
+- An agent **built on a GPAI model** and deployed for a high-risk use case is a high-risk system. The deployer bears conformity responsibility.
+- An agent **purpose-built** for a high-risk use case is a high-risk system from day one.
+- An agent used only for **internal productivity** in low-risk workflows sits outside mandatory conformity assessment—though you still need to perform a GPAI transparency check if the underlying model counts as a GPAI model with systemic risk.
+
+The distinction matters because many developers assume that wrapping a foundation model insulates them from Annex III requirements. It does not.
+
+## What Article 11 and Annex IV Actually Require
+
+Article 11 obliges providers of high-risk AI systems to draw up technical documentation *before* placing the system on the market. Annex IV specifies the contents. The eight required sections are:
+
+1. **General description** — intended purpose, the version and name of the system, the hardware/software environment it runs in.
+2. **Description of the elements and development process** — training data, data governance, design choices, labelling instructions.
+3. **Information on monitoring, functioning, and control** — capabilities and limitations, foreseeable misuse, accuracy and robustness metrics.
+4. **Description of the validation and testing** — metrics used, test datasets, results, known biases.
+5. **Cybersecurity measures** — how the system is protected against adversarial inputs.
+6. **Description of changes** — version history and how changes were validated.
+7. **Post-market monitoring plan** — how you will detect drifts, failures, or unexpected outputs.
+8. **Declaration of conformity and standards** — which harmonised standards were applied.
+
+For an agent that calls external tools, writes files, or persists state, several of these sections require non-trivial work beyond what a static model card provides.
+
+## The Sections Most Agents Fail on First Pass
+
+### Section 3: Capabilities and Limitations
+
+This is the hardest section for agent systems. A model has a relatively bounded capability surface. An agent orchestrating ten tools does not. You need to enumerate:
+
+- Which tools the agent can invoke, under what conditions.
+- What the agent *cannot* safely do (e.g., it must not approve its own purchase orders).
+- Performance bounds under distribution shift—what happens when the agent encounters inputs outside its training distribution.
+
+The practical approach is to instrument your agent at the tool boundary and capture a capabilities matrix from integration tests: for each tool, under what input patterns does the agent invoke it correctly, hallucinate an invocation, or refuse? This data feeds directly into Section 3 and doubles as regression test coverage.
+
+### Section 5: Cybersecurity
+
+The Act requires documented measures against attacks specifically affecting AI systems: adversarial inputs, data poisoning, model inversion, and prompt injection. For agents, prompt injection deserves special attention because the attack surface extends to every document, email, or web page the agent retrieves.
+
+Your documentation should record:
+
+- Which inputs are sanitised before being placed in the agent's context.
+- Whether the agent's tool calls are validated against an allow-list.
+- How you detect and respond to anomalous tool invocation patterns.
+
+BitAtlas stores agent activity logs with a tamper-evident structure precisely for this use case—if you can produce an immutable record of what the agent read and what it invoked, you have a strong foundation for the cybersecurity section.
+
+### Section 7: Post-Market Monitoring
+
+This section trips up teams that think compliance ends at deployment. The Act requires a concrete monitoring plan, not just an intent to monitor. For agents the minimal viable plan includes:
+
+- A metric for outcome accuracy (domain-specific; for a document-processing agent this might be field extraction error rate).
+- A threshold that triggers human review or rollback.
+- A logging architecture that retains sufficient context to reconstruct agent decisions post-hoc.
+
+Immutable, queryable audit logs are not optional if you want to fill this section honestly.
+
+## Automating Documentation Generation
+
+Annex IV documentation is living documentation—it changes with every model update, tool change, or scope extension. Treating it as a manual PDF is a recipe for stale compliance. Here is how to automate the high-signal sections:
+
+**General description (Section 1):** Drive from your deployment manifest or CI pipeline. If you version your agent configs in git, a script can extract the model name, version, tool list, and deployment environment at release time and render them into the documentation template.
+
+**Development process and data (Section 2):** If you fine-tune or RAG your agent, your data pipeline should emit a data card at each run: record counts, provenance labels, date ranges. Tie the data card to the documentation version automatically.
+
+**Validation and testing (Section 4):** Your CI results are most of this section. Export your evaluation suite outputs (accuracy, F1, adversarial robustness metrics) as structured JSON, then inject them into the documentation template. Any evaluation framework that can emit machine-readable results works here.
+
+**Monitoring plan (Section 7):** Document the alerts and dashboards that already exist in your observability stack. If you have a SLO that pages on-call when the agent error rate spikes, that is most of your monitoring plan—write it down in the documentation template once and keep the thresholds in sync with your alerting config.
+
+**Version history (Section 6):** This is free if you maintain a structured changelog. A git tag combined with a conventional commit log and a release notes template gives you section 6 with minimal additional effort.
+
+## A Practical Checklist
+
+Before claiming conformity, verify you can answer yes to each of these:
+
+- [ ] The system's intended purpose is documented and matches actual deployment.
+- [ ] A capabilities matrix exists listing which tools the agent can invoke and under what conditions.
+- [ ] Foreseeable misuse scenarios are enumerated with mitigations.
+- [ ] Adversarial input handling is documented, including prompt injection controls.
+- [ ] Evaluation metrics and thresholds are recorded with the test results used to derive them.
+- [ ] A named monitoring owner exists with defined escalation thresholds.
+- [ ] The documentation version is tied to the deployed model and tool versions.
+- [ ] A post-market feedback loop exists that can update the documentation when the system changes.
+
+## The Broader Point
+
+The EU AI Act's documentation requirements are onerous, but they are not arbitrary. The Annex IV structure closely tracks what a responsible engineering team would want to know before and after deployment anyway. The difference between teams that find compliance painful and teams that find it manageable is usually whether their existing practices generate the required artifacts as a side effect or require separate manual work to produce them.
+
+Immutable audit logs, structured evaluation outputs, versioned deployment configs, and monitored SLOs are all good engineering independent of compliance. If you build those first, conformity documentation becomes mostly a matter of pointing at existing artifacts and filling in a template.
+
+---
+
+*BitAtlas provides encrypted, auditable storage for AI agent activity—purpose-built for teams that need tamper-evident logs and data residency controls to meet EU AI Act and GDPR obligations.*
