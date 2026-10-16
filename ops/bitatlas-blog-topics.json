@@ -1411,6 +1411,120 @@
         "privacy-preserving"
       ],
       "brief": "Using differential privacy techniques to collect meaningful agent telemetry without exposing individual user data"
+    },
+    {
+      "slug": "zero-knowledge-api-key-management-agents",
+      "keywords": [
+        "zero-knowledge",
+        "API keys",
+        "agent secrets",
+        "key management",
+        "cryptographic security"
+      ],
+      "brief": "How to manage API keys for AI agents using zero-knowledge techniques so the server never sees plaintext credentials \u2014 covering key derivation, encrypted storage, and runtime injection without key exposure."
+    },
+    {
+      "slug": "mcp-server-authentication-mutual-tls",
+      "keywords": [
+        "MCP",
+        "mutual TLS",
+        "mTLS",
+        "client certificates",
+        "server authentication",
+        "agent security"
+      ],
+      "brief": "Implementing mutual TLS for MCP server connections \u2014 certificate provisioning, client certificate rotation, and how mTLS eliminates shared secrets between agents and tool servers."
+    },
+    {
+      "slug": "client-side-encryption-react-native-mobile",
+      "keywords": [
+        "client-side encryption",
+        "React Native",
+        "mobile encryption",
+        "iOS",
+        "Android",
+        "secure storage"
+      ],
+      "brief": "A practical guide to client-side encryption in React Native apps \u2014 using the Secure Enclave and Android Keystore, bridging to native crypto APIs, and avoiding the pitfalls of JavaScript crypto on mobile."
+    },
+    {
+      "slug": "eu-whistleblower-protection-encrypted-channels",
+      "keywords": [
+        "EU whistleblower directive",
+        "anonymous reporting",
+        "encrypted channels",
+        "data protection",
+        "GDPR"
+      ],
+      "brief": "How developers can build EU-compliant whistleblower platforms using end-to-end encryption \u2014 covering the EU Whistleblower Protection Directive requirements, anonymous submission patterns, and zero-knowledge report storage."
+    },
+    {
+      "slug": "ai-agent-sandboxed-filesystem-design",
+      "keywords": [
+        "agent sandboxing",
+        "filesystem isolation",
+        "secure execution",
+        "least privilege",
+        "chroot",
+        "namespaces"
+      ],
+      "brief": "Designing sandboxed filesystem access for AI agents \u2014 Linux namespaces, seccomp filters, bind mounts, and how to give agents write access to exactly what they need without exposing the host filesystem."
+    },
+    {
+      "slug": "zero-knowledge-backup-deduplication-privacy",
+      "keywords": [
+        "zero-knowledge backup",
+        "deduplication",
+        "convergent encryption",
+        "privacy",
+        "cloud backup"
+      ],
+      "brief": "Reconciling backup deduplication with zero-knowledge encryption \u2014 convergent encryption, its security tradeoffs, and alternative approaches that preserve storage efficiency without sacrificing privacy."
+    },
+    {
+      "slug": "mcp-server-plugin-permissions-capability-model",
+      "keywords": [
+        "MCP",
+        "plugin permissions",
+        "capability model",
+        "least privilege",
+        "tool authorization"
+      ],
+      "brief": "Designing a capability-based permission model for MCP server plugins \u2014 how to scope tool access, revoke permissions at runtime, and audit which agents called which tools with what parameters."
+    },
+    {
+      "slug": "encrypted-agent-workflow-checkpointing-resume",
+      "keywords": [
+        "agent workflows",
+        "checkpointing",
+        "encrypted state",
+        "fault tolerance",
+        "workflow resume"
+      ],
+      "brief": "Building fault-tolerant AI agent workflows with encrypted checkpoints \u2014 serializing agent state without leaking intermediate results, resuming from checkpoints after failures, and integrating with existing workflow engines."
+    },
+    {
+      "slug": "eu-data-processor-agreements-ai-third-parties",
+      "keywords": [
+        "EU data processor",
+        "GDPR Article 28",
+        "AI third parties",
+        "data processing agreements",
+        "DPA"
+      ],
+      "brief": "What Article 28 GDPR data processor agreements mean for AI-powered SaaS products \u2014 standard contractual clauses with LLM providers, sub-processor chains, and technical controls that reduce your liability."
+    },
+    {
+      "slug": "client-side-crypto-wasm-performance-benchmarks",
+      "keywords": [
+        "WebAssembly",
+        "crypto performance",
+        "WASM",
+        "AES-GCM",
+        "ChaCha20",
+        "browser benchmarks"
+      ],
+      "brief": "Benchmarking client-side cryptography in WebAssembly vs Web Crypto API vs pure JavaScript \u2014 real throughput numbers for AES-GCM, ChaCha20-Poly1305, and ed25519 operations across Chrome, Firefox, and Safari in 2026."
     }
   ]
 }
