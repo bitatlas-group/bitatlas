@@ -1,0 +1,202 @@
+---
+title: "Zero-Knowledge API Key Management for AI Agents"
+description: "How to store and inject API keys for AI agents without the server ever seeing plaintext credentials — covering key derivation, encrypted vault patterns, and runtime injection."
+date: "2026-10-16"
+author: "BitAtlas Team"
+slug: "zero-knowledge-api-key-management-agents"
+keywords: ["zero-knowledge", "API keys", "agent secrets", "key management", "cryptographic security", "AI agents", "encrypted vault"]
+readingTime: "9 min read"
+---
+
+Every AI agent needs secrets. Database credentials, third-party API keys, webhook signing secrets — the list grows with every tool you give your agent access to. The common pattern is to store these in a secrets manager (Vault, AWS Secrets Manager, 1Password Secrets Automation) and inject them at runtime. That works, but it has a fundamental property worth examining: **the server knows your secrets**.
+
+Zero-knowledge key management flips this. The server stores an encrypted blob it cannot read. Only your agent — holding the right decryption key — can recover the plaintext credential. If the secrets service is compromised, the attacker gets ciphertext, not usable keys.
+
+This post walks through the design, the tradeoffs, and practical implementation patterns.
+
+## Why the Standard Approach Falls Short
+
+Secrets managers are excellent operational tools. They handle rotation, auditing, access control, and emergency revocation. None of that changes with zero-knowledge storage. What does change is the threat model.
+
+Consider what happens when:
+
+- A cloud provider employee queries the secrets API directly
+- Your secrets backend is breached and the database is exfiltrated
+- A misconfigured IAM policy allows unauthorized role assumption
+- A vendor discloses that their encryption keys were accessed
+
+In each scenario, plaintext-at-rest storage means your API keys are exposed. A zero-knowledge store means they are not — the breach leaks opaque ciphertext.
+
+For many teams, this threat model is theoretical. For teams operating under GDPR data processor obligations, handling credentials that grant access to EU personal data, or building multi-tenant platforms, it is not.
+
+## The Core Pattern: Client-Side Key Derivation
+
+The foundation is simple: never send the encryption key to the server.
+
+```typescript
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha256";
+import { randomBytes } from "@noble/ciphers/webcrypto";
+
+async function deriveAgentKey(
+  masterSecret: Uint8Array,
+  agentId: string,
+  purpose: string
+): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(`agent:${agentId}:${purpose}`);
+  const keyMaterial = hkdf(sha256, masterSecret, new Uint8Array(32), info, 32);
+
+  return crypto.subtle.importKey("raw", keyMaterial, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+```
+
+`HKDF` (HMAC-based Key Derivation Function) lets you derive unlimited purpose-specific keys from a single master secret. Your agent's API key encryption key is derived from the master secret plus a context string. Change the context string and you get a completely different key.
+
+The master secret itself lives in hardware where possible — TPM, Secure Enclave, or a hardware security module — or in a tightly scoped environment variable that never touches your secrets backend.
+
+## Encrypting and Storing API Keys
+
+With a derived key in hand, encryption is straightforward:
+
+```typescript
+async function encryptApiKey(
+  apiKey: string,
+  encryptionKey: CryptoKey
+): Promise<{ ciphertext: string; iv: string }> {
+  const iv = randomBytes(12); // 96-bit IV for AES-GCM
+  const plaintext = new TextEncoder().encode(apiKey);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    encryptionKey,
+    plaintext
+  );
+
+  return {
+    ciphertext: Buffer.from(ciphertext).toString("base64"),
+    iv: Buffer.from(iv).toString("base64"),
+  };
+}
+```
+
+The server stores `{ ciphertext, iv, agentId, keyPurpose, createdAt }`. It has everything needed to serve the encrypted blob on demand, but nothing that lets it decrypt it. The `iv` is not secret — it is only required to be unique per encryption operation.
+
+## Runtime Injection Without Exposure
+
+The tricky part is getting the decrypted key into your agent's process without it appearing in logs, environment dumps, or crash reports.
+
+**Option 1: In-memory injection with scope limiting**
+
+```typescript
+async function withApiKey<T>(
+  encryptedKey: EncryptedKey,
+  masterSecret: Uint8Array,
+  fn: (apiKey: string) => Promise<T>
+): Promise<T> {
+  const encryptionKey = await deriveAgentKey(
+    masterSecret,
+    encryptedKey.agentId,
+    encryptedKey.purpose
+  );
+  const apiKey = await decryptApiKey(encryptedKey, encryptionKey);
+
+  try {
+    return await fn(apiKey);
+  } finally {
+    // Explicit cleanup — helps GC but not a security guarantee in JS
+    apiKey.split("").fill("\0");
+  }
+}
+```
+
+The API key exists as a string only inside `fn`. It is never stored, never returned, never serialized. This pattern is imperfect — JavaScript strings are immutable and you cannot zero memory reliably — but it substantially reduces the window during which a heap dump would expose the credential.
+
+**Option 2: Encrypted transport to a sidecar**
+
+For agents that call external APIs frequently, derive an ephemeral session key and proxy requests through a sidecar that holds the decrypted credential. The sidecar accepts requests authenticated by the session key, appends the actual API key, and forwards the call. The agent process never sees the plaintext.
+
+```
+Agent ──[session key]──► Credential Sidecar ──[API key]──► External API
+```
+
+This adds latency but dramatically reduces exposure surface.
+
+## Key Hierarchy for Multi-Agent Deployments
+
+A single master secret does not scale to dozens of agents. Use a key hierarchy:
+
+```
+Root Master Secret (HSM / KMS)
+  └── Agent Class Key (derived per agent type)
+        └── Instance Key (derived per agent instance)
+              └── Purpose Key (derived per tool / API)
+```
+
+Each level adds isolation. Rotating the key for one agent class does not affect others. Revoking a single agent instance is a matter of destroying its instance key — all downstream purpose keys become inaccessible simultaneously.
+
+HKDF handles arbitrary-depth derivation cleanly. The derivation path itself (e.g., `root/agent-class:code-assistant/instance:abc123/purpose:github-api`) is the context string at each level.
+
+## Rotation Without Downtime
+
+Key rotation under zero-knowledge storage requires a re-encryption step that the client must perform:
+
+1. Derive the new encryption key
+2. Decrypt each stored secret with the old key
+3. Re-encrypt with the new key
+4. Update the server record atomically
+
+```typescript
+async function rotateAgentKeys(
+  agentId: string,
+  oldMasterSecret: Uint8Array,
+  newMasterSecret: Uint8Array,
+  storedSecrets: EncryptedKey[]
+): Promise<EncryptedKey[]> {
+  const rotated: EncryptedKey[] = [];
+
+  for (const secret of storedSecrets) {
+    const oldKey = await deriveAgentKey(oldMasterSecret, agentId, secret.purpose);
+    const newKey = await deriveAgentKey(newMasterSecret, agentId, secret.purpose);
+
+    const plaintext = await decryptApiKey(secret, oldKey);
+    const reencrypted = await encryptApiKey(plaintext, newKey);
+
+    rotated.push({ ...secret, ...reencrypted });
+  }
+
+  return rotated;
+}
+```
+
+This runs client-side. The server sees only encrypted blobs changing — it never observes the plaintext API keys at any point in the rotation.
+
+## What This Does Not Solve
+
+Zero-knowledge key storage is not a complete security strategy. Be clear about what it protects against:
+
+**It does protect against:** server-side breaches where the database is exfiltrated, insider threats at the storage layer, misconfigured access controls that expose the secrets backend.
+
+**It does not protect against:** a compromised agent process (which holds the master secret and can decrypt anything it needs), an attacker who gains code execution in the agent runtime, or logging middleware that captures decrypted values before they are used.
+
+The attack surface shifts from the secrets backend to the agent runtime and the master secret. Protect those accordingly: use hardware key storage where available, restrict master secret access to the minimum required processes, and instrument your agent's outbound calls to detect credential misuse.
+
+## Putting It Together with BitAtlas
+
+BitAtlas stores all file encryption keys using client-side key derivation — the server holds ciphertext it cannot read. The same architecture extends naturally to agent credential storage: your agent's API keys are encrypted with a key derived from your account's master key material, which never leaves your control.
+
+When an agent needs to call an external API, it derives the appropriate purpose key, decrypts the credential in memory, uses it, and discards it — all without a round-trip to a centralized secrets service that could be queried by someone other than you.
+
+For teams building on top of BitAtlas MCP servers, the credential injection pattern is already handled: your agent receives scoped, time-limited access tokens derived from your master key, not the underlying API credentials themselves.
+
+## Summary
+
+Zero-knowledge API key management for agents comes down to three things:
+
+1. **Derive, don't store**: use HKDF to derive purpose-specific encryption keys from a master secret rather than storing the master secret near the encrypted data.
+2. **Encrypt client-side**: the server stores ciphertext it cannot read.
+3. **Inject ephemerally**: decrypt credentials in-memory at the point of use, with the smallest possible scope.
+
+The operational overhead is real — rotation is more complex, there is no "unlock" path if the master secret is lost, and the sidecar proxy pattern adds infrastructure. For teams where the alternative is trusting a third-party secrets service with credentials that grant access to sensitive user data, the tradeoff is worth examining carefully.
