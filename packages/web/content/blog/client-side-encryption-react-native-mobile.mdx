@@ -1,0 +1,198 @@
+---
+title: "Client-Side Encryption in React Native: A Developer's Guide"
+description: "Learn how to implement robust client-side encryption in React Native apps using the Secure Enclave on iOS and Android Keystore — without trusting the JavaScript layer."
+date: "2026-10-19"
+author: "BitAtlas Team"
+slug: "client-side-encryption-react-native-mobile"
+keywords: ["client-side encryption", "React Native", "mobile encryption", "iOS", "Android", "secure storage"]
+readingTime: "7 min"
+---
+
+Mobile apps handle sensitive data constantly — authentication tokens, API keys, user files, health records. On the web, client-side encryption usually means WebCrypto in a browser. On mobile, the story is more nuanced: you have access to dedicated hardware security modules, but bridging to them correctly from JavaScript requires understanding a few platform-specific details.
+
+This guide covers the practical path to strong encryption in React Native, from key generation to storage to the pitfalls that trip up most developers.
+
+## Why JavaScript Crypto Alone Is Not Enough
+
+React Native runs your business logic in a JavaScript engine (Hermes or JSC). Both are sandboxed, but JavaScript keys live in the JS heap — and that heap can be inspected through developer tools, crash dumps, or by a sufficiently privileged process.
+
+The better model: generate and store keys inside the platform's secure hardware, then call into that hardware for each encrypt/decrypt operation. Keys never leave the secure zone. Your JavaScript code passes plaintext in, gets ciphertext back, and never holds a raw key.
+
+On iOS this is the **Secure Enclave**. On Android it is the **Android Keystore**. Both are hardware-backed on modern devices (A-series chips on iPhone, StrongBox on Pixels and flagship Samsungs).
+
+## Setting Up: The Right Libraries
+
+Don't reach for a pure-JS crypto library for key management. Use a library that bridges to native hardware:
+
+- **`react-native-keychain`** — stores credentials in Keychain (iOS) and Keystore (Android). Good for secrets under 2 KB.
+- **`react-native-quick-crypto`** — a native module wrapping OpenSSL; faster than the JS fallback and avoids the JS heap for operations.
+- **`expo-crypto`** and **`expo-secure-store`** — if you're on Expo Managed Workflow, these provide hardware-backed storage without ejecting.
+
+For file-level encryption (user documents, attachments), you'll want something like `react-native-aes-crypto` or a custom native module wrapping CommonCrypto on iOS and JCE on Android.
+
+Install and link:
+
+```bash
+npm install react-native-keychain react-native-quick-crypto
+npx pod-install   # iOS
+```
+
+## Generating and Storing Keys
+
+The cleanest pattern: generate a symmetric key, wrap it with an asymmetric key pair that lives in hardware, and store only the wrapped key.
+
+```typescript
+import * as Keychain from 'react-native-keychain';
+import { randomBytes, createCipheriv, createDecipheriv } from 'react-native-quick-crypto';
+
+const KEY_SERVICE = 'com.yourapp.encryption.key';
+
+async function getOrCreateDataKey(): Promise<Buffer> {
+  const existing = await Keychain.getGenericPassword({ service: KEY_SERVICE });
+  if (existing) {
+    return Buffer.from(existing.password, 'base64');
+  }
+
+  // Generate a 256-bit AES key
+  const key = randomBytes(32);
+  await Keychain.setGenericPassword('datakey', key.toString('base64'), {
+    service: KEY_SERVICE,
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
+  });
+  return key;
+}
+```
+
+A few things worth noting in that options object:
+
+- `WHEN_UNLOCKED_THIS_DEVICE_ONLY` prevents the key from being backed up to iCloud or Android backup, and requires the device to be unlocked before access. This is almost always what you want.
+- `SECURE_HARDWARE` tells Keychain to prefer hardware-backed storage on Android. On iOS, Keychain items are always Secure Enclave-backed on supported devices.
+
+## Encrypting Data
+
+With a key in hand, AES-256-GCM is the right primitive. GCM provides both confidentiality and integrity — if anyone tampers with the ciphertext, decryption fails.
+
+```typescript
+async function encrypt(plaintext: string): Promise<string> {
+  const key = await getOrCreateDataKey();
+  const iv = randomBytes(12); // 96-bit IV for GCM
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag(); // 128-bit auth tag
+
+  // Pack IV + tag + ciphertext into a single base64 blob
+  const result = Buffer.concat([iv, tag, encrypted]);
+  return result.toString('base64');
+}
+
+async function decrypt(blob: string): Promise<string> {
+  const key = await getOrCreateDataKey();
+  const buf = Buffer.from(blob, 'base64');
+
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const ciphertext = buf.subarray(28);
+
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+
+  return Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final(),
+  ]).toString('utf8');
+}
+```
+
+Generate a fresh IV per encryption. Reusing an IV with the same key under GCM is catastrophic — it leaks the key. The pattern above makes IV reuse impossible by design.
+
+## Biometric Gating
+
+If your threat model includes an unlocked but unattended device (stolen phone, shoulder surfing), add a biometric gate before key access.
+
+```typescript
+import * as LocalAuthentication from 'expo-local-authentication';
+
+async function biometricGatedDecrypt(blob: string): Promise<string> {
+  const result = await LocalAuthentication.authenticateAsync({
+    promptMessage: 'Authenticate to decrypt',
+    fallbackLabel: 'Use passcode',
+  });
+
+  if (!result.success) {
+    throw new Error('Authentication cancelled or failed');
+  }
+
+  return decrypt(blob);
+}
+```
+
+On iOS, you can also configure Keychain items to require biometric authentication at the OS level via `Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET`. This is stronger than app-level gating because it enforces the requirement even if your app code has a bug — the OS won't return the key without a biometric match.
+
+## Handling Key Rotation
+
+Keys age. A good design makes rotation possible without losing access to old data.
+
+The standard pattern is **envelope encryption**: each piece of data is encrypted with a unique **data encryption key (DEK)**, and that DEK is encrypted with a **key encryption key (KEK)** stored in hardware. To rotate, you only re-encrypt the DEKs — not all the data.
+
+```typescript
+interface EncryptedRecord {
+  encryptedDek: string;  // DEK wrapped with current KEK
+  ciphertext: string;    // Data encrypted with DEK
+}
+
+async function rotateKek(
+  records: EncryptedRecord[],
+  oldKek: Buffer,
+  newKek: Buffer
+): Promise<EncryptedRecord[]> {
+  return Promise.all(records.map(async (record) => {
+    const dek = await unwrapDek(record.encryptedDek, oldKek);
+    const newEncryptedDek = await wrapDek(dek, newKek);
+    return { ...record, encryptedDek: newEncryptedDek };
+  }));
+}
+```
+
+The data never moves. Only the small DEK blobs get re-wrapped. This makes rotation cheap even with thousands of records.
+
+## Common Pitfalls
+
+**Storing keys in AsyncStorage.** AsyncStorage is unencrypted plaintext on disk. Never put key material there. Use Keychain/Keystore.
+
+**ECB mode.** Any library that defaults to `aes-256-ecb` should be treated as broken by default. Use GCM or CBC+HMAC.
+
+**Logging plaintext.** React Native's Metro bundler and crash reporters (Sentry, Bugsnag) can capture variable values. Scrub sensitive data before it reaches any log boundary.
+
+**Forgetting Android backup.** By default, Android backs up app data including the SharedPreferences-backed Keystore equivalent. Set `android:allowBackup="false"` in your manifest, or use `FLAG_SECURE` — Keychain's `THIS_DEVICE_ONLY` flag handles this at the key level, but it's worth auditing.
+
+**Not handling hardware unavailability.** `SECURE_HARDWARE` is a preference, not a guarantee. Emulators and older devices may silently fall back to software. Your code should check `Keychain.getSupportedBiometryType()` and `Keychain.getSecurityLevel()` and fail loudly if the expected security level isn't met.
+
+## Testing Your Encryption Layer
+
+A few test patterns worth wiring up:
+
+- Round-trip test: `decrypt(await encrypt(plaintext)) === plaintext`
+- Tamper test: flip a byte in the ciphertext and confirm decryption throws
+- Cross-version test: encrypted data from v1 of your app should decrypt correctly in v2 after a key migration
+- Fresh-install test: uninstall the app, reinstall, and verify that encrypted data from iCloud/Android backup (if any) is either correctly inaccessible or correctly migrated
+
+## Putting It Together
+
+Client-side encryption on React Native is genuinely achievable without a PhD in cryptography, but the defaults matter:
+
+1. Use hardware-backed key storage, not AsyncStorage
+2. Use AES-256-GCM with fresh IVs
+3. Design for key rotation from day one with envelope encryption
+4. Gate sensitive operations behind biometrics for high-trust scenarios
+5. Test the tamper and fresh-install cases explicitly
+
+The secure Enclave and Android Keystore exist precisely so you don't have to manage raw key material in JavaScript. Use them.
+
+---
+
+*BitAtlas provides zero-knowledge encrypted storage for AI agents and mobile apps. If you're building a React Native app that needs server-side encrypted storage without trusting the server, [check out our API](/docs).*
