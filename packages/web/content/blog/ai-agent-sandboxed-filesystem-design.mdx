@@ -1,0 +1,189 @@
+---
+title: "Sandboxed Filesystem Access for AI Agents: Linux Namespaces, Seccomp, and Least Privilege"
+description: "How to design secure, sandboxed filesystem access for AI agents using Linux namespaces, seccomp filters, bind mounts, and least-privilege principles — so agents can do their job without touching anything they shouldn't."
+date: "2026-10-21"
+author: "BitAtlas Team"
+slug: "ai-agent-sandboxed-filesystem-design"
+keywords: ["agent sandboxing", "filesystem isolation", "secure execution", "least privilege", "chroot", "namespaces"]
+readingTime: "8 min read"
+---
+
+AI agents need to write files. They cache intermediate results, download documents, produce outputs, and sometimes manage state across long-running workflows. The question is not whether agents touch the filesystem — they will — but how much of it you expose when they do.
+
+Without explicit sandboxing, an agent that executes shell commands or calls a file-writing tool has access to everything the host process can reach. That means secrets in `~/.env`, credentials in `~/.ssh`, database files, shared config. One misconfigured tool call and the blast radius is the entire mounted volume.
+
+This post covers the practical toolkit for locking that down: Linux namespaces, seccomp filters, bind mounts, and how to compose them into a sandboxed environment that gives an agent exactly the access it needs — nothing more.
+
+## Why Filesystem Scope Matters for Agents
+
+Traditional applications access files in predictable, auditable patterns. An AI agent does not. It reasons about what to do next, picks tools from a registry, and calls them in sequences a developer cannot fully anticipate at deploy time. That unpredictability is the feature — but it also means access control cannot rely on code review alone.
+
+The threat model for agent filesystem access has three distinct failure modes:
+
+1. **Prompt injection leading to path traversal** — a malicious document instructs the agent to read or exfiltrate files outside its working directory.
+2. **Tool misuse** — a legitimate write tool is invoked with a path the developer didn't intend (e.g., overwriting a config file instead of a scratch file).
+3. **Escalation through subprocesses** — an agent that can spawn shells or compilers can trivially escape soft path checks.
+
+The correct fix for all three is the same: constrain at the OS layer, not the application layer.
+
+## Namespace Isolation: The Foundation
+
+Linux mount namespaces let you give a process its own view of the filesystem tree, completely independent of the host. Combined with a `pivot_root` or `chroot`, you can create an isolated root where the agent can only see what you explicitly place there.
+
+Here is the core pattern in Go using `syscall`:
+
+```go
+cmd := exec.Command(agentBinary, args...)
+cmd.SysProcAttr = &syscall.SysProcAttr{
+    Cloneflags: syscall.CLONE_NEWNS |   // mount namespace
+                syscall.CLONE_NEWPID |  // pid namespace
+                syscall.CLONE_NEWNET,   // network namespace
+    Unshareflags: syscall.CLONE_NEWNS,
+}
+```
+
+By creating a new mount namespace, every `mount()` call inside the child is invisible to the host. The agent can bind-mount a scratch directory, write whatever it wants there, and the host filesystem remains untouched.
+
+In Python, the same effect is achievable through `unshare(1)` or the `unshare` syscall via `ctypes`:
+
+```python
+import ctypes, os
+
+CLONE_NEWNS = 0x00020000
+libc = ctypes.CDLL("libc.so.6", use_errno=True)
+if libc.unshare(CLONE_NEWNS) != 0:
+    raise OSError(ctypes.get_errno(), "unshare failed")
+```
+
+After unsharing, remount everything read-only and then bind-mount only the directories the agent legitimately needs.
+
+## Bind Mounts: Surgical Access
+
+Once you have an isolated namespace, bind mounts let you project specific host paths into the agent's view without copying data. The key design principle is **explicit allow-listing**: start with a minimal root and add only what the agent actually needs.
+
+A typical agent sandbox might look like this:
+
+```
+/                    ← tmpfs (ephemeral, no persistent writes)
+/lib                 ← ro bind-mount from host (runtime libraries)
+/usr                 ← ro bind-mount from host (binaries)
+/proc                ← proc mount (needed by many programs)
+/workspace           ← rw bind-mount of agent's scratch dir
+/secrets/output      ← rw bind-mount of designated output dir
+```
+
+Notice what is absent: `/home`, `/root`, `/etc`, `/var`. The agent cannot reach environment files, cron jobs, SSH keys, or system configuration because those paths simply do not exist in its namespace.
+
+In a container context, this translates directly to Docker volume flags:
+
+```
+docker run \
+  --read-only \
+  --tmpfs /tmp \
+  -v /data/agent-scratch:/workspace:rw \
+  -v /data/agent-output:/output:rw \
+  agent-image
+```
+
+For host processes (not containers), you achieve the same effect with `mount --bind` inside the new namespace.
+
+## Seccomp: Blocking Dangerous Syscalls
+
+Namespace isolation controls *where* an agent can write. Seccomp controls *what system calls* it can make. Together they eliminate most escalation paths.
+
+The default seccomp profile used by Docker blocks around 44 syscalls, including `ptrace`, `kexec_load`, and `perf_event_open`. For an agent sandbox you likely want to add:
+
+- `openat` with paths outside the workspace → `EPERM`
+- `execve` → blocked entirely if the agent should not spawn subprocesses
+- `mount` → blocked to prevent namespace escape
+- `setuid` / `setgid` → blocked to prevent privilege escalation
+
+Using `libseccomp` in C or the `seccomp` Python bindings:
+
+```python
+import seccomp
+
+f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
+f.add_rule(seccomp.KILL, "execve")    # no subprocess spawning
+f.add_rule(seccomp.KILL, "mount")     # no namespace manipulation
+f.add_rule(seccomp.ERRNO(1), "ptrace")
+f.load()
+```
+
+For agents that run inside containers, you can supply a custom seccomp profile JSON to the container runtime. This is more portable than in-process filtering because it applies before the agent process starts.
+
+## Chroot vs. Pivot Root
+
+`chroot` is the classic isolation primitive, but it has well-known weaknesses: a root process inside a chroot can often escape it with a sequence of `open`, `fchdir`, and `chroot` calls. For agent sandboxes where the agent process may have elevated privileges (e.g., to install dependencies), `pivot_root` is the safer choice.
+
+`pivot_root` actually changes the root filesystem for the mount namespace rather than just the process's working directory, making escape significantly harder:
+
+```bash
+# Set up the new root in a tmpfs
+mount -t tmpfs none /new-root
+# Populate it with only what the agent needs
+cp -a /lib /usr /new-root/
+mkdir /new-root/workspace
+mount --bind /data/agent-scratch /new-root/workspace
+# Enter the new root
+cd /new-root
+pivot_root . .old-root
+umount -l .old-root
+rm -rf .old-root
+```
+
+For most production deployments, the cleanest approach is to use a container runtime (containerd, runc) that handles `pivot_root` automatically when given a minimal OCI image. This keeps the complexity managed by a well-audited codebase rather than hand-rolled syscall sequences.
+
+## Applying This to MCP-Based Agents
+
+If your agent communicates via the Model Context Protocol, the MCP server is the natural enforcement point. Each tool that writes files should resolve paths relative to a base directory and reject anything that escapes it:
+
+```typescript
+function resolveSafePath(base: string, userPath: string): string {
+  const resolved = path.resolve(base, userPath);
+  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    throw new Error(`Path escape attempt: ${userPath}`);
+  }
+  return resolved;
+}
+```
+
+This is a soft check — necessary but not sufficient. It stops accidental or naive escapes but not syscall-level attacks. The hard enforcement is the OS-level sandbox underneath. Think of the path check as input validation and the namespace/seccomp layer as defense in depth.
+
+## Encrypted Scratch Space
+
+One pattern worth calling out: if the agent's scratch directory contains intermediate data that could be sensitive (partially processed documents, query results, credentials passed as file arguments), consider mounting it on an encrypted volume.
+
+A tmpfs in a mount namespace is already ephemeral — it disappears when the namespace exits. For longer-lived scratch that persists across agent restarts, a dm-crypt volume or a FUSE-mounted encrypted filesystem ensures that data at rest is protected even if the host is compromised:
+
+```bash
+# Create a 1GB encrypted scratch volume
+dd if=/dev/urandom of=/var/agent-scratch.img bs=1M count=1024
+cryptsetup luksFormat /var/agent-scratch.img
+cryptsetup open /var/agent-scratch.img agent-scratch
+mkfs.ext4 /dev/mapper/agent-scratch
+mount /dev/mapper/agent-scratch /workspace
+```
+
+The key unlocks on agent startup and is kept only in memory. When the agent exits, `cryptsetup close` drops the key and the volume goes back to opaque ciphertext.
+
+## Putting It Together
+
+A production-grade agent sandbox combines four layers:
+
+| Layer | Mechanism | What it prevents |
+|---|---|---|
+| Path validation | Application-level resolve + prefix check | Naive traversal in tool calls |
+| Mount namespace + bind mounts | `CLONE_NEWNS` + selective bind mounts | Access to host filesystem paths |
+| Seccomp filter | Custom seccomp profile | Subprocess spawning, namespace escape |
+| Encrypted scratch | dm-crypt or FUSE | Data exposure from compromised host |
+
+You do not need all four layers for every agent. A simple batch-processing agent that reads one input directory and writes one output directory can get away with Docker volumes and `--read-only`. The more autonomous and long-running the agent, the more layers you want.
+
+## What BitAtlas Does
+
+BitAtlas uses client-side encryption on top of OS-level sandboxing, so even agents with write access to the storage layer cannot read the contents of files they handle. The encryption key never leaves the client — the agent can write and read its own files, but the storage backend sees only ciphertext. This is the same zero-knowledge guarantee applied to the agent's own working storage.
+
+If you are building an agent that handles user data, combining namespace isolation with zero-knowledge storage gives you defense in depth at both the OS level and the application level. A namespace escape is serious; a namespace escape into encrypted ciphertext is a much smaller incident.
+
+The least-privilege principle is not new, but applying it to AI agents requires more intentionality than applying it to traditional services. Agents are non-deterministic by design. Build the sandbox before you need it.
