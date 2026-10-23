@@ -1,0 +1,129 @@
+---
+title: "Zero-Knowledge Backup with Deduplication: Making Convergent Encryption Work"
+description: "Reconciling backup deduplication with zero-knowledge encryption — convergent encryption, its security tradeoffs, and alternative approaches that preserve storage efficiency without sacrificing privacy."
+date: "2026-10-23"
+author: "BitAtlas Team"
+slug: "zero-knowledge-backup-deduplication-privacy"
+keywords: ["zero-knowledge backup", "deduplication", "convergent encryption", "privacy", "cloud backup"]
+readingTime: "8 min read"
+---
+
+Backup storage is expensive. A 100 GB dataset backed up daily for a year can balloon to terabytes if every snapshot is stored in full. Deduplication solves this — instead of storing duplicate file chunks, a deduplicating backend stores each unique chunk once. But when you add zero-knowledge encryption, naive deduplication breaks: if every client encrypts the same file with a different random key, the ciphertext looks unique even though the plaintext isn't.
+
+This tension is real. Solving it requires understanding **convergent encryption** — its power, its limits, and the alternatives.
+
+## Why Deduplication Matters for Backup
+
+Modern backup systems work at the chunk level. A file is split into content-defined chunks (using algorithms like Rabin fingerprinting or FastCDC), each chunk is hashed, and only new chunks are uploaded. A 1 GB file with a 1-byte change might only require uploading a few kilobytes of changed chunks.
+
+Cross-user deduplication takes this further: if two users back up the same OS image or the same npm module tree, the storage backend only keeps one copy. Services like Backblaze B2 and Wasabi can achieve 10x-50x storage efficiency this way.
+
+The problem: standard zero-knowledge encryption generates a random key per file or per session. Two users encrypting the same data produce completely different ciphertext — deduplication sees two distinct objects.
+
+## Convergent Encryption: The Classic Solution
+
+Convergent encryption solves this by deriving the encryption key deterministically from the plaintext itself:
+
+```python
+import hashlib
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+def convergent_encrypt(chunk: bytes) -> tuple[bytes, bytes]:
+    key = hashlib.sha256(chunk).digest()   # key derived from content
+    aes = AESGCM(key)
+    nonce = b'\x00' * 12                   # fixed nonce — content is the entropy source
+    ciphertext = aes.encrypt(nonce, chunk, None)
+    # Store content_hash → ciphertext; key is discarded after upload
+    content_hash = hashlib.sha256(ciphertext).hexdigest()
+    return content_hash, ciphertext
+```
+
+Two users encrypting the same chunk produce the same ciphertext, so deduplication works. The storage backend never sees the key — only the ciphertext and its hash. This is the approach used by Tahoe-LAFS, early Dropbox internals, and several open-source backup tools like Duplicacy.
+
+### The Confirmation-of-a-File Attack
+
+The weakness of convergent encryption is well-documented: an adversary who suspects you have a particular file can encrypt it themselves to obtain its content hash, then query the backend to confirm whether that hash exists in your backup. This is the **confirmation-of-a-file** (or **learn-whether-you-own-it**) attack.
+
+For most files this is theoretical. For legally sensitive content, it matters: a subpoena to the storage provider could reveal whether specific content hashes are present in a user's backup set, confirming possession without decrypting anything.
+
+## Keyed Convergent Encryption
+
+The standard mitigation is to mix a per-user secret into key derivation:
+
+```python
+def keyed_convergent_encrypt(chunk: bytes, user_secret: bytes) -> tuple[bytes, bytes]:
+    # HKDF: mix content + user secret
+    import hmac
+    key = hmac.new(user_secret, chunk, hashlib.sha256).digest()
+    aes = AESGCM(key)
+    nonce = b'\x00' * 12
+    ciphertext = aes.encrypt(nonce, chunk, None)
+    content_hash = hashlib.sha256(ciphertext).hexdigest()
+    return content_hash, ciphertext
+```
+
+Now two users with different secrets produce different ciphertext for the same chunk — cross-user deduplication is broken. But same-user deduplication across multiple backups still works because the secret is stable. This gives you:
+
+- Deduplication across your own backup history
+- No cross-user deduplication (higher storage cost per user)
+- Protection against the confirmation-of-a-file attack from other users or the storage provider
+
+For consumer backups, losing cross-user deduplication typically doubles storage costs. For enterprise, where backup data is sensitive and cross-user dedup is often disabled anyway, this is the right tradeoff.
+
+## Server-Side Deduplication with Client-Side Verification
+
+An alternative architecture separates deduplication from encryption:
+
+1. Client computes a **plaintext hash** (SHA-256 or BLAKE3) of each chunk before encrypting.
+2. Client encrypts with a random per-session key, stored in the client's key vault.
+3. Client sends both the ciphertext and the plaintext hash to the server.
+4. Server deduplicates by plaintext hash — two clients uploading the same content send the same hash, so the server can reference-count it.
+5. The server never stores plaintext; it stores one ciphertext per unique hash and maps each user's key to the appropriate stored ciphertext via the user's encrypted key vault.
+
+```
+User A:  plaintext → hash(plaintext) = H1,  encrypt(plaintext, keyA) = CT_A  → server stores (H1 → CT_A), user A's keyvault: (H1 → keyA)
+User B:  plaintext → hash(plaintext) = H1,  encrypt(plaintext, keyB) = CT_B  → server: H1 already exists, store (H1 → CT_A, CT_B), user B's keyvault: (H1 → keyB)
+```
+
+This approach provides storage efficiency (deduplication at the hash layer), while each user's data is independently encrypted. But the server still learns the plaintext hash, which reintroduces a weaker version of the confirmation attack.
+
+## CADET: Chunk-Level Auditable Deduplication with Encrypted Tags
+
+Research from 2023-2024 has proposed schemes (sometimes grouped under "CADET" or "proof-of-ownership deduplication") where the server issues a challenge before allowing a deduplication reference. The client must prove they possess the plaintext — not just the hash — before getting credit for deduplication.
+
+The flow:
+
+1. Client sends plaintext hash to server.
+2. Server issues a random challenge nonce.
+3. Client responds with `HMAC(plaintext, nonce)`.
+4. Only if the response is correct does the server credit the deduplication.
+
+An attacker who only knows the hash (not the plaintext) cannot pass the challenge. This directly closes the confirmation-of-a-file attack without giving up cross-user deduplication.
+
+```python
+def dedup_challenge_response(plaintext_chunk: bytes, nonce: bytes) -> bytes:
+    import hmac, hashlib
+    return hmac.new(nonce, plaintext_chunk, hashlib.sha256).digest()
+```
+
+The tradeoff: one round-trip per new chunk, versus fire-and-forget uploads. For backup workloads where latency matters less than throughput, this is acceptable.
+
+## Practical Recommendations
+
+| Threat Model | Recommended Approach |
+|---|---|
+| Personal backup, low sensitivity | Standard convergent encryption — maximum dedup efficiency |
+| Personal backup, high sensitivity | Keyed convergent encryption — protects against storage provider |
+| Enterprise, cross-org dedup wanted | CADET / proof-of-ownership |
+| Maximum zero-knowledge, no dedup | Random per-chunk keys in encrypted key vault |
+
+When building a backup client, the implementation choice also affects recovery. Convergent encryption is simpler to recover from — keys are derived from data, so losing your key vault doesn't lose your data if you have the backup. Keyed convergent encryption requires retaining the secret; losing it means losing the ability to derive keys for re-verification.
+
+## Key Takeaways
+
+- Convergent encryption enables cross-user deduplication but is vulnerable to the confirmation-of-a-file attack.
+- Keyed convergent encryption mitigates that attack at the cost of cross-user deduplication.
+- Proof-of-ownership / challenge-response schemes restore cross-user deduplication while closing the confirmation attack.
+- For most backup tools targeting sensitive data, keyed convergent encryption is the right default — it's simple, well-understood, and the storage cost increase is modest for modern storage pricing.
+
+The academic literature on this is dense, but the implementation choices are well-scoped. If you're building a zero-knowledge backup system and want to support deduplication, keyed convergent encryption with HMAC-SHA256 key derivation is a solid starting point that you can implement correctly without deep cryptographic expertise.
