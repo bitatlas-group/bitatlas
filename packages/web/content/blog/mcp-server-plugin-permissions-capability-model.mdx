@@ -1,0 +1,163 @@
+---
+title: "MCP Server Plugin Permissions: Designing a Capability Model That Doesn't Bite You"
+description: "How to scope tool access in MCP server plugins, revoke permissions at runtime, and audit which agents called which tools — building a capability-based permission model that actually enforces least privilege."
+date: "2026-11-02"
+author: "BitAtlas Team"
+slug: "mcp-server-plugin-permissions-capability-model"
+keywords: ["MCP", "plugin permissions", "capability model", "least privilege", "tool authorization"]
+readingTime: "7 min read"
+---
+
+The Model Context Protocol (MCP) makes it easy to give AI agents access to tools — almost too easy. Within minutes you can spin up a server that lets an agent read files, call APIs, execute SQL queries, and push to GitHub. The danger is that "easy to give access" and "easy to over-give access" look identical from the outside.
+
+This post is about building a capability-based permission model for MCP plugins: one that scopes tool access to what's actually needed, lets you revoke permissions at runtime without redeploying, and produces an audit trail you can actually query.
+
+## Why the Default MCP Permission Model Falls Short
+
+MCP's transport and tool-call spec doesn't say much about authorization. By design, that's left to implementers. In practice, most MCP servers today do one of two things:
+
+1. **No auth at all** — every tool is callable by any connected client.
+2. **Binary auth** — a token proves you're allowed to connect; after that, every tool is fair game.
+
+Neither model survives contact with a multi-agent system. When you have an orchestrator spinning up sub-agents for research, code execution, and file management, you don't want the research agent to be able to push commits. You don't want a code-execution sandbox to be able to exfiltrate files. The connections are all legitimate — the capability grants are not.
+
+## Capabilities vs. Permissions: The Key Distinction
+
+Traditional permission systems say "this user can do X." Capability-based systems say "this token _is_ the authority to do X, and it can be handed to exactly the entity that needs it."
+
+The distinction matters for MCP because your agents aren't users — they're automated processes with no interactive login. You can't ask an agent to re-authenticate when it tries to call a tool it shouldn't have. You need to enforce boundaries at the point the token is issued.
+
+A capability model for MCP plugins looks like this:
+
+```
+Agent obtains a scoped capability token for a specific plugin + tool set
+       ↓
+Agent connects to MCP server, presents token
+       ↓
+Server validates token, enforces tool-level scope
+       ↓
+Each tool call is authorized against the token's capability set
+       ↓
+Token can be revoked independently of other agents' tokens
+```
+
+This means the token carries not just "who you are" but "what you're allowed to call."
+
+## Structuring the Capability Token
+
+A capability token for an MCP plugin session should encode at minimum:
+
+- **Subject** — which agent (or agent session) holds this capability
+- **Issuer** — which service issued it (your capability authority)
+- **Plugin scope** — which plugin(s) this token grants access to
+- **Tool allowlist** — explicit list of callable tools, or a wildcard with exclusions
+- **Parameter constraints** (optional) — e.g., the `read_file` tool may only be called with paths under `/workspace/`
+- **Expiry** — short-lived by default; refresh tokens for long-running sessions
+
+A JWT works fine here if you're in a single-trust-domain. For cross-organization or cross-service scenarios, consider a capability URL pattern instead (a signed, opaque token that the MCP server can validate without a round-trip to the issuer).
+
+```typescript
+interface McpCapabilityToken {
+  sub: string;           // agent-session-id
+  iss: string;           // "capability-authority.example.com"
+  plugin: string;        // "file-manager-plugin"
+  tools: string[];       // ["read_file", "list_directory"]
+  constraints?: Record<string, unknown>;
+  exp: number;
+  jti: string;           // for revocation
+}
+```
+
+## Enforcing the Capability at the Tool Layer
+
+Your MCP server needs to intercept tool calls before they execute and check them against the capability token. This is a middleware concern, not something to scatter across individual tool implementations.
+
+```typescript
+function capabilityMiddleware(token: McpCapabilityToken) {
+  return async (toolName: string, params: unknown, next: () => Promise<unknown>) => {
+    if (!token.tools.includes(toolName)) {
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        `Tool '${toolName}' is not in this session's capability scope`
+      );
+    }
+
+    if (token.constraints?.[toolName]) {
+      validateConstraints(toolName, params, token.constraints[toolName]);
+    }
+
+    return next();
+  };
+}
+```
+
+The key is that this runs before the tool handler sees the request. Even if a tool's own code has a bug that would allow unauthorized operations, the middleware catches it first.
+
+## Runtime Revocation Without Redeployment
+
+Short-lived tokens help, but sometimes you need to revoke immediately — an agent behaved unexpectedly, a credential was rotated, a session was compromised. You need a revocation mechanism that doesn't require redeploying your MCP server.
+
+Two practical patterns:
+
+**Token revocation list (TRL):** Maintain a fast store (Redis works well) keyed by token `jti`. On every tool call, check whether the token's `jti` is in the revocation list. The latency cost is one cache read per call — worth it for the control you gain.
+
+**Short-lived tokens with forced refresh:** Issue tokens with a 5-minute TTL and require agents to refresh via a capability endpoint. Revocation means refusing the next refresh. This is simpler operationally but has up to 5-minute latency on revocation taking effect.
+
+For most production systems, combine both: short TTL (15 minutes) plus a revocation list for immediate termination when needed.
+
+## Audit Logging That's Actually Queryable
+
+An audit trail is only useful if you can answer the questions you'll actually ask under pressure: "What did agent X call in the last hour?", "Did anything call the `delete_file` tool today?", "Show me all cross-plugin tool calls from orchestrator sessions."
+
+Structure your audit log events to support these queries:
+
+```typescript
+interface McpAuditEvent {
+  timestamp: string;      // ISO 8601
+  agentSession: string;   // from token.sub
+  plugin: string;
+  tool: string;
+  outcome: "allowed" | "denied" | "error";
+  durationMs: number;
+  tokenJti: string;       // links to the specific capability token
+  paramHash?: string;     // HMAC of params — for integrity without storing PII
+}
+```
+
+Send these to a structured log store (OpenSearch, BigQuery, CloudWatch Logs Insights) rather than a flat file. The `tokenJti` field lets you trace every call made with a given capability token across its lifetime — useful both for security investigations and for performance analysis.
+
+## Putting It Together: A Plugin Permission Registry
+
+Instead of hardcoding capability definitions, maintain a plugin permission registry — a document that declares what each plugin exposes and what the minimum required scope for each use case is:
+
+```json
+{
+  "file-manager-plugin": {
+    "tools": {
+      "read_file": { "sensitivity": "low" },
+      "write_file": { "sensitivity": "high" },
+      "delete_file": { "sensitivity": "critical" }
+    },
+    "roles": {
+      "read-only": ["read_file", "list_directory"],
+      "read-write": ["read_file", "list_directory", "write_file"],
+      "admin": ["read_file", "list_directory", "write_file", "delete_file"]
+    }
+  }
+}
+```
+
+When an agent requests a capability, it presents the role it needs. Your capability authority issues a token scoped to the tools in that role. No agent ever gets more tools than their role requires — least privilege by construction.
+
+## The Payoff
+
+A capability-based permission model for MCP plugins costs you some upfront architecture: a capability authority, a middleware layer, and a revocation store. What you get back is a system where:
+
+- Compromising one agent doesn't compromise all tool access
+- You can trace exactly what every agent called and when
+- You can revoke a misbehaving agent's access in seconds, not after a redeployment
+- Your audit log can answer the hard questions during an incident
+
+As MCP-based systems grow more complex — orchestrators spawning sub-agents, agents delegating tasks to other agents — this kind of principled access control stops being a nice-to-have and becomes the thing standing between you and a production incident.
+
+The good news: most of this is plumbing you implement once and the rest of your plugin ecosystem inherits automatically.
